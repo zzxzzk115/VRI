@@ -31,6 +31,13 @@ namespace vri::gl
         if (desc.callbackInterface)
             m_callback = *desc.callbackInterface;
 
+        m_api = desc.graphicsAPI;
+        m_es = (desc.graphicsAPI == VriGraphicsAPI_OpenGLES);
+        // The command path is the GLES3/WebGL2-compatible (non-DSA) subset, which
+        // also runs on desktop GL. We still create a 4.x core context on desktop
+        // so debug tooling and future fast-paths are available.
+        m_shaderVersion = m_es ? 310u : 420u;
+
         if (!glfwInit())
         {
             ReportError("glfwInit failed");
@@ -38,14 +45,23 @@ namespace vri::gl
         }
 
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        if (m_es)
+        {
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+        }
+        else
+        {
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        }
 
         m_window = glfwCreateWindow(1, 1, "vri-gl", nullptr, nullptr);
         if (!m_window)
         {
-            ReportError("glfwCreateWindow (GL 4.6 core) failed");
+            ReportError(m_es ? "glfwCreateWindow (GLES 3.1) failed" : "glfwCreateWindow (GL 4.6 core) failed");
             return VriResult_Failure;
         }
         glfwMakeContextCurrent(m_window);
@@ -56,12 +72,14 @@ namespace vri::gl
             return VriResult_Failure;
         }
 
-        // Align GL with the VRI standard coordinate system (Y-up clip, depth
-        // [0,1], top-left framebuffer origin) -- matches Vulkan/D3D12/WebGPU.
-        glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
+        // Coordinate system: GLES/WebGL have no glClipControl, so we do NOT use it
+        // on any profile. The VRI Y-up convention is honored by flipping clip-space
+        // Y in-shader (SPIRV-Cross flip_vert_y), which makes the bottom-left GL
+        // framebuffer read back top-left like Vulkan/WebGPU. (Depth stays GL's
+        // [-1,1] for now; remapping to [0,1] is a later, depth-only concern.)
 
-        // GL core requires a VAO bound for any draw (even attribute-less ones).
-        glCreateVertexArrays(1, &m_vao);
+        // GL core (and GLES) require a VAO bound for any draw. Non-DSA: gen+bind.
+        glGenVertexArrays(1, &m_vao);
         glBindVertexArray(m_vao);
 
         m_queue.device = this;
@@ -73,7 +91,7 @@ namespace vri::gl
     void DeviceGL::FillDeviceDesc()
     {
         m_desc = {};
-        m_desc.graphicsAPI = VriGraphicsAPI_OpenGL;
+        m_desc.graphicsAPI = m_api;
 
         const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         if (renderer)

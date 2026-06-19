@@ -1,10 +1,18 @@
-// core_gl.cpp - OpenGL implementation of VriCoreInterface.
+// core_gl.cpp - OpenGL / OpenGL ES / WebGL implementation of VriCoreInterface.
 //
+// This uses the GLES3 / WebGL2-compatible NON-DSA subset (bind-then-modify) so a
+// single command path serves desktop GL, desktop GLES, and WebGL (Emscripten).
 // Commands execute immediately on the (single, thread-bound) GL context, so the
-// VRI command buffer is a thin recorder and QueueSubmit just flushes. A deferred
-// command stream for multi-threaded recording is a later enhancement. SPIR-V is
-// transpiled to GLSL via SPIRV-Cross at pipeline creation. Explicit memory and
-// descriptor sets are stubbed for now (descriptor flattening lands next).
+// VRI command buffer is a thin recorder and QueueSubmit just flushes; a deferred
+// stream for multi-threaded recording is a later enhancement.
+//
+// Coordinate system: GLES/WebGL lack glClipControl, so the VRI Y-up convention is
+// honored by flipping clip-space Y in-shader (SPIRV-Cross flip_vert_y). That makes
+// GL's bottom-left framebuffer read back top-left, matching Vulkan/WebGPU. Shaders
+// are transpiled SPIR-V -> GLSL/ESSL via SPIRV-Cross at pipeline creation.
+//
+// Explicit memory and descriptor sets are stubbed for now (descriptor flattening
+// lands next).
 
 #include "core_gl.h"
 #include "conversions_gl.h"
@@ -31,14 +39,17 @@ namespace vri::gl
         inline PipelineGL*      Pipe(VriPipeline* h)     { return reinterpret_cast<PipelineGL*>(h); }
         inline FenceGL*         Fen(VriFence* h)         { return reinterpret_cast<FenceGL*>(h); }
 
-        std::string SpirvToGlsl(const void* bytecode, size_t bytecodeSize, const char* entry, spv::ExecutionModel model)
+        std::string SpirvToGlsl(const DeviceGL* d, const void* bytecode, size_t bytecodeSize, const char* entry, spv::ExecutionModel model)
         {
             const uint32_t* words = static_cast<const uint32_t*>(bytecode);
             spirv_cross::CompilerGLSL comp(words, bytecodeSize / 4);
             spirv_cross::CompilerGLSL::Options o = comp.get_common_options();
-            o.version = 460;
-            o.es = false;
+            o.version = d->ShaderVersion();
+            o.es = d->IsES();
             o.vulkan_semantics = false;
+            // Flip clip-space Y so GL's bottom-left framebuffer matches the VRI
+            // (Vulkan/WebGPU) top-left convention without glClipControl.
+            o.vertex.flip_vert_y = true;
             comp.set_common_options(o);
             if (entry)
                 comp.set_entry_point(entry, model);
@@ -98,13 +109,16 @@ namespace vri::gl
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
             GLuint id = 0;
-            glCreateBuffers(1, &id);
-            GLbitfield storage = 0;
+            glGenBuffers(1, &id);
+            GLenum usage = GL_STATIC_DRAW;
             GLbitfield mapAccess = 0;
-            if (desc->memoryLocation == VriMemoryLocation_HostReadback) { storage = GL_MAP_READ_BIT; mapAccess = GL_MAP_READ_BIT; }
-            else if (desc->memoryLocation == VriMemoryLocation_HostUpload) { storage = GL_MAP_WRITE_BIT; mapAccess = GL_MAP_WRITE_BIT; }
-            else storage = GL_DYNAMIC_STORAGE_BIT;
-            glNamedBufferStorage(id, static_cast<GLsizeiptr>(desc->size), nullptr, storage);
+            if (desc->memoryLocation == VriMemoryLocation_HostReadback) { usage = GL_STREAM_READ; mapAccess = GL_MAP_READ_BIT; }
+            else if (desc->memoryLocation == VriMemoryLocation_HostUpload) { usage = GL_STREAM_DRAW; mapAccess = GL_MAP_WRITE_BIT; }
+            // GL_COPY_WRITE_BUFFER is a neutral binding point that doesn't disturb
+            // vertex/index/uniform binding state.
+            glBindBuffer(GL_COPY_WRITE_BUFFER, id);
+            glBufferData(GL_COPY_WRITE_BUFFER, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
             *out = ToHandle(new BufferGL{Dev(device), id, desc->size, mapAccess});
             return VriResult_Success;
         }
@@ -120,18 +134,28 @@ namespace vri::gl
             BufferGL* b = Buf(buffer);
             const GLbitfield access = b->mapAccess ? b->mapAccess : GL_MAP_READ_BIT;
             const GLsizeiptr len = static_cast<GLsizeiptr>(size ? size : (b->size - offset));
-            return glMapNamedBufferRange(b->id, static_cast<GLintptr>(offset), len, access);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
+            return glMapBufferRange(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(offset), len, access);
         }
-        void VRI_CALL UnmapBuffer(VriBuffer* buffer) { glUnmapNamedBuffer(Buf(buffer)->id); }
+        void VRI_CALL UnmapBuffer(VriBuffer* buffer)
+        {
+            glBindBuffer(GL_COPY_WRITE_BUFFER, Buf(buffer)->id);
+            glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        }
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
             const GLFormat gf = ToGLFormat(desc->format);
             GLuint id = 0;
-            glCreateTextures(GL_TEXTURE_2D, 1, &id);
+            glGenTextures(1, &id);
             const GLsizei mips = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
-            glTextureStorage2D(id, mips, gf.internalFormat, static_cast<GLsizei>(desc->width), static_cast<GLsizei>(desc->height ? desc->height : 1u));
+            const GLsizei w = static_cast<GLsizei>(desc->width);
+            const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
+            glBindTexture(GL_TEXTURE_2D, id);
+            glTexStorage2D(GL_TEXTURE_2D, mips, gf.internalFormat, w, h);
+            glBindTexture(GL_TEXTURE_2D, 0);
 
             TextureGL* t = new TextureGL{};
             t->device = Dev(device);
@@ -190,7 +214,7 @@ namespace vri::gl
         VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, VriDescriptor** out)
         {
             GLuint s = 0;
-            glCreateSamplers(1, &s);
+            glGenSamplers(1, &s);
             glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, desc->magFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, desc->minFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             DescriptorGL* v = new DescriptorGL{};
@@ -224,9 +248,9 @@ namespace vri::gl
             {
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
-                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex));
+                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex));
                 else if (s.stage == VriShaderStage_Fragment)
-                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment));
+                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment));
             }
             if (!vs || !fs)
             {
@@ -259,7 +283,7 @@ namespace vri::gl
             p->topology = ToGLTopology(desc->inputAssembly.topology);
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
             p->cullFace = desc->rasterization.cullMode == VriCullMode_Front ? GL_FRONT : GL_BACK;
-            // glClipControl(UPPER_LEFT) flips window-space handedness, so a VRI
+            // flip_vert_y negates clip Y, reversing window-space winding, so a VRI
             // CCW front face is GL CW (and vice versa).
             p->frontFace = desc->rasterization.frontFace == VriFrontFace_CounterClockwise ? GL_CW : GL_CCW;
             p->depthTest = desc->depthStencil.depthTest != VRI_FALSE;
@@ -318,20 +342,20 @@ namespace vri::gl
         {
             CommandBufferGL* c = CB(cmd);
             GLuint fbo = 0;
-            glCreateFramebuffers(1, &fbo);
+            glGenFramebuffers(1, &fbo);
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
             std::vector<GLenum> drawBufs(a->colorNum);
             for (uint32_t i = 0; i < a->colorNum; ++i)
             {
                 const DescriptorGL* v = Desc(a->colors[i].view);
-                glNamedFramebufferTexture(fbo, GL_COLOR_ATTACHMENT0 + i, v->texture->id, static_cast<GLint>(v->mip));
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
                 drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
             }
-            glNamedFramebufferDrawBuffers(fbo, static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
-            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
 
             for (uint32_t i = 0; i < a->colorNum; ++i)
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
-                    glClearNamedFramebufferfv(fbo, GL_COLOR, static_cast<GLint>(i), a->colors[i].clearValue.color.f32);
+                    glClearBufferfv(GL_COLOR, static_cast<GLint>(i), a->colors[i].clearValue.color.f32);
 
             c->fbo = fbo;
         }
@@ -384,8 +408,10 @@ namespace vri::gl
         {
             CommandBufferGL* c = CB(cmd);
             glBindVertexArray(c->device->DefaultVao());
-            glDrawArraysInstancedBaseInstance(c->topology, static_cast<GLint>(d->baseVertex), static_cast<GLsizei>(d->vertexNum),
-                                              static_cast<GLsizei>(d->instanceNum), d->baseInstance);
+            // baseInstance is GL 4.2+ only (absent on GLES/WebGL); the portable
+            // path uses glDrawArraysInstanced. baseInstance!=0 is unsupported here.
+            glDrawArraysInstanced(c->topology, static_cast<GLint>(d->baseVertex), static_cast<GLsizei>(d->vertexNum),
+                                  static_cast<GLsizei>(d->instanceNum));
         }
         void VRI_CALL CmdDrawIndexed(VriCommandBuffer*, const VriDrawIndexedDesc*) {}
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
@@ -394,14 +420,29 @@ namespace vri::gl
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // GL is ordered on one context
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
-            glCopyNamedBufferSubData(Buf(src)->id, Buf(dst)->id, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
+            glBindBuffer(GL_COPY_READ_BUFFER, Buf(src)->id);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, Buf(dst)->id);
+            glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
+            glBindBuffer(GL_COPY_READ_BUFFER, 0);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
         }
         void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc*)
         {
+            // glCopyImageSubData is GL 4.3 / GLES 3.2; use a portable framebuffer
+            // blit so the path also works on GLES 3.0 / WebGL2.
             const TextureGL* s = reinterpret_cast<const TextureGL*>(src);
             const TextureGL* d = reinterpret_cast<const TextureGL*>(dst);
-            glCopyImageSubData(s->id, s->target, 0, 0, 0, 0, d->id, d->target, 0, 0, 0, 0,
-                               static_cast<GLsizei>(s->width), static_cast<GLsizei>(s->height), 1);
+            GLuint fbos[2] = {0, 0};
+            glGenFramebuffers(2, fbos);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s->target, s->id, 0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[1]);
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, d->target, d->id, 0);
+            const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glDeleteFramebuffers(2, fbos);
         }
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*, VriTexture* dst, VriBuffer* src, const VriBufferTextureCopyDesc* region)
         {
@@ -409,20 +450,38 @@ namespace vri::gl
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id);
-            glTextureSubImage2D(t->id, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
-                                static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType,
-                                reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset)));
+            glBindTexture(t->target, t->id);
+            glTexSubImage2D(t->target, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
+                            static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType,
+                            reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset)));
+            glBindTexture(t->target, 0);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
         void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*, VriBuffer* dst, VriTexture* src, const VriBufferTextureCopyDesc* region)
         {
+            // No glGetTextureImage on GLES/WebGL: read via a temp FBO + glReadPixels
+            // into a PBO. glReadPixels reads bottom-up; combined with the in-shader
+            // flip_vert_y this yields VRI top-left row order.
             const TextureGL* t = reinterpret_cast<const TextureGL*>(src);
             BufferGL* b = Buf(dst);
+            const GLint mip = static_cast<GLint>(region->texture.mip);
+            GLsizei w = static_cast<GLsizei>(t->width >> region->texture.mip); if (w < 1) w = 1;
+            GLsizei h = static_cast<GLsizei>(t->height >> region->texture.mip); if (h < 1) h = 1;
+
+            GLuint fbo = 0;
+            glGenFramebuffers(1, &fbo);
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->target, t->id, mip);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+
             glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
-            const GLsizei bufSize = static_cast<GLsizei>(b->size - region->bufferOffset);
-            glGetTextureImage(t->id, static_cast<GLint>(region->texture.mip), t->glFormat, t->glType, bufSize,
-                              reinterpret_cast<void*>(static_cast<uintptr_t>(region->bufferOffset)));
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, w, h, t->glFormat, t->glType,
+                         reinterpret_cast<void*>(static_cast<uintptr_t>(region->bufferOffset)));
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glDeleteFramebuffers(1, &fbo);
         }
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
         void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
