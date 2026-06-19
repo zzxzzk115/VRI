@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Compile every backend and run the doctest suite. GPU backends self-skip when no
+  # device is available, so this is a reliable compile-and-run gate; on Linux we
+  # install Mesa's software rasterizers (lavapipe / llvmpipe) so Vulkan + GL + WebGPU
+  # actually render headless under Xvfb.
+  desktop:
+    name: desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: latest
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
+
+      - name: Install Linux deps (software GL/Vulkan + headless X)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xorg-dev libgl1-mesa-dev libglu1-mesa-dev \
+            mesa-vulkan-drivers libgl1-mesa-dri \
+            xvfb
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - name: Configure
+        run: >-
+          xmake f -y -m release
+          -p ${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y
+          --vri_build_tests=y --vri_build_tools=n --vri_build_examples=n
+
+      - name: Build
+        run: xmake build -y vri-tests
+
+      - name: Test (Linux, headless via Xvfb + software rasterizers)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: xvfb-run -a xmake run vri-tests
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: xmake run vri-tests
+
+  # End-to-end WebGL: build the GL backend to wasm and render the triangle + UBO
+  # triangle in headless Chrome (WebGL2 via SwiftShader - no GPU needed).
+  webgl:
+    name: webgl (emscripten + headless chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Configure (wasm)
+        run: xmake f -y -p wasm --vri_backend_vulkan=n --vri_backend_wgpu=n --vri_backend_gl=y
+
+      - name: Build WebGL E2E
+        run: xmake build -y vri-webgl-triangle
+
+      - name: Run headless (Chrome + SwiftShader)
+        run: |
+          set -o pipefail
+          emrun \
+            --browser="${{ steps.setup-chrome.outputs.chrome-path }}" \
+            --browser_args="--headless=new --disable-gpu --use-angle=swiftshader --enable-unsafe-swiftshader --no-sandbox" \
+            --kill_exit --timeout 90 \
+            build/wasm/wasm32/release/vri-webgl-triangle.html 2>&1 | tee emrun.log
+          echo "--- grading ---"
+          grep -q "VRI_WEBGL_RESULT: PASS" emrun.log
