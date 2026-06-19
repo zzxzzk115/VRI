@@ -23,7 +23,10 @@
 
 #include <spirv_cross/spirv_glsl.hpp>
 
+#include <cstdlib>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace vri::gl
@@ -39,21 +42,116 @@ namespace vri::gl
         inline PipelineGL*      Pipe(VriPipeline* h)     { return reinterpret_cast<PipelineGL*>(h); }
         inline FenceGL*         Fen(VriFence* h)         { return reinterpret_cast<FenceGL*>(h); }
 
+        // ESSL/WebGL has no gl_BaseVertex / gl_BaseInstance, but Slang lowers
+        // SV_VertexID/SV_InstanceID as (VertexIndex - BaseVertex) etc. and SPIRV-Cross
+        // also synthesizes a base for the Vulkan VertexIndex builtin -> it throws for
+        // the ES profile. For ES we transform the module so no base is referenced:
+        //   * VertexIndex(42)  -> VertexId(5),  InstanceIndex(43) -> InstanceId(6)
+        //     (so SPIRV-Cross emits plain gl_VertexID/gl_InstanceID, no base term)
+        //   * every OpLoad of a BaseVertex/BaseInstance/DrawIndex builtin variable is
+        //     turned into a load of constant 0, leaving those variables unused so
+        //     SPIRV-Cross's active-variable analysis drops them entirely.
+        // VRI always draws with baseVertex/baseInstance == 0, so results are identical.
+        void PatchDrawParamsForES(std::vector<uint32_t>& w)
+        {
+            constexpr uint32_t kOpNop = 0, kOpConstant = 43, kOpFunction = 54;
+            constexpr uint32_t kOpDecorate = 71, kOpLoad = 61, kOpCopyObject = 83;
+            constexpr uint32_t kDecBuiltIn = 11;
+            constexpr uint32_t kVertexId = 5, kInstanceId = 6, kVertexIndex = 42, kInstanceIndex = 43;
+            constexpr uint32_t kBaseVertex = 4424, kBaseInstance = 4425, kDrawIndex = 4426;
+
+            std::unordered_set<uint32_t>          baseVars;   // builtin vars to neutralize
+            std::unordered_map<uint32_t, uint32_t> zeroConst; // 32-bit type id -> a 0-constant id
+            size_t firstFunc = w.size();
+
+            for (size_t i = 5; i < w.size();)
+            {
+                const uint32_t op = w[i] & 0xFFFFu;
+                const uint32_t len = w[i] >> 16;
+                if (len == 0) return; // malformed; leave the module untouched
+                if (op == kOpDecorate && len >= 4 && w[i + 2] == kDecBuiltIn)
+                {
+                    const uint32_t b = w[i + 3];
+                    if (b == kBaseVertex || b == kBaseInstance || b == kDrawIndex) baseVars.insert(w[i + 1]);
+                    else if (b == kVertexIndex) w[i + 3] = kVertexId;
+                    else if (b == kInstanceIndex) w[i + 3] = kInstanceId;
+                }
+                else if (op == kOpConstant && len == 4 && w[i + 3] == 0)
+                    zeroConst.emplace(w[i + 1], w[i + 2]); // first 0-constant per 32-bit type
+                else if (op == kOpFunction && firstFunc == w.size())
+                    firstFunc = i;
+                i += len;
+            }
+            if (baseVars.empty()) return;
+
+            uint32_t              bound = w[3];
+            std::vector<uint32_t> newConstants;
+            for (size_t i = 5; i < w.size();)
+            {
+                const uint32_t op = w[i] & 0xFFFFu;
+                const uint32_t len = w[i] >> 16;
+                if (len == 0) break;
+                if (op == kOpLoad && len >= 4 && baseVars.count(w[i + 3]))
+                {
+                    const uint32_t type = w[i + 1];
+                    uint32_t       c;
+                    auto           it = zeroConst.find(type);
+                    if (it != zeroConst.end())
+                        c = it->second;
+                    else
+                    {
+                        c = bound++;
+                        zeroConst.emplace(type, c);
+                        newConstants.push_back((4u << 16) | kOpConstant);
+                        newConstants.push_back(type);
+                        newConstants.push_back(c);
+                        newConstants.push_back(0u);
+                    }
+                    // OpLoad %type %res %ptr -> OpCopyObject %type %res %zeroConst
+                    w[i] = (4u << 16) | kOpCopyObject;
+                    w[i + 3] = c;
+                    for (uint32_t k = 4; k < len; ++k)
+                        w[i + k] = (1u << 16) | kOpNop; // keep stream length stable
+                }
+                i += len;
+            }
+            w[3] = bound;
+            if (!newConstants.empty())
+                w.insert(w.begin() + static_cast<long>(firstFunc), newConstants.begin(), newConstants.end());
+        }
+
         std::string SpirvToGlsl(const DeviceGL* d, const void* bytecode, size_t bytecodeSize, const char* entry, spv::ExecutionModel model)
         {
             const uint32_t* words = static_cast<const uint32_t*>(bytecode);
-            spirv_cross::CompilerGLSL comp(words, bytecodeSize / 4);
-            spirv_cross::CompilerGLSL::Options o = comp.get_common_options();
-            o.version = d->ShaderVersion();
-            o.es = d->IsES();
-            o.vulkan_semantics = false;
-            // Flip clip-space Y so GL's bottom-left framebuffer matches the VRI
-            // (Vulkan/WebGPU) top-left convention without glClipControl.
-            o.vertex.flip_vert_y = true;
-            comp.set_common_options(o);
-            if (entry)
-                comp.set_entry_point(entry, model);
-            return comp.compile();
+            const size_t wordCount = bytecodeSize / 4;
+            // SPIRV-Cross signals transpile errors by throwing; turn that into a
+            // clean failure (empty source -> shader compile fails -> pipeline
+            // returns Failure) instead of an abort, and surface the message.
+            try
+            {
+                std::vector<uint32_t> patched(words, words + wordCount);
+                if (d->IsES())
+                    PatchDrawParamsForES(patched);
+                spirv_cross::CompilerGLSL comp(std::move(patched));
+                spirv_cross::CompilerGLSL::Options o = comp.get_common_options();
+                o.version = d->ShaderVersion();
+                o.es = d->IsES();
+                o.vulkan_semantics = false;
+                // Flip clip-space Y so GL's bottom-left framebuffer matches the VRI
+                // (Vulkan/WebGPU) top-left convention without glClipControl.
+                o.vertex.flip_vert_y = true;
+                comp.set_common_options(o);
+                if (entry)
+                    comp.set_entry_point(entry, model);
+                return comp.compile();
+            }
+            catch (const std::exception& e)
+            {
+                std::string msg = "SPIRV-Cross transpile failed: ";
+                msg += e.what();
+                d->ReportError(msg.c_str());
+                return std::string();
+            }
         }
 
         GLuint CompileShader(DeviceGL* d, GLenum type, const std::string& src)
@@ -133,13 +231,41 @@ namespace vri::gl
         {
             BufferGL* b = Buf(buffer);
             const GLbitfield access = b->mapAccess ? b->mapAccess : GL_MAP_READ_BIT;
-            const GLsizeiptr len = static_cast<GLsizeiptr>(size ? size : (b->size - offset));
+            const uint64_t len = size ? size : (b->size - offset);
+            if (b->device->IsES())
+            {
+                // WebGL2 cannot map buffers: stage through a CPU shadow.
+                b->shadow = std::malloc(static_cast<size_t>(len));
+                b->mapOffset = offset;
+                b->mapLen = len;
+                b->mapWrite = (access & GL_MAP_WRITE_BIT) != 0;
+                if (access & GL_MAP_READ_BIT)
+                {
+                    glBindBuffer(GL_COPY_READ_BUFFER, b->id);
+                    glGetBufferSubData(GL_COPY_READ_BUFFER, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), b->shadow);
+                    glBindBuffer(GL_COPY_READ_BUFFER, 0);
+                }
+                return b->shadow;
+            }
             glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
-            return glMapBufferRange(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(offset), len, access);
+            return glMapBufferRange(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
         }
         void VRI_CALL UnmapBuffer(VriBuffer* buffer)
         {
-            glBindBuffer(GL_COPY_WRITE_BUFFER, Buf(buffer)->id);
+            BufferGL* b = Buf(buffer);
+            if (b->shadow)
+            {
+                if (b->mapWrite)
+                {
+                    glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
+                    glBufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(b->mapOffset), static_cast<GLsizeiptr>(b->mapLen), b->shadow);
+                    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+                }
+                std::free(b->shadow);
+                b->shadow = nullptr;
+                return;
+            }
+            glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
             glUnmapBuffer(GL_COPY_WRITE_BUFFER);
             glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
         }

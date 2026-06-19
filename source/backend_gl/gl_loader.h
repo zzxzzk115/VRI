@@ -19,6 +19,9 @@
 #            define GL_BGRA GL_RGBA
 #        endif
 #    endif
+// WebGL2's getBufferSubData is implemented by the Emscripten GL runtime but not
+// declared in <GLES3/gl3.h>; declare it so the buffer-readback path can use it.
+extern "C" void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, void* data);
 #else
 #    include <glad/glad.h>
 #endif

@@ -38,8 +38,9 @@ option("vri_build_tools") -- build host tools (vri-shaderc)?
 option_end()
 
 -- backend options (MVP: Vulkan on by default; others enabled as they come online)
+-- On wasm the only viable backend is GL (-> WebGL2); Vulkan is unavailable there.
 option("vri_backend_vulkan")
-    set_default(true)
+    set_default(not is_plat("wasm"))
     set_showmenu(true)
     set_description("Enable the Vulkan backend")
 option_end()
@@ -51,9 +52,10 @@ option("vri_backend_wgpu")
 option_end()
 
 option("vri_backend_gl")
-    set_default(false)
+    -- default on for wasm so `xmake f -p wasm` gives the WebGL backend out of the box
+    set_default(is_plat("wasm"))
     set_showmenu(true)
-    set_description("Enable the OpenGL / OpenGL ES backend")
+    set_description("Enable the OpenGL / OpenGL ES / WebGL backend")
 option_end()
 
 option("vri_backend_d3d11")
@@ -212,4 +214,10 @@ end
 -- if build examples, then include examples
 if has_config("vri_build_examples") then
     includes("examples")
+end
+
+-- WebGL (Emscripten) end-to-end target: a headless triangle that renders via the
+-- GL backend (WebGL2) and reports a pass/fail pixel check. Browser-run via emrun.
+if is_plat("wasm") and has_config("vri_backend_gl") then
+    includes("wasm")
 end

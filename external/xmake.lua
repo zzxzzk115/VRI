@@ -18,11 +18,15 @@ if has_config("vri_backend_wgpu") then
     add_requires("webgpu-sdk v0.1.2")
 end
 
--- OpenGL / OpenGL ES backend: glad loader + glfw (context) + spirv-cross (SPIR-V -> GLSL)
+-- OpenGL / OpenGL ES / WebGL backend: spirv-cross (SPIR-V -> GLSL/ESSL) always;
+-- on wasm the GL loader (WebGL2) and GLFW come from Emscripten ports, so glad/glfw
+-- packages are native-only.
 if has_config("vri_backend_gl") then
-    add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
-    add_requires("glfw")
     add_requires("spirv-cross")
+    if not is_plat("wasm") then
+        add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
+        add_requires("glfw")
+    end
 end
 
 -- Examples windowing (matches libvultra)

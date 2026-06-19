@@ -35,10 +35,21 @@ target("vri")
     end
     if has_config("vri_backend_gl") then
         add_defines("VRI_BACKEND_GL")
-        -- public: glad/glfw must link into the final exe (+ their runtime needs)
-        add_packages("glad", "glfw", "spirv-cross", {public = true})
+        add_packages("spirv-cross", {public = true})
         add_files("backend_gl/**.cpp")
         add_includedirs("backend_gl", {public = false})
+        if is_plat("wasm") then
+            -- WebGL2 + GLFW3 from Emscripten ports. The port flags are needed at
+            -- compile (for the GLFW header) and link (for the final exe), and must
+            -- propagate to dependents, hence {public = true}.
+            add_cxflags("-sUSE_GLFW=3", {public = true, force = true})
+            add_ldflags("-sUSE_GLFW=3", "-sFULL_ES3",
+                        "-sMIN_WEBGL_VERSION=2", "-sMAX_WEBGL_VERSION=2",
+                        {public = true, force = true})
+        else
+            -- public: glad/glfw must link into the final exe (+ their runtime needs)
+            add_packages("glad", "glfw", {public = true})
+        end
     end
     if has_config("vri_backend_d3d11") and is_plat("windows") then
         add_defines("VRI_BACKEND_D3D11")

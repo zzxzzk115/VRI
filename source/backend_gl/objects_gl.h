@@ -33,7 +33,13 @@ namespace vri::gl
         DeviceGL*  device;
         GLuint     id;
         uint64_t   size;
-        GLbitfield mapAccess; // GL_MAP_READ_BIT / GL_MAP_WRITE_BIT for MapBuffer
+        GLbitfield mapAccess;          // GL_MAP_READ_BIT / GL_MAP_WRITE_BIT for MapBuffer
+        // WebGL2 has no real buffer mapping, so on ES we emulate Map/Unmap with a CPU
+        // shadow filled via glGetBufferSubData and flushed back via glBufferSubData.
+        void*      shadow = nullptr;
+        uint64_t   mapOffset = 0;
+        uint64_t   mapLen = 0;
+        bool       mapWrite = false;
     };
 
     struct TextureGL

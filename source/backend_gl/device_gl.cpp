@@ -35,8 +35,9 @@ namespace vri::gl
         m_es = (desc.graphicsAPI == VriGraphicsAPI_OpenGLES);
         // The command path is the GLES3/WebGL2-compatible (non-DSA) subset, which
         // also runs on desktop GL. We still create a 4.x core context on desktop
-        // so debug tooling and future fast-paths are available.
-        m_shaderVersion = m_es ? 310u : 420u;
+        // so debug tooling and future fast-paths are available. ESSL 300 (ES 3.0)
+        // is the WebGL2 baseline; ES 3.1 / ESSL 310 isn't available in WebGL2.
+        m_shaderVersion = m_es ? 300u : 420u;
 
         if (!glfwInit())
         {
@@ -49,7 +50,7 @@ namespace vri::gl
         {
             glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0); // WebGL2 == ES 3.0
         }
         else
         {
