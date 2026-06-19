@@ -4,7 +4,7 @@
 // window+context; rendering targets FBOs. (Windowed presentation lands later.)
 #pragma once
 
-#include <glad/glad.h>
+#include "gl_loader.h"
 
 #include <vri/vri.h>
 

@@ -1,7 +1,7 @@
 // objects_gl.h - concrete OpenGL objects behind the opaque VRI handles.
 #pragma once
 
-#include <glad/glad.h>
+#include "gl_loader.h"
 
 #include <vri/vri.h>
 

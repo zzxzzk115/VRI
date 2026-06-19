@@ -61,7 +61,10 @@ VriResult VRI_CALL vriCreateDevice(const VriDeviceCreationDesc* desc, VriDevice*
         case VriGraphicsAPI_WebGPU: device = vri::wgpu::CreateDevice(*desc, result); break;
 #endif
 #if defined(VRI_BACKEND_GL)
-        case VriGraphicsAPI_OpenGL: device = vri::gl::CreateDevice(*desc, result); break;
+        // The GL backend serves both desktop GL and the GLES3/WebGL2 profile; the
+        // device picks the context + shader target from graphicsAPI.
+        case VriGraphicsAPI_OpenGL:
+        case VriGraphicsAPI_OpenGLES: device = vri::gl::CreateDevice(*desc, result); break;
 #endif
         default:
             return VriResult_Unsupported;

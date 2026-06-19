@@ -19,7 +19,7 @@
 #include "device_gl.h"
 #include "objects_gl.h"
 
-#include <glad/glad.h>
+#include "gl_loader.h"
 
 #include <spirv_cross/spirv_glsl.hpp>
 

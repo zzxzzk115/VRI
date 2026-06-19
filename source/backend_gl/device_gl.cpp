@@ -66,11 +66,15 @@ namespace vri::gl
         }
         glfwMakeContextCurrent(m_window);
 
+#if !defined(__EMSCRIPTEN__)
+        // On Emscripten the GLES3/WebGL2 symbols are provided directly; only native
+        // platforms need a runtime loader.
         if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
         {
             ReportError("gladLoadGLLoader failed");
             return VriResult_Failure;
         }
+#endif
 
         // Coordinate system: GLES/WebGL have no glClipControl, so we do NOT use it
         // on any profile. The VRI Y-up convention is honored by flipping clip-space
@@ -98,10 +102,14 @@ namespace vri::gl
             std::strncpy(m_desc.adapter.name, renderer, sizeof(m_desc.adapter.name) - 1);
         m_desc.adapter.type = VriAdapterType_Unknown;
 
-        m_desc.apiVersionMajor = static_cast<uint32_t>(GLVersion.major);
-        m_desc.apiVersionMinor = static_cast<uint32_t>(GLVersion.minor);
-
+        // GL_MAJOR/MINOR_VERSION are core in GL 3.0+ and GLES 3.0+ (and avoid the
+        // glad-specific GLVersion global, which is absent on Emscripten).
         GLint v = 0;
+        glGetIntegerv(GL_MAJOR_VERSION, &v);
+        m_desc.apiVersionMajor = static_cast<uint32_t>(v);
+        glGetIntegerv(GL_MINOR_VERSION, &v);
+        m_desc.apiVersionMinor = static_cast<uint32_t>(v);
+
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &v);
         m_desc.texture2DMaxDim = static_cast<uint32_t>(v);
         glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &v);

@@ -1,7 +1,7 @@
 // conversions_gl.h - VRI enum -> OpenGL enum conversions (triangle subset).
 #pragma once
 
-#include <glad/glad.h>
+#include "gl_loader.h"
 
 #include <vri/vri.h>
 
