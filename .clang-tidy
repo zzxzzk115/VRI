@@ -162,8 +162,11 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.EnumCase
     value: CamelCase
-  - key: readability-identifier-naming.EnumConstantPrefix
-    value: e
+  # VRI's internal scoped enums use PascalCase values without a prefix
+  # (e.g. DescriptorGL::Kind::TextureView). Public C enums (VriThing_Value)
+  # live under include/vri/.clang-tidy, which disables naming checks.
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase
   - key: readability-identifier-naming.LocalVariableCase
     value: camelBack, _
   - key: readability-identifier-naming.StaticConstantCase
@@ -178,14 +181,19 @@ CheckOptions:
     value: m_
   - key: readability-identifier-naming.PublicMemberCase
     value: camelBack
+  # VRI house style: members are m_camelBack (m_window), methods are PascalCase
+  # (CreateBuffer, Init) mirroring the C API. This matches the whole C++ codebase
+  # (core + all backends); the template's camelBack/m_Pascal defaults did not.
   - key: readability-identifier-naming.PrivateMemberCase
-    value: CamelCase
+    value: camelBack
+  - key: readability-identifier-naming.ProtectedMemberCase
+    value: camelBack
   - key: readability-identifier-naming.MethodCase
-    value: camelBack
+    value: CamelCase
   - key: readability-identifier-naming.PrivateMethodCase
-    value: camelBack
+    value: CamelCase
   - key: readability-identifier-naming.ProtectedMethodCase
-    value: camelBack
+    value: CamelCase
   - key: readability-identifier-naming.PrivateMethodPrefix
     value: ""
   - key: readability-identifier-naming.ProtectedMethodPrefix
