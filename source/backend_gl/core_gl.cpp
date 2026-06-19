@@ -120,7 +120,12 @@ namespace vri::gl
                 w.insert(w.begin() + static_cast<long>(firstFunc), newConstants.begin(), newConstants.end());
         }
 
-        std::string SpirvToGlsl(const DeviceGL* d, const void* bytecode, size_t bytecodeSize, const char* entry, spv::ExecutionModel model)
+        // Deterministic GLSL block name for a uniform buffer at a flattened unit, so
+        // CreateGraphicsPipeline can glGetUniformBlockIndex it after linking (ESSL 300
+        // / WebGL2 can't use layout(binding=) on uniform blocks).
+        std::string UboBlockName(uint32_t glUnit) { return "VriUbo_" + std::to_string(glUnit); }
+
+        std::string SpirvToGlsl(const DeviceGL* d, const PipelineLayoutGL* layout, const void* bytecode, size_t bytecodeSize, const char* entry, spv::ExecutionModel model)
         {
             const uint32_t* words = static_cast<const uint32_t*>(bytecode);
             const size_t wordCount = bytecodeSize / 4;
@@ -143,6 +148,25 @@ namespace vri::gl
                 comp.set_common_options(o);
                 if (entry)
                     comp.set_entry_point(entry, model);
+
+                // Remap each Vulkan (set, binding) to the flattened GL unit from the
+                // pipeline layout, and give uniform blocks a deterministic name so the
+                // binding point can be assigned via glUniformBlockBinding after link.
+                if (layout)
+                {
+                    const spirv_cross::ShaderResources res = comp.get_shader_resources();
+                    for (const spirv_cross::Resource& u : res.uniform_buffers)
+                    {
+                        const uint32_t set = comp.get_decoration(u.id, spv::DecorationDescriptorSet);
+                        const uint32_t bind = comp.get_decoration(u.id, spv::DecorationBinding);
+                        if (const LayoutBindingGL* lb = layout->Find(set, bind))
+                        {
+                            comp.unset_decoration(u.id, spv::DecorationDescriptorSet);
+                            comp.set_decoration(u.id, spv::DecorationBinding, lb->glUnit);
+                            comp.set_name(u.base_type_id, UboBlockName(lb->glUnit));
+                        }
+                    }
+                }
                 return comp.compile();
             }
             catch (const std::exception& e)
@@ -359,9 +383,33 @@ namespace vri::gl
         }
 
         // ---- pipeline layout & pipelines -----------------------------------
-        VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc*, VriPipelineLayout** out)
+        VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc* desc, VriPipelineLayout** out)
         {
-            *out = ToHandle(new PipelineLayoutGL{Dev(device)});
+            PipelineLayoutGL* l = new PipelineLayoutGL{Dev(device), {}};
+            // Flatten (set, binding) -> per-type GL unit. GL has independent binding
+            // namespaces for uniform buffers, shader-storage buffers and texture
+            // units, so each type gets its own running counter.
+            uint32_t uboNext = 0, ssboNext = 0, texNext = 0;
+            for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
+            {
+                const VriDescriptorSetDesc& sd = desc->descriptorSets[s];
+                for (uint32_t r = 0; r < sd.rangeNum; ++r)
+                {
+                    const VriDescriptorRangeDesc& rd = sd.ranges[r];
+                    uint32_t* counter = &texNext;
+                    if (rd.descriptorType == VriDescriptorType_ConstantBuffer) counter = &uboNext;
+                    else if (rd.descriptorType == VriDescriptorType_StorageBuffer ||
+                             rd.descriptorType == VriDescriptorType_StructuredBuffer) counter = &ssboNext;
+                    LayoutBindingGL b{};
+                    b.set = sd.registerSpace;
+                    b.binding = rd.baseRegister;
+                    b.type = rd.descriptorType;
+                    b.glUnit = *counter;
+                    *counter += (rd.descriptorNum ? rd.descriptorNum : 1u);
+                    l->bindings.push_back(b);
+                }
+            }
+            *out = ToHandle(l);
             return VriResult_Success;
         }
         void VRI_CALL DestroyPipelineLayout(VriPipelineLayout* layout) { delete reinterpret_cast<PipelineLayoutGL*>(layout); }
@@ -369,14 +417,15 @@ namespace vri::gl
         VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
         {
             DeviceGL* d = Dev(device);
+            const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
             GLuint vs = 0, fs = 0;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
-                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex));
+                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex));
                 else if (s.stage == VriShaderStage_Fragment)
-                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment));
+                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment));
             }
             if (!vs || !fs)
             {
@@ -402,6 +451,17 @@ namespace vri::gl
                 glDeleteProgram(program);
                 return VriResult_Failure;
             }
+
+            // Assign each uniform block its flattened binding point. Portable across
+            // desktop GL and ESSL 300 / WebGL2 (which can't use layout(binding=)).
+            if (layout)
+                for (const LayoutBindingGL& b : layout->bindings)
+                    if (b.type == VriDescriptorType_ConstantBuffer)
+                    {
+                        const GLuint idx = glGetUniformBlockIndex(program, UboBlockName(b.glUnit).c_str());
+                        if (idx != GL_INVALID_INDEX)
+                            glUniformBlockBinding(program, idx, b.glUnit);
+                    }
 
             PipelineGL* p = new PipelineGL{};
             p->device = d;
@@ -441,12 +501,42 @@ namespace vri::gl
             delete p;
         }
 
-        // ---- descriptor pools / sets (flattening lands next) ---------------
-        VriResult VRI_CALL CreateDescriptorPool(VriDevice*, const VriDescriptorPoolDesc*, VriDescriptorPool**) { return VriResult_Unsupported; }
+        // ---- descriptor pools / sets ---------------------------------------
+        // GL has no descriptor objects: a set is a CPU record of (binding -> view)
+        // that CmdSetDescriptorSet replays as glBindBufferRange / texture binds via
+        // the pipeline layout's (set,binding) -> GL-unit map.
+        VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPoolDesc*, VriDescriptorPool** out)
+        {
+            *out = ToHandle(new DescriptorPoolGL{Dev(device)});
+            return VriResult_Success;
+        }
         void VRI_CALL ResetDescriptorPool(VriDescriptorPool*) {}
-        void VRI_CALL DestroyDescriptorPool(VriDescriptorPool*) {}
-        VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*, const VriPipelineLayout*, uint32_t, VriDescriptorSet**, uint32_t) { return VriResult_Unsupported; }
-        void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*, uint32_t, uint32_t, const VriDescriptorRangeUpdateDesc*) {}
+        void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool) { delete reinterpret_cast<DescriptorPoolGL*>(pool); }
+        VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool* pool, const VriPipelineLayout* layout, uint32_t setIndex, VriDescriptorSet** outSets, uint32_t setNum)
+        {
+            DescriptorPoolGL* p = reinterpret_cast<DescriptorPoolGL*>(pool);
+            const PipelineLayoutGL* l = reinterpret_cast<const PipelineLayoutGL*>(layout);
+            for (uint32_t i = 0; i < setNum; ++i)
+                outSets[i] = ToHandle(new DescriptorSetGL{p->device, l, setIndex, {}});
+            return VriResult_Success;
+        }
+        void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet* set, uint32_t baseRange, uint32_t rangeNum, const VriDescriptorRangeUpdateDesc* updates)
+        {
+            DescriptorSetGL* s = reinterpret_cast<DescriptorSetGL*>(set);
+            // The layout's bindings for this set, in declaration order, line up with
+            // the ranges; range r writes the view at that range's binding.
+            std::vector<const LayoutBindingGL*> setBindings;
+            for (const LayoutBindingGL& b : s->layout->bindings)
+                if (b.set == s->setIndex)
+                    setBindings.push_back(&b);
+            for (uint32_t r = 0; r < rangeNum; ++r)
+            {
+                const uint32_t idx = baseRange + r;
+                if (idx >= setBindings.size() || updates[r].descriptorNum == 0)
+                    continue;
+                s->bound[setBindings[idx]->binding] = reinterpret_cast<const DescriptorGL*>(updates[r].descriptors[0]);
+            }
+        }
 
         // ---- synchronization (coarse; GL is ordered on one context) --------
         VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
@@ -504,7 +594,10 @@ namespace vri::gl
             glEnable(GL_SCISSOR_TEST);
             glScissor(r[0].x, r[0].y, static_cast<GLsizei>(r[0].width), static_cast<GLsizei>(r[0].height));
         }
-        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer*, VriPipelineLayout*) {}
+        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
+        {
+            CB(cmd)->boundLayout = reinterpret_cast<const PipelineLayoutGL*>(layout);
+        }
         void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
         {
             CommandBufferGL* c = CB(cmd);
@@ -526,7 +619,30 @@ namespace vri::gl
             glColorMask(p->colorMask[0], p->colorMask[1], p->colorMask[2], p->colorMask[3]);
             c->topology = p->topology;
         }
-        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer*, uint32_t, const VriDescriptorSet*) {}
+        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
+        {
+            CommandBufferGL* c = CB(cmd);
+            if (!c->boundLayout || !set)
+                return;
+            const DescriptorSetGL* s = reinterpret_cast<const DescriptorSetGL*>(set);
+            for (const auto& [binding, view] : s->bound)
+            {
+                const LayoutBindingGL* lb = c->boundLayout->Find(setIndex, binding);
+                if (!lb || !view)
+                    continue;
+                if (view->kind == DescriptorGL::Kind::BufferView && view->buffer)
+                {
+                    const GLenum target = (lb->type == VriDescriptorType_StorageBuffer ||
+                                           lb->type == VriDescriptorType_StructuredBuffer)
+                                              ? GL_SHADER_STORAGE_BUFFER
+                                              : GL_UNIFORM_BUFFER;
+                    glBindBufferRange(target, lb->glUnit, view->buffer->id,
+                                      static_cast<GLintptr>(view->bufferOffset),
+                                      static_cast<GLsizeiptr>(view->bufferRange ? view->bufferRange : view->buffer->size));
+                }
+                // Texture/sampler binding lands with the sampled-texture parity work.
+            }
+        }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer*, uint32_t, const VriVertexBufferBinding*, uint32_t) {}
         void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer*, VriBuffer*, uint64_t, VriIndexType) {}

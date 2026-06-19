@@ -5,6 +5,9 @@
 
 #include <vri/vri.h>
 
+#include <unordered_map>
+#include <vector>
+
 namespace vri::gl
 {
     class DeviceGL;
@@ -21,11 +24,14 @@ namespace vri::gl
 
     // Commands execute immediately on the (single, thread-bound) GL context;
     // a deferred stream for multi-threaded recording is a later enhancement.
+    struct PipelineLayoutGL;
+
     struct CommandBufferGL
     {
-        DeviceGL* device;
-        GLuint    fbo;      // transient FBO for the active render pass
-        GLenum    topology; // from the bound pipeline
+        DeviceGL*               device;
+        GLuint                  fbo;         // transient FBO for the active render pass
+        GLenum                  topology;    // from the bound pipeline
+        const PipelineLayoutGL* boundLayout; // from CmdSetPipelineLayout (descriptor remap)
     };
 
     struct BufferGL
@@ -70,9 +76,44 @@ namespace vri::gl
         uint64_t         bufferRange;
     };
 
+    // Flattened binding: each (set, binding) maps to a per-type GL unit (uniform
+    // buffer binding point / SSBO binding point / texture unit). This is the
+    // legacy-backend descriptor remap from the design plan.
+    struct LayoutBindingGL
+    {
+        uint32_t          set;
+        uint32_t          binding;
+        VriDescriptorType type;
+        uint32_t          glUnit;
+    };
+
     struct PipelineLayoutGL
     {
+        DeviceGL*                    device;
+        std::vector<LayoutBindingGL> bindings;
+
+        const LayoutBindingGL* Find(uint32_t set, uint32_t binding) const
+        {
+            for (const LayoutBindingGL& b : bindings)
+                if (b.set == set && b.binding == binding)
+                    return &b;
+            return nullptr;
+        }
+    };
+
+    struct DescriptorPoolGL
+    {
         DeviceGL* device;
+    };
+
+    // CPU-side descriptor set: records which view sits at each binding; bound to
+    // GL units at CmdSetDescriptorSet time via the pipeline layout's mapping.
+    struct DescriptorSetGL
+    {
+        DeviceGL*                                         device;
+        const PipelineLayoutGL*                           layout;
+        uint32_t                                          setIndex;
+        std::unordered_map<uint32_t, const DescriptorGL*> bound; // binding -> view
     };
 
     struct PipelineGL
@@ -106,4 +147,6 @@ namespace vri::gl
     inline VriPipelineLayout*   ToHandle(PipelineLayoutGL* p)   { return reinterpret_cast<VriPipelineLayout*>(p); }
     inline VriPipeline*         ToHandle(PipelineGL* p)         { return reinterpret_cast<VriPipeline*>(p); }
     inline VriFence*            ToHandle(FenceGL* f)            { return reinterpret_cast<VriFence*>(f); }
+    inline VriDescriptorPool*   ToHandle(DescriptorPoolGL* p)   { return reinterpret_cast<VriDescriptorPool*>(p); }
+    inline VriDescriptorSet*    ToHandle(DescriptorSetGL* s)    { return reinterpret_cast<VriDescriptorSet*>(s); }
 } // namespace vri::gl

@@ -22,6 +22,11 @@
 // WebGL2's getBufferSubData is implemented by the Emscripten GL runtime but not
 // declared in <GLES3/gl3.h>; declare it so the buffer-readback path can use it.
 extern "C" void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, void* data);
+// SSBOs are ES 3.1 (absent in WebGL2); define the token so code compiles. Binding
+// to it on WebGL would be a runtime no-op/error, but the triangle/UBO path never does.
+#    if !defined(GL_SHADER_STORAGE_BUFFER)
+#        define GL_SHADER_STORAGE_BUFFER 0x90D2
+#    endif
 #else
 #    include <glad/glad.h>
 #endif

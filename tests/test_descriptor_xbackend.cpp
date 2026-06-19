@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_ubo_spv.h"  // g_triangleUboSpv  (Vulkan)
+#include "shaders/triangle_ubo_spv.h"  // g_triangleUboSpv  (Vulkan + OpenGL via SPIRV-Cross)
 #include "shaders/triangle_ubo_wgsl.h" // g_triangleUboWgsl (WebGPU)
 
 namespace
@@ -223,4 +223,9 @@ TEST_CASE("descriptor set parity: UBO tints the triangle green on each backend")
 
     const bool wgpu = RunUboTint(VriGraphicsAPI_WebGPU, g_triangleUboWgsl, sizeof(g_triangleUboWgsl), ran);
     if (ran) { CHECK(wgpu); } else { MESSAGE("WebGPU unavailable - skipped"); }
+
+    // OpenGL consumes the SPIR-V (transpiled to GLSL by SPIRV-Cross); the UBO is
+    // bound through the flattened (set,binding) -> uniform-block-binding map.
+    const bool gl = RunUboTint(VriGraphicsAPI_OpenGL, g_triangleUboSpv, sizeof(g_triangleUboSpv), ran);
+    if (ran) { CHECK(gl); } else { MESSAGE("OpenGL unavailable - skipped"); }
 }
