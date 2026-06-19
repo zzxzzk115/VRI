@@ -1,0 +1,42 @@
+-- The VRI library target.
+
+target("vri")
+    set_kind("static")
+    set_languages("cxx23")
+
+    -- public C/C++ headers
+    add_includedirs("$(projectdir)/include", {public = true})
+
+    -- internal headers (core, backends)
+    add_includedirs(os.scriptdir(), {public = false})
+
+    -- backend-agnostic core
+    add_files("core/*.cpp")
+    add_headerfiles("$(projectdir)/include/(vri/**.h)")
+    add_headerfiles("$(projectdir)/include/(vri/**.hpp)")
+
+    -- defined while building the library (controls dllexport on Windows)
+    add_defines("VRI_BUILD")
+
+    -- backend selection (implementations land Phase 1+)
+    if has_config("vri_backend_vulkan") then
+        add_defines("VRI_BACKEND_VULKAN")
+        add_rules("vulkansdk")
+        add_packages("vulkan-headers", "vulkan-memory-allocator-hpp", {public = false})
+        add_files("backend_vk/**.cpp")
+        add_includedirs("backend_vk", {public = false})
+    end
+    if has_config("vri_backend_wgpu") then
+        add_defines("VRI_BACKEND_WGPU")
+        -- public: wgpu_native must link into the final exe + its DLL on runtime PATH
+        add_packages("webgpu-sdk", {public = true})
+        add_files("backend_wgpu/**.cpp")
+        add_includedirs("backend_wgpu", {public = false})
+    end
+    if has_config("vri_backend_gl") then
+        add_defines("VRI_BACKEND_GL")
+    end
+    if has_config("vri_backend_d3d11") and is_plat("windows") then
+        add_defines("VRI_BACKEND_D3D11")
+    end
+target_end()

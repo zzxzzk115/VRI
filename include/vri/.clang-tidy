@@ -1,0 +1,8 @@
+# The public VRI headers are C-clean (must compile as C11). They intentionally
+# use `typedef` (not `using`) and C-style `VriThing_Value` enum constants, which
+# conflict with the repo-wide modernize/naming checks. Inherit everything else
+# but silence those two here.
+InheritParentConfig: true
+Checks: >
+  -modernize-use-using,
+  -readability-identifier-naming

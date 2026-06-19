@@ -1,0 +1,873 @@
+// core_wgpu.cpp - WebGPU (wgpu-native) implementation of VriCoreInterface.
+//
+// Triangle vertical slice: resources, texture views, render pipeline from WGSL,
+// command recording (render pass), copy/readback, queue submit, and emulated
+// timeline fences. WebGPU auto-synchronizes, so CmdBarrier is a no-op and there
+// are no resource layouts. Explicit memory and descriptor pools/sets are stubbed
+// (WebGPU has no memory objects; descriptor sets = bind groups, landing later).
+
+#include "core_wgpu.h"
+#include "conversions_wgpu.h"
+#include "device_wgpu.h"
+#include "objects_wgpu.h"
+
+#include <webgpu/webgpu.h>
+#include <webgpu/wgpu.h>
+
+#include <cstring>
+#include <vector>
+
+namespace vri::wgpu
+{
+    namespace
+    {
+        inline DeviceWGPU*        Dev(VriDevice* h)        { return reinterpret_cast<DeviceWGPU*>(h); }
+        inline const DeviceWGPU*  Dev(const VriDevice* h)  { return reinterpret_cast<const DeviceWGPU*>(h); }
+        inline QueueWGPU*         Q(VriQueue* h)           { return reinterpret_cast<QueueWGPU*>(h); }
+        inline CommandAllocatorWGPU* CA(VriCommandAllocator* h) { return reinterpret_cast<CommandAllocatorWGPU*>(h); }
+        inline CommandBufferWGPU* CB(VriCommandBuffer* h)  { return reinterpret_cast<CommandBufferWGPU*>(h); }
+        inline BufferWGPU*        Buf(VriBuffer* h)        { return reinterpret_cast<BufferWGPU*>(h); }
+        inline TextureWGPU*       Tex(VriTexture* h)       { return reinterpret_cast<TextureWGPU*>(h); }
+        inline DescriptorWGPU*    Desc(VriDescriptor* h)   { return reinterpret_cast<DescriptorWGPU*>(h); }
+        inline PipelineLayoutWGPU* PL(VriPipelineLayout* h){ return reinterpret_cast<PipelineLayoutWGPU*>(h); }
+        inline const PipelineLayoutWGPU* PLc(const VriPipelineLayout* h) { return reinterpret_cast<const PipelineLayoutWGPU*>(h); }
+        inline PipelineWGPU*      Pipe(VriPipeline* h)     { return reinterpret_cast<PipelineWGPU*>(h); }
+        inline FenceWGPU*         Fen(VriFence* h)         { return reinterpret_cast<FenceWGPU*>(h); }
+        inline DescriptorPoolWGPU* DPool(VriDescriptorPool* h) { return reinterpret_cast<DescriptorPoolWGPU*>(h); }
+        inline DescriptorSetWGPU* DSet(VriDescriptorSet* h) { return reinterpret_cast<DescriptorSetWGPU*>(h); }
+
+        inline WGPUStringView SV(const char* s) { return WGPUStringView{s, WGPU_STRLEN}; }
+
+        WGPUShaderStage ToWgpuShaderStage(VriShaderStageFlags s)
+        {
+            WGPUShaderStage r = WGPUShaderStage_None;
+            if (s & VriShaderStage_Vertex)   r |= WGPUShaderStage_Vertex;
+            if (s & VriShaderStage_Fragment) r |= WGPUShaderStage_Fragment;
+            if (s & VriShaderStage_Compute)  r |= WGPUShaderStage_Compute;
+            return r;
+        }
+
+        uint32_t TexelSize(VriFormat f)
+        {
+            switch (f)
+            {
+                case VriFormat_R8_UNORM: case VriFormat_R8_UINT: case VriFormat_R8_SNORM: case VriFormat_R8_SINT:
+                    return 1;
+                case VriFormat_RG8_UNORM: case VriFormat_R16_SFLOAT: case VriFormat_R16_UNORM: case VriFormat_D16_UNORM:
+                    return 2;
+                case VriFormat_RGBA8_UNORM: case VriFormat_RGBA8_SRGB: case VriFormat_BGRA8_UNORM: case VriFormat_BGRA8_SRGB:
+                case VriFormat_RG16_SFLOAT: case VriFormat_R32_SFLOAT: case VriFormat_R32_UINT:
+                case VriFormat_RGB10A2_UNORM: case VriFormat_D32_SFLOAT:
+                    return 4;
+                case VriFormat_RGBA16_SFLOAT: case VriFormat_RG32_SFLOAT:
+                    return 8;
+                case VriFormat_RGBA32_SFLOAT:
+                    return 16;
+                default:
+                    return 4;
+            }
+        }
+
+        WGPUShaderModule MakeWgslModule(WGPUDevice device, const void* bytecode)
+        {
+            WGPUShaderSourceWGSL src = {};
+            src.chain.sType = WGPUSType_ShaderSourceWGSL;
+            src.code = SV(static_cast<const char*>(bytecode));
+            WGPUShaderModuleDescriptor d = {};
+            d.nextInChain = &src.chain;
+            return wgpuDeviceCreateShaderModule(device, &d);
+        }
+
+        // ---- queries -------------------------------------------------------
+        const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
+
+        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat format)
+        {
+            // Coarse: WebGPU guarantees these for common formats. Refined later.
+            VriFormatSupportFlags r = VriFormatSupport_Texture | VriFormatSupport_VertexBuffer;
+            if (ToWgpuFormat(format) != WGPUTextureFormat_Undefined)
+                r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
+            return r;
+        }
+
+        VriResult VRI_CALL GetQueue(VriDevice* device, VriQueueType type, uint32_t, VriQueue** outQueue)
+        {
+            if (type >= VriQueueType_Count)
+                return VriResult_InvalidArgument;
+            *outQueue = ToHandle(Dev(device)->GetQueue(type));
+            return VriResult_Success;
+        }
+
+        // ---- command allocation / lifecycle --------------------------------
+        VriResult VRI_CALL CreateCommandAllocator(VriDevice* device, VriQueueType, VriCommandAllocator** out)
+        {
+            *out = ToHandle(new CommandAllocatorWGPU{Dev(device)});
+            return VriResult_Success;
+        }
+        void VRI_CALL ResetCommandAllocator(VriCommandAllocator*) {}
+        void VRI_CALL DestroyCommandAllocator(VriCommandAllocator* a) { delete CA(a); }
+
+        VriResult VRI_CALL CreateCommandBuffer(VriCommandAllocator* allocator, VriCommandBuffer** out)
+        {
+            *out = ToHandle(new CommandBufferWGPU{CA(allocator)->device, nullptr, nullptr, nullptr, nullptr, nullptr});
+            return VriResult_Success;
+        }
+
+        VriResult VRI_CALL BeginCommandBuffer(VriCommandBuffer* cmd)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            WGPUCommandEncoderDescriptor d = {};
+            c->encoder = wgpuDeviceCreateCommandEncoder(c->device->Device(), &d);
+            c->pass = nullptr;
+            c->finished = nullptr;
+            return c->encoder ? VriResult_Success : VriResult_Failure;
+        }
+
+        VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer* cmd)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            WGPUCommandBufferDescriptor d = {};
+            c->finished = wgpuCommandEncoderFinish(c->encoder, &d);
+            wgpuCommandEncoderRelease(c->encoder);
+            c->encoder = nullptr;
+            return c->finished ? VriResult_Success : VriResult_Failure;
+        }
+
+        // ---- resources -----------------------------------------------------
+        VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
+        {
+            DeviceWGPU* d = Dev(device);
+            WGPUBufferUsage usage = ToWgpuBufferUsage(desc->usage);
+            WGPUMapMode mapMode = WGPUMapMode_None;
+            if (desc->memoryLocation == VriMemoryLocation_HostReadback)
+            {
+                usage |= WGPUBufferUsage_MapRead;
+                mapMode = WGPUMapMode_Read;
+            }
+            else if (desc->memoryLocation == VriMemoryLocation_HostUpload)
+            {
+                usage |= WGPUBufferUsage_MapWrite;
+                mapMode = WGPUMapMode_Write;
+            }
+
+            WGPUBufferDescriptor bd = {};
+            bd.usage = usage;
+            bd.size = desc->size;
+            WGPUBuffer buffer = wgpuDeviceCreateBuffer(d->Device(), &bd);
+            if (!buffer)
+                return VriResult_OutOfMemory;
+            *out = ToHandle(new BufferWGPU{d, buffer, desc->size, mapMode});
+            return VriResult_Success;
+        }
+
+        void VRI_CALL DestroyBuffer(VriBuffer* buffer)
+        {
+            if (!buffer) return;
+            BufferWGPU* b = Buf(buffer);
+            wgpuBufferRelease(b->buffer);
+            delete b;
+        }
+
+        struct MapState { bool done; WGPUMapAsyncStatus status; };
+        void OnMap(WGPUMapAsyncStatus status, WGPUStringView, void* ud1, void*)
+        {
+            auto* s = static_cast<MapState*>(ud1);
+            s->done = true;
+            s->status = status;
+        }
+
+        void* VRI_CALL MapBuffer(VriBuffer* buffer, uint64_t offset, uint64_t size)
+        {
+            BufferWGPU* b = Buf(buffer);
+            const WGPUMapMode mode = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
+            MapState st = {};
+            WGPUBufferMapCallbackInfo cb = {};
+            cb.mode = WGPUCallbackMode_AllowProcessEvents;
+            cb.callback = OnMap;
+            cb.userdata1 = &st;
+            wgpuBufferMapAsync(b->buffer, mode, offset, size ? size : WGPU_WHOLE_MAP_SIZE, cb);
+            for (int i = 0; i < 100000 && !st.done; ++i)
+                wgpuDevicePoll(b->device->Device(), /*wait*/ true, nullptr);
+            if (st.status != WGPUMapAsyncStatus_Success)
+                return nullptr;
+            return wgpuBufferGetMappedRange(b->buffer, offset, size ? size : WGPU_WHOLE_MAP_SIZE);
+        }
+
+        void VRI_CALL UnmapBuffer(VriBuffer* buffer) { wgpuBufferUnmap(Buf(buffer)->buffer); }
+
+        uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; } // not exposed by WebGPU
+
+        VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
+        {
+            DeviceWGPU* d = Dev(device);
+            WGPUTextureDescriptor td = {};
+            td.usage = ToWgpuTextureUsage(desc->usage);
+            td.dimension = desc->type == VriTextureType_3D ? WGPUTextureDimension_3D
+                         : desc->type == VriTextureType_1D || desc->type == VriTextureType_1DArray ? WGPUTextureDimension_1D
+                         : WGPUTextureDimension_2D;
+            td.size.width = desc->width;
+            td.size.height = desc->height ? desc->height : 1u;
+            td.size.depthOrArrayLayers = desc->type == VriTextureType_3D ? (desc->depth ? desc->depth : 1u)
+                                                                         : (desc->layerNum ? desc->layerNum : 1u);
+            td.format = ToWgpuFormat(desc->format);
+            td.mipLevelCount = desc->mipNum ? desc->mipNum : 1u;
+            td.sampleCount = desc->sampleNum ? desc->sampleNum : 1u;
+
+            WGPUTexture texture = wgpuDeviceCreateTexture(d->Device(), &td);
+            if (!texture)
+                return VriResult_OutOfMemory;
+
+            TextureWGPU* t = new TextureWGPU{};
+            t->device = d;
+            t->texture = texture;
+            t->format = td.format;
+            t->width = td.size.width;
+            t->height = td.size.height;
+            t->depth = td.size.depthOrArrayLayers;
+            t->mipNum = td.mipLevelCount;
+            t->layerNum = desc->type == VriTextureType_3D ? 1u : td.size.depthOrArrayLayers;
+            t->texelSize = TexelSize(desc->format);
+            t->owned = true;
+            *out = ToHandle(t);
+            return VriResult_Success;
+        }
+
+        void VRI_CALL DestroyTexture(VriTexture* texture)
+        {
+            if (!texture) return;
+            TextureWGPU* t = Tex(texture);
+            if (t->owned && t->texture)
+                wgpuTextureRelease(t->texture);
+            delete t;
+        }
+
+        // ---- explicit memory: unsupported on WebGPU (no memory objects) ----
+        void VRI_CALL GetBufferMemoryDesc(const VriDevice*, const VriBufferDesc*, VriMemoryLocation, VriMemoryDesc* o) { if (o) *o = VriMemoryDesc{}; }
+        void VRI_CALL GetTextureMemoryDesc(const VriDevice*, const VriTextureDesc*, VriMemoryLocation, VriMemoryDesc* o) { if (o) *o = VriMemoryDesc{}; }
+        VriResult VRI_CALL AllocateMemory(VriDevice*, const VriMemoryDesc*, VriMemory**) { return VriResult_Unsupported; }
+        void VRI_CALL FreeMemory(VriMemory*) {}
+        VriResult VRI_CALL BindBufferMemory(VriDevice*, VriBuffer*, VriMemory*, uint64_t) { return VriResult_Unsupported; }
+        VriResult VRI_CALL BindTextureMemory(VriDevice*, VriTexture*, VriMemory*, uint64_t) { return VriResult_Unsupported; }
+
+        // ---- views & samplers ----------------------------------------------
+        VriResult VRI_CALL CreateBufferView(VriDevice* device, const VriBufferViewDesc* desc, VriDescriptor** out)
+        {
+            DescriptorWGPU* v = new DescriptorWGPU{};
+            v->kind = DescriptorWGPU::Kind::BufferView;
+            v->device = Dev(device);
+            v->buffer = Buf(desc->buffer);
+            v->bufferOffset = desc->offset;
+            v->bufferRange = desc->size;
+            *out = ToHandle(v);
+            return VriResult_Success;
+        }
+
+        VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc* desc, VriDescriptor** out)
+        {
+            const TextureWGPU* t = reinterpret_cast<const TextureWGPU*>(desc->texture);
+            WGPUTextureViewDescriptor vd = {};
+            vd.format = desc->format == VriFormat_Unknown ? t->format : ToWgpuFormat(desc->format);
+            switch (desc->viewType)
+            {
+                case VriTextureViewType_1D:        vd.dimension = WGPUTextureViewDimension_1D; break;
+                case VriTextureViewType_2DArray:   vd.dimension = WGPUTextureViewDimension_2DArray; break;
+                case VriTextureViewType_3D:        vd.dimension = WGPUTextureViewDimension_3D; break;
+                case VriTextureViewType_Cube:      vd.dimension = WGPUTextureViewDimension_Cube; break;
+                case VriTextureViewType_CubeArray: vd.dimension = WGPUTextureViewDimension_CubeArray; break;
+                default:                           vd.dimension = WGPUTextureViewDimension_2D; break;
+            }
+            vd.baseMipLevel = desc->baseMip;
+            vd.mipLevelCount = desc->mipNum ? desc->mipNum : (t->mipNum - desc->baseMip);
+            vd.baseArrayLayer = desc->baseLayer;
+            vd.arrayLayerCount = desc->layerNum ? desc->layerNum : (t->layerNum - desc->baseLayer);
+            vd.aspect = WGPUTextureAspect_All;
+
+            WGPUTextureView view = wgpuTextureCreateView(t->texture, &vd);
+            if (!view)
+                return VriResult_Failure;
+
+            DescriptorWGPU* v = new DescriptorWGPU{};
+            v->kind = DescriptorWGPU::Kind::TextureView;
+            v->device = Dev(device);
+            v->view = view;
+            *out = ToHandle(v);
+            return VriResult_Success;
+        }
+
+        VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, VriDescriptor** out)
+        {
+            auto toAddr = [](VriAddressMode m) {
+                switch (m)
+                {
+                    case VriAddressMode_MirroredRepeat: return WGPUAddressMode_MirrorRepeat;
+                    case VriAddressMode_ClampToEdge:    return WGPUAddressMode_ClampToEdge;
+                    case VriAddressMode_ClampToBorder:  return WGPUAddressMode_ClampToEdge; // WebGPU has no border
+                    default:                            return WGPUAddressMode_Repeat;
+                }
+            };
+            WGPUSamplerDescriptor sd = {};
+            sd.magFilter = desc->magFilter == VriFilter_Linear ? WGPUFilterMode_Linear : WGPUFilterMode_Nearest;
+            sd.minFilter = desc->minFilter == VriFilter_Linear ? WGPUFilterMode_Linear : WGPUFilterMode_Nearest;
+            sd.mipmapFilter = desc->mipmapMode == VriMipmapMode_Linear ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
+            sd.addressModeU = toAddr(desc->addressModeU);
+            sd.addressModeV = toAddr(desc->addressModeV);
+            sd.addressModeW = toAddr(desc->addressModeW);
+            sd.lodMinClamp = desc->minLod;
+            sd.lodMaxClamp = desc->maxLod;
+            sd.maxAnisotropy = desc->anisotropyEnable ? (desc->maxAnisotropy > 1.0f ? (uint16_t)desc->maxAnisotropy : 1) : 1;
+
+            WGPUSampler sampler = wgpuDeviceCreateSampler(Dev(device)->Device(), &sd);
+            if (!sampler)
+                return VriResult_Failure;
+            DescriptorWGPU* v = new DescriptorWGPU{};
+            v->kind = DescriptorWGPU::Kind::Sampler;
+            v->device = Dev(device);
+            v->sampler = sampler;
+            *out = ToHandle(v);
+            return VriResult_Success;
+        }
+
+        void VRI_CALL DestroyDescriptor(VriDescriptor* descriptor)
+        {
+            if (!descriptor) return;
+            DescriptorWGPU* v = Desc(descriptor);
+            if (v->view) wgpuTextureViewRelease(v->view);
+            if (v->sampler) wgpuSamplerRelease(v->sampler);
+            delete v;
+        }
+
+        // ---- pipeline layout & pipelines -----------------------------------
+        VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc* desc, VriPipelineLayout** out)
+        {
+            DeviceWGPU* d = Dev(device);
+            PipelineLayoutWGPU* layout = new PipelineLayoutWGPU{};
+            layout->device = d;
+
+            for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
+            {
+                const VriDescriptorSetDesc& set = desc->descriptorSets[s];
+                std::vector<WGPUBindGroupLayoutEntry> entries;
+                std::vector<RangeInfoWGPU> rangeInfos;
+                entries.reserve(set.rangeNum);
+                rangeInfos.reserve(set.rangeNum);
+                for (uint32_t r = 0; r < set.rangeNum; ++r)
+                {
+                    const VriDescriptorRangeDesc& range = set.ranges[r];
+                    WGPUBindGroupLayoutEntry e = {};
+                    e.binding = range.baseRegister;
+                    e.visibility = ToWgpuShaderStage(range.shaderStages);
+                    switch (range.descriptorType)
+                    {
+                        case VriDescriptorType_ConstantBuffer:   e.buffer.type = WGPUBufferBindingType_Uniform; break;
+                        case VriDescriptorType_StorageBuffer:    e.buffer.type = WGPUBufferBindingType_Storage; break;
+                        case VriDescriptorType_StructuredBuffer: e.buffer.type = WGPUBufferBindingType_ReadOnlyStorage; break;
+                        case VriDescriptorType_Texture:
+                            e.texture.sampleType = WGPUTextureSampleType_Float;
+                            e.texture.viewDimension = WGPUTextureViewDimension_2D;
+                            break;
+                        case VriDescriptorType_StorageTexture:
+                            e.storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+                            e.storageTexture.format = WGPUTextureFormat_RGBA8Unorm;
+                            e.storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+                            break;
+                        case VriDescriptorType_Sampler:
+                            e.sampler.type = WGPUSamplerBindingType_Filtering;
+                            break;
+                        default:
+                            break; // acceleration structure: not WebGPU core
+                    }
+                    entries.push_back(e);
+                    rangeInfos.push_back({range.baseRegister, range.descriptorType, range.descriptorNum});
+                }
+
+                WGPUBindGroupLayoutDescriptor ld = {};
+                ld.entryCount = static_cast<uint32_t>(entries.size());
+                ld.entries = entries.data();
+                WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(d->Device(), &ld);
+                layout->bindGroupLayouts.push_back(bgl);
+                layout->setRanges.push_back(std::move(rangeInfos));
+            }
+
+            WGPUPipelineLayoutDescriptor pld = {};
+            pld.bindGroupLayoutCount = static_cast<uint32_t>(layout->bindGroupLayouts.size());
+            pld.bindGroupLayouts = layout->bindGroupLayouts.empty() ? nullptr : layout->bindGroupLayouts.data();
+            layout->layout = wgpuDeviceCreatePipelineLayout(d->Device(), &pld);
+            *out = ToHandle(layout);
+            return VriResult_Success;
+        }
+
+        void VRI_CALL DestroyPipelineLayout(VriPipelineLayout* layout)
+        {
+            if (!layout) return;
+            PipelineLayoutWGPU* l = PL(layout);
+            for (WGPUBindGroupLayout bgl : l->bindGroupLayouts)
+                wgpuBindGroupLayoutRelease(bgl);
+            if (l->layout) wgpuPipelineLayoutRelease(l->layout);
+            delete l;
+        }
+
+        VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
+        {
+            DeviceWGPU* d = Dev(device);
+            WGPUShaderModule vsMod = nullptr, fsMod = nullptr;
+            const char* vsEntry = "main";
+            const char* fsEntry = "main";
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+            {
+                const VriShaderDesc& s = desc->shaders[i];
+                if (s.stage == VriShaderStage_Vertex)
+                {
+                    vsMod = MakeWgslModule(d->Device(), s.bytecode);
+                    vsEntry = s.entryPointName ? s.entryPointName : "main";
+                }
+                else if (s.stage == VriShaderStage_Fragment)
+                {
+                    fsMod = MakeWgslModule(d->Device(), s.bytecode);
+                    fsEntry = s.entryPointName ? s.entryPointName : "main";
+                }
+            }
+
+            WGPUVertexState vertex = {};
+            vertex.module = vsMod;
+            vertex.entryPoint = SV(vsEntry);
+            // (vertex buffers land alongside vertex-buffer-driven pipelines)
+
+            std::vector<WGPUColorTargetState> targets;
+            std::vector<WGPUBlendState> blends;
+            targets.reserve(desc->outputMerger.colorNum);
+            blends.reserve(desc->outputMerger.colorNum);
+            for (uint32_t i = 0; i < desc->outputMerger.colorNum; ++i)
+            {
+                const VriColorAttachmentDesc& c = desc->outputMerger.colors[i];
+                WGPUColorTargetState ct = {};
+                ct.format = ToWgpuFormat(c.format);
+                WGPUColorWriteMask mask = WGPUColorWriteMask_None;
+                if (c.colorWriteMask == 0 || c.colorWriteMask == VriColorWrite_RGBA)
+                    mask = WGPUColorWriteMask_All;
+                else
+                {
+                    if (c.colorWriteMask & VriColorWrite_R) mask |= WGPUColorWriteMask_Red;
+                    if (c.colorWriteMask & VriColorWrite_G) mask |= WGPUColorWriteMask_Green;
+                    if (c.colorWriteMask & VriColorWrite_B) mask |= WGPUColorWriteMask_Blue;
+                    if (c.colorWriteMask & VriColorWrite_A) mask |= WGPUColorWriteMask_Alpha;
+                }
+                ct.writeMask = mask;
+                if (c.blend.enable)
+                {
+                    WGPUBlendState bs = {};
+                    bs.color.srcFactor = ToWgpuBlendFactor(c.blend.srcColor);
+                    bs.color.dstFactor = ToWgpuBlendFactor(c.blend.dstColor);
+                    bs.color.operation = ToWgpuBlendOp(c.blend.colorOp);
+                    bs.alpha.srcFactor = ToWgpuBlendFactor(c.blend.srcAlpha);
+                    bs.alpha.dstFactor = ToWgpuBlendFactor(c.blend.dstAlpha);
+                    bs.alpha.operation = ToWgpuBlendOp(c.blend.alphaOp);
+                    blends.push_back(bs);
+                    ct.blend = &blends.back();
+                }
+                targets.push_back(ct);
+            }
+
+            WGPUFragmentState fragment = {};
+            fragment.module = fsMod;
+            fragment.entryPoint = SV(fsEntry);
+            fragment.targetCount = static_cast<uint32_t>(targets.size());
+            fragment.targets = targets.data();
+
+            WGPURenderPipelineDescriptor pd = {};
+            pd.layout = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : nullptr;
+            pd.vertex = vertex;
+            pd.primitive.topology = ToWgpuTopology(desc->inputAssembly.topology);
+            pd.primitive.frontFace = ToWgpuFrontFace(desc->rasterization.frontFace);
+            pd.primitive.cullMode = ToWgpuCullMode(desc->rasterization.cullMode);
+            pd.multisample.count = desc->multisample.sampleNum ? desc->multisample.sampleNum : 1u;
+            pd.multisample.mask = 0xFFFFFFFFu;
+            pd.fragment = &fragment;
+
+            WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(d->Device(), &pd);
+
+            if (vsMod) wgpuShaderModuleRelease(vsMod);
+            if (fsMod) wgpuShaderModuleRelease(fsMod);
+            if (!pipeline)
+                return VriResult_Failure;
+
+            *out = ToHandle(new PipelineWGPU{d, pipeline, nullptr, false});
+            return VriResult_Success;
+        }
+
+        VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
+
+        void VRI_CALL DestroyPipeline(VriPipeline* pipeline)
+        {
+            if (!pipeline) return;
+            PipelineWGPU* p = Pipe(pipeline);
+            if (p->render) wgpuRenderPipelineRelease(p->render);
+            if (p->compute) wgpuComputePipelineRelease(p->compute);
+            delete p;
+        }
+
+        // ---- descriptor pools / sets (= WebGPU bind groups) ----------------
+        VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPoolDesc*, VriDescriptorPool** out)
+        {
+            *out = ToHandle(new DescriptorPoolWGPU{Dev(device), {}});
+            return VriResult_Success;
+        }
+
+        void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool)
+        {
+            DescriptorPoolWGPU* p = DPool(pool);
+            for (DescriptorSetWGPU* s : p->sets)
+            {
+                if (s->bindGroup) wgpuBindGroupRelease(s->bindGroup);
+                delete s;
+            }
+            p->sets.clear();
+        }
+
+        void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool)
+        {
+            if (!pool) return;
+            ResetDescriptorPool(pool);
+            delete DPool(pool);
+        }
+
+        VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool* pool, const VriPipelineLayout* layout, uint32_t setIndex, VriDescriptorSet** outSets, uint32_t setNum)
+        {
+            DescriptorPoolWGPU* p = DPool(pool);
+            const PipelineLayoutWGPU* l = PLc(layout);
+            if (setIndex >= l->bindGroupLayouts.size())
+                return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < setNum; ++i)
+            {
+                DescriptorSetWGPU* s = new DescriptorSetWGPU{p->device, l, setIndex, nullptr};
+                p->sets.push_back(s);
+                outSets[i] = ToHandle(s);
+            }
+            return VriResult_Success;
+        }
+
+        void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet* set, uint32_t baseRange, uint32_t rangeNum, const VriDescriptorRangeUpdateDesc* updates)
+        {
+            DescriptorSetWGPU* s = DSet(set);
+            const std::vector<RangeInfoWGPU>& ranges = s->layout->setRanges[s->setIndex];
+
+            std::vector<WGPUBindGroupEntry> entries;
+            for (uint32_t r = 0; r < rangeNum; ++r)
+            {
+                const VriDescriptorRangeUpdateDesc& u = updates[r];
+                const RangeInfoWGPU& info = ranges[baseRange + r];
+                const bool isBuffer = info.type == VriDescriptorType_ConstantBuffer ||
+                                      info.type == VriDescriptorType_StorageBuffer ||
+                                      info.type == VriDescriptorType_StructuredBuffer;
+                for (uint32_t k = 0; k < u.descriptorNum; ++k)
+                {
+                    const DescriptorWGPU* d = Desc(const_cast<VriDescriptor*>(u.descriptors[k]));
+                    WGPUBindGroupEntry e = {};
+                    e.binding = info.binding + k;
+                    if (isBuffer)
+                    {
+                        e.buffer = d->buffer ? d->buffer->buffer : nullptr;
+                        e.offset = d->bufferOffset;
+                        e.size = d->bufferRange ? d->bufferRange : WGPU_WHOLE_SIZE;
+                    }
+                    else if (info.type == VriDescriptorType_Sampler)
+                    {
+                        e.sampler = d->sampler;
+                    }
+                    else
+                    {
+                        e.textureView = d->view;
+                    }
+                    entries.push_back(e);
+                }
+            }
+
+            WGPUBindGroupDescriptor bd = {};
+            bd.layout = s->layout->bindGroupLayouts[s->setIndex];
+            bd.entryCount = static_cast<uint32_t>(entries.size());
+            bd.entries = entries.data();
+            if (s->bindGroup)
+                wgpuBindGroupRelease(s->bindGroup);
+            s->bindGroup = wgpuDeviceCreateBindGroup(s->device->Device(), &bd);
+        }
+
+        // ---- synchronization (emulated timeline) ---------------------------
+        VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
+        {
+            *out = ToHandle(new FenceWGPU{Dev(device), initialValue});
+            return VriResult_Success;
+        }
+        void VRI_CALL DestroyFence(VriFence* fence) { delete Fen(fence); }
+        uint64_t VRI_CALL GetFenceValue(VriFence* fence) { return Fen(fence)->value; }
+        void VRI_CALL Wait(VriFence* fence, uint64_t value)
+        {
+            FenceWGPU* f = Fen(fence);
+            wgpuDevicePoll(f->device->Device(), /*wait*/ true, nullptr); // block until submitted work completes
+            if (value > f->value)
+                f->value = value;
+        }
+
+        // ---- command recording ---------------------------------------------
+        void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc* a)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            std::vector<WGPURenderPassColorAttachment> colors(a->colorNum);
+            for (uint32_t i = 0; i < a->colorNum; ++i)
+            {
+                const VriAttachmentDesc& src = a->colors[i];
+                WGPURenderPassColorAttachment& ca = colors[i];
+                ca = {};
+                ca.view = Desc(src.view)->view;
+                ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+                ca.loadOp = src.loadOp == VriAttachmentLoadOp_Clear ? WGPULoadOp_Clear
+                          : src.loadOp == VriAttachmentLoadOp_DontCare ? WGPULoadOp_Clear
+                          : WGPULoadOp_Load;
+                ca.storeOp = src.storeOp == VriAttachmentStoreOp_DontCare ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
+                ca.clearValue = WGPUColor{src.clearValue.color.f32[0], src.clearValue.color.f32[1],
+                                          src.clearValue.color.f32[2], src.clearValue.color.f32[3]};
+            }
+
+            WGPURenderPassDescriptor rp = {};
+            rp.colorAttachmentCount = static_cast<uint32_t>(colors.size());
+            rp.colorAttachments = colors.data();
+            c->pass = wgpuCommandEncoderBeginRenderPass(c->encoder, &rp);
+        }
+
+        void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            wgpuRenderPassEncoderEnd(c->pass);
+            wgpuRenderPassEncoderRelease(c->pass);
+            c->pass = nullptr;
+        }
+
+        void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)
+        {
+            if (num == 0) return;
+            wgpuRenderPassEncoderSetViewport(CB(cmd)->pass, vps[0].x, vps[0].y, vps[0].width, vps[0].height, vps[0].minDepth, vps[0].maxDepth);
+        }
+
+        void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* rects, uint32_t num)
+        {
+            if (num == 0) return;
+            wgpuRenderPassEncoderSetScissorRect(CB(cmd)->pass, rects[0].x, rects[0].y, rects[0].width, rects[0].height);
+        }
+
+        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->boundLayout = layout; }
+
+        void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            PipelineWGPU* p = Pipe(pipeline);
+            c->boundPipeline = p->render;
+            if (p->render && c->pass)
+                wgpuRenderPassEncoderSetPipeline(c->pass, p->render);
+        }
+
+        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            if (!set || !c->pass) return;
+            const DescriptorSetWGPU* s = reinterpret_cast<const DescriptorSetWGPU*>(set);
+            if (s->bindGroup)
+                wgpuRenderPassEncoderSetBindGroup(c->pass, setIndex, s->bindGroup, 0, nullptr);
+        }
+        void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}        // WebGPU has no push constants (core)
+
+        void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
+        {
+            for (uint32_t i = 0; i < num; ++i)
+                wgpuRenderPassEncoderSetVertexBuffer(CB(cmd)->pass, baseSlot + i, Buf(bindings[i].buffer)->buffer, bindings[i].offset, WGPU_WHOLE_SIZE);
+        }
+
+        void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriIndexType type)
+        {
+            wgpuRenderPassEncoderSetIndexBuffer(CB(cmd)->pass, Buf(buffer)->buffer,
+                                                type == VriIndexType_UInt16 ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32,
+                                                offset, WGPU_WHOLE_SIZE);
+        }
+
+        void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
+        {
+            wgpuRenderPassEncoderDraw(CB(cmd)->pass, d->vertexNum, d->instanceNum, d->baseVertex, d->baseInstance);
+        }
+        void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
+        {
+            wgpuRenderPassEncoderDrawIndexed(CB(cmd)->pass, d->indexNum, d->instanceNum, d->baseIndex, d->vertexOffset, d->baseInstance);
+        }
+        void VRI_CALL CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t /*stride*/)
+        {
+            for (uint32_t i = 0; i < drawNum; ++i)
+                wgpuRenderPassEncoderDrawIndirect(CB(cmd)->pass, Buf(buffer)->buffer, offset);
+        }
+        void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}         // compute pass: later
+        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
+
+        void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // WebGPU auto-synchronizes
+
+        void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
+        {
+            wgpuCommandEncoderCopyBufferToBuffer(CB(cmd)->encoder, Buf(src)->buffer, r->srcOffset, Buf(dst)->buffer, r->dstOffset, r->size);
+        }
+
+        void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriTexture* src, const VriBufferTextureCopyDesc* region)
+        {
+            const TextureWGPU* t = reinterpret_cast<const TextureWGPU*>(src);
+            const uint32_t w = region->texture.width ? region->texture.width : t->width;
+            const uint32_t h = region->texture.height ? region->texture.height : t->height;
+
+            WGPUTexelCopyTextureInfo srcInfo = {};
+            srcInfo.texture = t->texture;
+            srcInfo.mipLevel = region->texture.mip;
+            srcInfo.origin = {static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), static_cast<uint32_t>(region->texture.z)};
+            srcInfo.aspect = WGPUTextureAspect_All;
+
+            WGPUTexelCopyBufferInfo dstInfo = {};
+            dstInfo.buffer = Buf(dst)->buffer;
+            dstInfo.layout.offset = region->bufferOffset;
+            dstInfo.layout.bytesPerRow = region->bufferRowLength ? region->bufferRowLength * t->texelSize : w * t->texelSize;
+            dstInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
+
+            WGPUExtent3D ext = {w, h, region->texture.depth ? region->texture.depth : 1u};
+            wgpuCommandEncoderCopyTextureToBuffer(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
+        }
+
+        void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer* cmd, VriTexture* dst, VriBuffer* src, const VriBufferTextureCopyDesc* region)
+        {
+            const TextureWGPU* t = reinterpret_cast<const TextureWGPU*>(dst);
+            const uint32_t w = region->texture.width ? region->texture.width : t->width;
+            const uint32_t h = region->texture.height ? region->texture.height : t->height;
+
+            WGPUTexelCopyBufferInfo srcInfo = {};
+            srcInfo.buffer = Buf(src)->buffer;
+            srcInfo.layout.offset = region->bufferOffset;
+            srcInfo.layout.bytesPerRow = region->bufferRowLength ? region->bufferRowLength * t->texelSize : w * t->texelSize;
+            srcInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
+
+            WGPUTexelCopyTextureInfo dstInfo = {};
+            dstInfo.texture = t->texture;
+            dstInfo.mipLevel = region->texture.mip;
+            dstInfo.origin = {static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), static_cast<uint32_t>(region->texture.z)};
+            dstInfo.aspect = WGPUTextureAspect_All;
+
+            WGPUExtent3D ext = {w, h, region->texture.depth ? region->texture.depth : 1u};
+            wgpuCommandEncoderCopyBufferToTexture(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
+        }
+
+        void VRI_CALL CmdCopyTexture(VriCommandBuffer* cmd, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
+        {
+            const TextureWGPU* s = reinterpret_cast<const TextureWGPU*>(src);
+            const TextureWGPU* d = reinterpret_cast<const TextureWGPU*>(dst);
+            WGPUTexelCopyTextureInfo si = {}; si.texture = s->texture; si.aspect = WGPUTextureAspect_All;
+            WGPUTexelCopyTextureInfo di = {}; di.texture = d->texture; di.aspect = WGPUTextureAspect_All;
+            if (region) { si.mipLevel = region->src.mip; di.mipLevel = region->dst.mip; }
+            WGPUExtent3D ext = {s->width, s->height, s->depth};
+            wgpuCommandEncoderCopyTextureToTexture(CB(cmd)->encoder, &si, &di, &ext);
+        }
+
+        void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
+        void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
+
+        // ---- submission ----------------------------------------------------
+        void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
+        {
+            QueueWGPU* q = Q(queue);
+            std::vector<WGPUCommandBuffer> cbs;
+            cbs.reserve(submit->commandBufferNum);
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+            {
+                CommandBufferWGPU* c = CB(submit->commandBuffers[i]);
+                if (c->finished)
+                    cbs.push_back(c->finished);
+            }
+            wgpuQueueSubmit(q->queue, cbs.size(), cbs.data());
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+            {
+                CommandBufferWGPU* c = CB(submit->commandBuffers[i]);
+                if (c->finished) { wgpuCommandBufferRelease(c->finished); c->finished = nullptr; }
+            }
+            // record intended signal values (completion guaranteed by Wait's poll)
+            for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+                Fen(submit->signalFences[i].fence)->value = submit->signalFences[i].value;
+        }
+
+        void VRI_CALL QueueWaitIdle(VriQueue* queue) { wgpuDevicePoll(Q(queue)->device->Device(), true, nullptr); }
+        void VRI_CALL DeviceWaitIdle(VriDevice* device) { wgpuDevicePoll(Dev(device)->Device(), true, nullptr); }
+        void VRI_CALL SetDebugName(void*, const char*) {}
+
+        VriCoreInterface MakeTable()
+        {
+            VriCoreInterface t = {};
+            t.GetDeviceDesc = GetDeviceDesc;
+            t.GetFormatSupport = GetFormatSupport;
+            t.GetQueue = GetQueue;
+            t.CreateCommandAllocator = CreateCommandAllocator;
+            t.ResetCommandAllocator = ResetCommandAllocator;
+            t.DestroyCommandAllocator = DestroyCommandAllocator;
+            t.CreateCommandBuffer = CreateCommandBuffer;
+            t.BeginCommandBuffer = BeginCommandBuffer;
+            t.EndCommandBuffer = EndCommandBuffer;
+            t.CreateBuffer = CreateBuffer;
+            t.DestroyBuffer = DestroyBuffer;
+            t.MapBuffer = MapBuffer;
+            t.UnmapBuffer = UnmapBuffer;
+            t.GetBufferDeviceAddress = GetBufferDeviceAddress;
+            t.CreateTexture = CreateTexture;
+            t.DestroyTexture = DestroyTexture;
+            t.GetBufferMemoryDesc = GetBufferMemoryDesc;
+            t.GetTextureMemoryDesc = GetTextureMemoryDesc;
+            t.AllocateMemory = AllocateMemory;
+            t.FreeMemory = FreeMemory;
+            t.BindBufferMemory = BindBufferMemory;
+            t.BindTextureMemory = BindTextureMemory;
+            t.CreateBufferView = CreateBufferView;
+            t.CreateTextureView = CreateTextureView;
+            t.CreateSampler = CreateSampler;
+            t.DestroyDescriptor = DestroyDescriptor;
+            t.CreatePipelineLayout = CreatePipelineLayout;
+            t.DestroyPipelineLayout = DestroyPipelineLayout;
+            t.CreateGraphicsPipeline = CreateGraphicsPipeline;
+            t.CreateComputePipeline = CreateComputePipeline;
+            t.DestroyPipeline = DestroyPipeline;
+            t.CreateDescriptorPool = CreateDescriptorPool;
+            t.ResetDescriptorPool = ResetDescriptorPool;
+            t.DestroyDescriptorPool = DestroyDescriptorPool;
+            t.AllocateDescriptorSets = AllocateDescriptorSets;
+            t.UpdateDescriptorRanges = UpdateDescriptorRanges;
+            t.CreateFence = CreateFence;
+            t.DestroyFence = DestroyFence;
+            t.GetFenceValue = GetFenceValue;
+            t.Wait = Wait;
+            t.CmdBeginRendering = CmdBeginRendering;
+            t.CmdEndRendering = CmdEndRendering;
+            t.CmdSetViewports = CmdSetViewports;
+            t.CmdSetScissors = CmdSetScissors;
+            t.CmdSetPipelineLayout = CmdSetPipelineLayout;
+            t.CmdSetPipeline = CmdSetPipeline;
+            t.CmdSetDescriptorSet = CmdSetDescriptorSet;
+            t.CmdSetConstants = CmdSetConstants;
+            t.CmdSetVertexBuffers = CmdSetVertexBuffers;
+            t.CmdSetIndexBuffer = CmdSetIndexBuffer;
+            t.CmdDraw = CmdDraw;
+            t.CmdDrawIndexed = CmdDrawIndexed;
+            t.CmdDrawIndirect = CmdDrawIndirect;
+            t.CmdDispatch = CmdDispatch;
+            t.CmdDispatchIndirect = CmdDispatchIndirect;
+            t.CmdBarrier = CmdBarrier;
+            t.CmdCopyBuffer = CmdCopyBuffer;
+            t.CmdCopyTexture = CmdCopyTexture;
+            t.CmdUploadBufferToTexture = CmdUploadBufferToTexture;
+            t.CmdReadbackTextureToBuffer = CmdReadbackTextureToBuffer;
+            t.CmdBeginDebugGroup = CmdBeginDebugGroup;
+            t.CmdEndDebugGroup = CmdEndDebugGroup;
+            t.QueueSubmit = QueueSubmit;
+            t.QueueWaitIdle = QueueWaitIdle;
+            t.DeviceWaitIdle = DeviceWaitIdle;
+            t.SetDebugName = SetDebugName;
+            return t;
+        }
+
+        const VriCoreInterface g_coreWGPU = MakeTable();
+    } // namespace
+
+    const VriCoreInterface* GetCoreInterfaceWGPU() { return &g_coreWGPU; }
+} // namespace vri::wgpu

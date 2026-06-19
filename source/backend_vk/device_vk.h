@@ -1,0 +1,65 @@
+// device_vk.h - the Vulkan VriDevice implementation + factory.
+#pragma once
+
+#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
+
+#include <vri/vri.h>
+
+#include "core/device_base.h"
+#include "objects_vk.h"
+
+namespace vri::vk
+{
+    class DeviceVK final : public core::DeviceBase
+    {
+    public:
+        DeviceVK() = default;
+        ~DeviceVK() override;
+
+        // Two-phase init so failures return cleanly through the factory.
+        VriResult Init(const VriDeviceCreationDesc& desc);
+
+        // accessors used by the core interface implementation
+        VkInstance       Instance() const { return m_instance; }
+        VkPhysicalDevice PhysicalDevice() const { return m_physicalDevice; }
+        VkDevice         Device() const { return m_device; }
+        VmaAllocator     Allocator() const { return m_allocator; }
+        const VriDeviceDesc& Desc() const { return m_desc; }
+
+        QueueVK* GetQueue(VriQueueType type) { return &m_queues[type]; }
+        const VkAllocationCallbacks* VkAllocCallbacks() const { return nullptr; }
+
+        void ReportError(const char* message) const;
+
+    private:
+        VriResult CreateInstance(const VriDeviceCreationDesc& desc);
+        VriResult PickPhysicalDevice(uint32_t adapterIndex);
+        VriResult CreateLogicalDevice(const VriDeviceCreationDesc& desc);
+        VriResult CreateAllocator();
+        void      FillDeviceDesc();
+        void      FillRegistry();
+
+        VkInstance               m_instance = VK_NULL_HANDLE;
+        VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
+        VkPhysicalDevice         m_physicalDevice = VK_NULL_HANDLE;
+        VkDevice                 m_device = VK_NULL_HANDLE;
+        VmaAllocator             m_allocator = VK_NULL_HANDLE;
+
+        QueueVK  m_queues[VriQueueType_Count] = {};
+        uint32_t m_queueFamilies[VriQueueType_Count] = {};
+        bool     m_validation = false;
+        uint64_t m_enabledFeatures = 0; // granted VriFeatureBits
+
+        VriDeviceDesc        m_desc = {};
+        VriCallbackInterface m_callback = {};
+    };
+
+    // Factory invoked from the C entry point (vri_entry.cpp). Reports the
+    // precise failure code (e.g. Unsupported) via outResult.
+    core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);
+
+    // Enumerate Vulkan adapters (spins up a transient instance). Fills up to
+    // `capacity` entries, returns the total adapter count.
+    uint32_t EnumerateAdapters(VriAdapterDesc* outAdapters, uint32_t capacity);
+} // namespace vri::vk

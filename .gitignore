@@ -23,5 +23,6 @@ CMakeLists.txt
 vs20*/
 vsxmake*/
 
-# clangd
-*.clangd
+# clangd: the root .clangd is generated (clangd.config rule copies it from
+# .clangd.win/.clangd.nowin). The per-directory include/vri/.clangd is tracked.
+/.clangd
