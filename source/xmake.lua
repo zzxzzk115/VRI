@@ -22,7 +22,7 @@ target("vri")
     if has_config("vri_backend_vulkan") then
         add_defines("VRI_BACKEND_VULKAN")
         add_rules("vulkansdk")
-        add_packages("vulkan-headers", "vulkan-memory-allocator-hpp", {public = false})
+        add_packages("vulkan-headers", "vulkan-memory-allocator", {public = false})
         add_files("backend_vk/**.cpp")
         add_includedirs("backend_vk", {public = false})
     end

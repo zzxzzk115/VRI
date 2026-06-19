@@ -75,11 +75,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-
+      # xmake must be set up BEFORE emsdk: with EMSDK active the setup action
+      # cross-builds xmake itself to wasm and fails. Install it first (host build).
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
 
       - name: Setup Chrome
         id: setup-chrome

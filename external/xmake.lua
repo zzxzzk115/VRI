@@ -10,7 +10,10 @@ end
 -- Vulkan backend (MVP / reference backend)
 if has_config("vri_backend_vulkan") then
     add_requires("vulkan-headers 1.4.335")
-    add_requires("vulkan-memory-allocator-hpp")
+    -- The backend uses the C VMA (vk_mem_alloc.h), not the C++ wrapper. The -hpp
+    -- package (v3.2.1) fails to compile against vulkan-headers 1.4.335
+    -- (vk::ValidationFailedEXTError was removed in newer vulkan-hpp).
+    add_requires("vulkan-memory-allocator")
 end
 
 -- WebGPU backend (prebuilt wgpu-native C API)
