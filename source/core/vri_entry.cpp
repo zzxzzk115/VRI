@@ -14,6 +14,9 @@
 #if defined(VRI_BACKEND_WGPU)
 #    include "device_wgpu.h"
 #endif
+#if defined(VRI_BACKEND_GL)
+#    include "device_gl.h"
+#endif
 
 using vri::core::DeviceBase;
 
@@ -56,6 +59,9 @@ VriResult VRI_CALL vriCreateDevice(const VriDeviceCreationDesc* desc, VriDevice*
 #endif
 #if defined(VRI_BACKEND_WGPU)
         case VriGraphicsAPI_WebGPU: device = vri::wgpu::CreateDevice(*desc, result); break;
+#endif
+#if defined(VRI_BACKEND_GL)
+        case VriGraphicsAPI_OpenGL: device = vri::gl::CreateDevice(*desc, result); break;
 #endif
         default:
             return VriResult_Unsupported;

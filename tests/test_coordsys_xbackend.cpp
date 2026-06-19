@@ -137,4 +137,6 @@ TEST_CASE("coordinate-system parity: both backends render Y-up (no vertical flip
 {
     CheckYUp(VriGraphicsAPI_Vulkan, g_triangleSpv, sizeof(g_triangleSpv), "Vulkan");
     CheckYUp(VriGraphicsAPI_WebGPU, g_triangleWgsl, sizeof(g_triangleWgsl), "WebGPU");
+    // OpenGL consumes the SPIR-V (transpiled to GLSL by SPIRV-Cross).
+    CheckYUp(VriGraphicsAPI_OpenGL, g_triangleSpv, sizeof(g_triangleSpv), "OpenGL");
 }

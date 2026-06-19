@@ -35,6 +35,10 @@ target("vri")
     end
     if has_config("vri_backend_gl") then
         add_defines("VRI_BACKEND_GL")
+        -- public: glad/glfw must link into the final exe (+ their runtime needs)
+        add_packages("glad", "glfw", "spirv-cross", {public = true})
+        add_files("backend_gl/**.cpp")
+        add_includedirs("backend_gl", {public = false})
     end
     if has_config("vri_backend_d3d11") and is_plat("windows") then
         add_defines("VRI_BACKEND_D3D11")

@@ -18,6 +18,13 @@ if has_config("vri_backend_wgpu") then
     add_requires("webgpu-sdk v0.1.2")
 end
 
+-- OpenGL / OpenGL ES backend: glad loader + glfw (context) + spirv-cross (SPIR-V -> GLSL)
+if has_config("vri_backend_gl") then
+    add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
+    add_requires("glfw")
+    add_requires("spirv-cross")
+end
+
 -- Examples windowing (matches libvultra)
 if has_config("vri_build_examples") then
     add_requires("libsdl3")
