@@ -35,6 +35,14 @@ namespace vri::gl
         uint64_t offset;
     };
 
+    struct TextureGL;
+    struct PendingResolveGL // MSAA color attachment -> single-sample resolve target (blit at EndRendering)
+    {
+        GLenum           srcAttachment;
+        const TextureGL* dst;
+        GLuint           dstMip;
+    };
+
     struct CommandBufferGL
     {
         DeviceGL*               device;
@@ -47,6 +55,7 @@ namespace vri::gl
         uint64_t                indexOffset = 0;
         GLenum                  indexType = 0x1405; // GL_UNSIGNED_INT
         uint32_t                enabledAttribMask = 0; // attrib locations enabled by the last draw
+        std::vector<PendingResolveGL> pendingResolves; // MSAA resolves to run at EndRendering
     };
 
     struct BufferGL

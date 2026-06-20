@@ -375,14 +375,29 @@ namespace vri::gl
             const GLsizei mips = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
             const GLsizei w = static_cast<GLsizei>(desc->width);
             const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
-            glBindTexture(GL_TEXTURE_2D, id);
-            glTexStorage2D(GL_TEXTURE_2D, mips, gf.internalFormat, w, h);
-            glBindTexture(GL_TEXTURE_2D, 0);
+            const bool ms = desc->sampleNum > 1;
+            GLenum target = GL_TEXTURE_2D;
+#if !defined(__EMSCRIPTEN__)
+            if (ms) // multisample textures are desktop-GL only (WebGL2 has none - use renderbuffers, later)
+            {
+                target = GL_TEXTURE_2D_MULTISAMPLE;
+                glBindTexture(target, id);
+                glTexStorage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
+                glBindTexture(target, 0);
+            }
+            else
+#endif
+            {
+                if (ms) { glDeleteTextures(1, &id); return VriResult_Unsupported; } // WebGL2: no multisample textures
+                glBindTexture(GL_TEXTURE_2D, id);
+                glTexStorage2D(GL_TEXTURE_2D, mips, gf.internalFormat, w, h);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
 
             TextureGL* t = new TextureGL{};
             t->device = Dev(device);
             t->id = id;
-            t->target = GL_TEXTURE_2D;
+            t->target = target;
             t->glFormat = gf.format;
             t->glType = gf.type;
             t->width = desc->width;
@@ -758,12 +773,18 @@ namespace vri::gl
             GLuint fbo = 0;
             glGenFramebuffers(1, &fbo);
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            c->pendingResolves.clear();
             std::vector<GLenum> drawBufs(a->colorNum);
             for (uint32_t i = 0; i < a->colorNum; ++i)
             {
                 const DescriptorGL* v = Desc(a->colors[i].view);
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
                 drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
+                if (a->colors[i].resolveView) // resolve this MSAA attachment at EndRendering
+                {
+                    const DescriptorGL* rv = Desc(a->colors[i].resolveView);
+                    c->pendingResolves.push_back({GL_COLOR_ATTACHMENT0 + i, rv->texture, static_cast<GLuint>(rv->mip)});
+                }
             }
             glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
 
@@ -800,6 +821,29 @@ namespace vri::gl
         void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
         {
             CommandBufferGL* c = CB(cmd);
+            // Resolve MSAA color attachments into their single-sample targets via blit
+            // (the multisample read FBO -> single-sample draw FBO performs the resolve).
+            if (!c->pendingResolves.empty())
+            {
+                GLuint resolveFbo = 0;
+                glGenFramebuffers(1, &resolveFbo);
+                for (const PendingResolveGL& r : c->pendingResolves)
+                {
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, c->fbo);
+                    glReadBuffer(r.srcAttachment);
+                    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFbo);
+                    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, r.dst->target, r.dst->id, static_cast<GLint>(r.dstMip));
+                    const GLenum drawBuf = GL_COLOR_ATTACHMENT0;
+                    glDrawBuffers(1, &drawBuf);
+                    glBlitFramebuffer(0, 0, static_cast<GLint>(r.dst->width), static_cast<GLint>(r.dst->height),
+                                      0, 0, static_cast<GLint>(r.dst->width), static_cast<GLint>(r.dst->height),
+                                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                }
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+                glDeleteFramebuffers(1, &resolveFbo);
+                c->pendingResolves.clear();
+            }
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             if (c->fbo) { glDeleteFramebuffers(1, &c->fbo); c->fbo = 0; }
         }

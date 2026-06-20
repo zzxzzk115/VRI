@@ -2,8 +2,9 @@
 // multisample color target and resolved into a single-sample texture, which is read
 // back. Proof of multisampling: edge pixels get *partial* coverage, so the resolved
 // image contains red values strictly between 0 and 255 - which a single-sample render
-// (hard edges: every pixel 0 or 255) can never produce. Runs on Vulkan + WebGPU;
-// the GL MSAA path (multisample texture + blit resolve) lands separately.
+// (hard edges: every pixel 0 or 255) can never produce. Runs on Vulkan + WebGPU +
+// desktop OpenGL (multisample texture + blit resolve); WebGL2 has no multisample
+// textures (would need renderbuffers) so CreateTexture returns Unsupported there.
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -136,4 +137,7 @@ TEST_CASE("MSAA parity: 4x multisample + resolve produces antialiased edges")
 
     const bool wgpu = RunMsaa(VriGraphicsAPI_WebGPU, g_triangleWgsl, sizeof(g_triangleWgsl), ran);
     if (ran) { CHECK(wgpu); } else { MESSAGE("WebGPU unavailable - skipped"); }
+
+    const bool gl = RunMsaa(VriGraphicsAPI_OpenGL, g_triangleSpv, sizeof(g_triangleSpv), ran);
+    if (ran) { CHECK(gl); } else { MESSAGE("OpenGL unavailable - skipped"); }
 }
