@@ -1,4 +1,4 @@
-// swapchain_wgpu.cpp - WebGPU presentation. Surface is created from a native
+﻿// swapchain_wgpu.cpp - WebGPU presentation. Surface is created from a native
 // VriWindowHandle (Win32 for now). WebGPU returns the current frame texture on
 // acquire (no fixed image array), so the VRI swapchain exposes one stable
 // texture handle refreshed each AcquireNextTexture.
@@ -9,8 +9,7 @@
 #    include <windows.h>
 #endif
 
-#include <webgpu/webgpu.h>
-#include <webgpu/wgpu.h> // wgpu-native extensions (wgpuDevicePoll)
+#include "wgpu_native.h" // webgpu.h + native-only poll helpers
 
 #include "swapchain_wgpu.h"
 #include "conversions_wgpu.h"
@@ -102,7 +101,7 @@ namespace vri::wgpu
         {
             if (!swapChain) return;
             SwapChainWGPU* sc = SC(swapChain);
-            wgpuDevicePoll(sc->device->Device(), true, nullptr);
+            PollDevice(sc->device->Device());
             if (sc->acquired) wgpuTextureRelease(sc->acquired);
             if (sc->surface) { wgpuSurfaceUnconfigure(sc->surface); wgpuSurfaceRelease(sc->surface); }
             delete sc;
@@ -147,7 +146,7 @@ namespace vri::wgpu
         VriResult VRI_CALL Resize(VriSwapChain* swapChain, uint32_t width, uint32_t height)
         {
             SwapChainWGPU* sc = SC(swapChain);
-            wgpuDevicePoll(sc->device->Device(), true, nullptr);
+            PollDevice(sc->device->Device());
             sc->width = width;
             sc->height = height;
             sc->current.width = width;

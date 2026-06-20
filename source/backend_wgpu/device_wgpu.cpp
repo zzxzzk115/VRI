@@ -1,8 +1,7 @@
 #include "device_wgpu.h"
 #include "core_wgpu.h"
 #include "swapchain_wgpu.h"
-
-#include <webgpu/wgpu.h> // wgpu-native extensions (wgpuDevicePoll)
+#include "wgpu_native.h" // webgpu.h + native poll helpers (browser yields via ASYNCIFY)
 
 #include <cstdio>
 #include <cstring>
@@ -61,7 +60,7 @@ namespace vri::wgpu
     {
         if (m_device)
         {
-            wgpuDevicePoll(m_device, /*wait*/ true, nullptr);
+            PollDevice(m_device);
             wgpuDeviceRelease(m_device);
         }
         if (m_adapter)
@@ -96,12 +95,12 @@ namespace vri::wgpu
         WGPURequestAdapterOptions aopts = {};
         aopts.powerPreference = WGPUPowerPreference_HighPerformance;
         WGPURequestAdapterCallbackInfo acb = {};
-        acb.mode = WGPUCallbackMode_AllowProcessEvents;
+        acb.mode = kCallbackMode;
         acb.callback = OnAdapter;
         acb.userdata1 = &areq;
         wgpuInstanceRequestAdapter(m_instance, &aopts, acb);
         for (int i = 0; i < 100000 && !areq.done; ++i)
-            wgpuInstanceProcessEvents(m_instance);
+            PumpInstance(m_instance);
         if (!areq.adapter)
         {
             ReportError("no WebGPU adapter");
@@ -113,12 +112,12 @@ namespace vri::wgpu
         DeviceRequest dreq;
         WGPUDeviceDescriptor deviceDesc = {};
         WGPURequestDeviceCallbackInfo dcb = {};
-        dcb.mode = WGPUCallbackMode_AllowProcessEvents;
+        dcb.mode = kCallbackMode;
         dcb.callback = OnDevice;
         dcb.userdata1 = &dreq;
         wgpuAdapterRequestDevice(m_adapter, &deviceDesc, dcb);
         for (int i = 0; i < 100000 && !dreq.done; ++i)
-            wgpuInstanceProcessEvents(m_instance);
+            PumpInstance(m_instance);
         if (!dreq.device)
         {
             ReportError("wgpuAdapterRequestDevice failed");

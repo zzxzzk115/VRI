@@ -11,8 +11,7 @@
 #include "device_wgpu.h"
 #include "objects_wgpu.h"
 
-#include <webgpu/webgpu.h>
-#include <webgpu/wgpu.h>
+#include "wgpu_native.h" // webgpu.h + native-only poll helpers / callback mode
 
 #include <cstring>
 #include <vector>
@@ -182,12 +181,12 @@ namespace vri::wgpu
             const WGPUMapMode mode = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
             MapState st = {};
             WGPUBufferMapCallbackInfo cb = {};
-            cb.mode = WGPUCallbackMode_AllowProcessEvents;
+            cb.mode = kCallbackMode;
             cb.callback = OnMap;
             cb.userdata1 = &st;
             wgpuBufferMapAsync(b->buffer, mode, offset, size ? size : WGPU_WHOLE_MAP_SIZE, cb);
             for (int i = 0; i < 100000 && !st.done; ++i)
-                wgpuDevicePoll(b->device->Device(), /*wait*/ true, nullptr);
+                PollDevice(b->device->Device());
             if (st.status != WGPUMapAsyncStatus_Success)
                 return nullptr;
             return wgpuBufferGetMappedRange(b->buffer, offset, size ? size : WGPU_WHOLE_MAP_SIZE);
@@ -640,7 +639,9 @@ namespace vri::wgpu
         void VRI_CALL Wait(VriFence* fence, uint64_t value)
         {
             FenceWGPU* f = Fen(fence);
-            wgpuDevicePoll(f->device->Device(), /*wait*/ true, nullptr); // block until submitted work completes
+            // Native blocks here; on the browser the real readback sync happens at
+            // buffer mapAsync, so this is a light yield.
+            PollDevice(f->device->Device());
             if (value > f->value)
                 f->value = value;
         }
@@ -840,8 +841,8 @@ namespace vri::wgpu
                 Fen(submit->signalFences[i].fence)->value = submit->signalFences[i].value;
         }
 
-        void VRI_CALL QueueWaitIdle(VriQueue* queue) { wgpuDevicePoll(Q(queue)->device->Device(), true, nullptr); }
-        void VRI_CALL DeviceWaitIdle(VriDevice* device) { wgpuDevicePoll(Dev(device)->Device(), true, nullptr); }
+        void VRI_CALL QueueWaitIdle(VriQueue* queue) { PollDevice(Q(queue)->device->Device()); }
+        void VRI_CALL DeviceWaitIdle(VriDevice* device) { PollDevice(Dev(device)->Device()); }
         void VRI_CALL SetDebugName(void*, const char*) {}
 
         VriCoreInterface MakeTable()
