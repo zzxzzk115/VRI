@@ -12,8 +12,9 @@ target("vri-shaderc")
     add_files("main.cpp")
 
     -- The shaders task runs this exe directly (not via `xmake run`), so the Slang
-    -- runtime must sit next to it. Copy the package's runtime (DLLs/.so + the
-    -- standard module dir) into the target dir after build.
+    -- runtime must sit next to it. Copy the package runtime into the target dir:
+    -- bin/ (Windows DLLs + slangc + the standard-module dir) AND the shared libs in
+    -- lib/ (libslang.so on Linux, libslang.dylib on macOS live there, not in bin/).
     after_build(function (target)
         local pkg = target:pkg("slang-prebuilt")
         if not pkg then
@@ -23,14 +24,13 @@ target("vri-shaderc")
         if not installdir then
             return
         end
-        local bindir = path.join(installdir, "bin")
-        if os.isdir(bindir) then
-            for _, f in ipairs(os.files(path.join(bindir, "*"))) do
-                os.trycp(f, target:targetdir())
-            end
-            for _, d in ipairs(os.dirs(path.join(bindir, "*"))) do
-                os.trycp(d, target:targetdir())
-            end
+        local copyAll = function (dir)
+            if not os.isdir(dir) then return end
+            for _, f in ipairs(os.files(path.join(dir, "*"))) do os.trycp(f, target:targetdir()) end
+            for _, d in ipairs(os.dirs(path.join(dir, "*"))) do os.trycp(d, target:targetdir()) end
         end
+        copyAll(path.join(installdir, "bin"))
+        for _, so in ipairs(os.files(path.join(installdir, "lib", "*.so*"))) do os.trycp(so, target:targetdir()) end
+        for _, dylib in ipairs(os.files(path.join(installdir, "lib", "*.dylib"))) do os.trycp(dylib, target:targetdir()) end
     end)
 target_end()
