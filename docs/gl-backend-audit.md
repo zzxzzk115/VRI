@@ -109,7 +109,12 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
      `SV_InstanceID` are *local* (D3D semantics, base excluded), so base offsets are
      observable through attribute fetching — covered by `test_baseoffset_xbackend`
      (a vertexOffset draw selecting a green vertex set over a red decoy).
-   - MDI + persistent-mapped buffers (later).
+   - ✅ **indirect draw/dispatch + MDI** — `CmdDrawIndirect` (was a **silent no-op**) now
+     issues `glDrawArraysIndirect` (GL 4.0; loops for >1 draw, or `glMultiDrawArraysIndirect`
+     when `GlFeatures::drawIndirect`/4.3 is present) and `CmdDispatchIndirect` issues
+     `glDispatchComputeIndirect` (4.3). The indirect command layout matches VK/WebGPU.
+     Unavailable on WebGL2 → reported, not silent. Covered by `test_indirect_xbackend`.
+   - persistent-mapped buffers (later).
 5. ✅ **DSA on 4.5** — desktop GL 4.5+ now creates/updates resources by name, no
    bind-to-edit: `glCreateBuffers`/`glNamedBuffer*` (create/map/unmap/copy),
    `glCreateTextures`/`glTextureStorage2D`/`glTextureSubImage2D` (incl. multisample),

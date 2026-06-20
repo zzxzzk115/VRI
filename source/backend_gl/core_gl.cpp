@@ -1259,7 +1259,27 @@ namespace vri::gl
             else
                 glDrawElementsInstanced(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip, static_cast<GLsizei>(d->instanceNum));
         }
-        void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        void VRI_CALL CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(__EMSCRIPTEN__)
+            // GL indirect commands match VK/GL layout {count, instanceCount, first,
+            // baseInstance}. glDrawArraysIndirect is GL 4.0 (all desktop); >1 draw uses
+            // multi-draw-indirect (4.3) where available, else loops single draws.
+            SetupVertexAttribs(c);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
+            if (drawNum > 1 && c->device->Features().drawIndirect)
+                glMultiDrawArraysIndirect(c->topology, reinterpret_cast<const void*>(static_cast<uintptr_t>(offset)),
+                                          static_cast<GLsizei>(drawNum), static_cast<GLsizei>(stride));
+            else
+                for (uint32_t i = 0; i < (drawNum ? drawNum : 1u); ++i)
+                    glDrawArraysIndirect(c->topology, reinterpret_cast<const void*>(static_cast<uintptr_t>(offset + static_cast<uint64_t>(i) * stride)));
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+#else
+            (void)buffer; (void)offset; (void)drawNum; (void)stride;
+            c->device->ReportError("CmdDrawIndirect: indirect draw is unavailable on WebGL2"); // explicit, never silent
+#endif
+        }
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc* d)
         {
 #if defined(__EMSCRIPTEN__)
@@ -1271,7 +1291,21 @@ namespace vri::gl
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
 #endif
         }
-        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
+        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(__EMSCRIPTEN__)
+            // glDispatchComputeIndirect is GL 4.3 (compute already requires 4.3, so no
+            // extra gate). Command layout {x, y, z} matches VK/WebGPU.
+            glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, Buf(buffer)->id);
+            glDispatchComputeIndirect(static_cast<GLintptr>(offset));
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+            glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0);
+#else
+            (void)buffer; (void)offset;
+            c->device->ReportError("CmdDispatchIndirect: indirect dispatch is unavailable on WebGL2"); // explicit, never silent
+#endif
+        }
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // GL is ordered on one context
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
