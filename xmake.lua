@@ -216,8 +216,8 @@ if has_config("vri_build_examples") then
     includes("examples")
 end
 
--- WebGL (Emscripten) end-to-end target: a headless triangle that renders via the
--- GL backend (WebGL2) and reports a pass/fail pixel check. Browser-run via emrun.
-if is_plat("wasm") and has_config("vri_backend_gl") then
+-- Emscripten end-to-end targets: headless triangles that render via the GL (WebGL2)
+-- and/or WebGPU backends and report a pass/fail pixel check. Browser-run via emrun.
+if is_plat("wasm") then
     includes("wasm")
 end

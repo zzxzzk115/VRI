@@ -189,7 +189,12 @@ namespace vri::wgpu
                 PollDevice(b->device->Device());
             if (st.status != WGPUMapAsyncStatus_Success)
                 return nullptr;
-            return wgpuBufferGetMappedRange(b->buffer, offset, size ? size : WGPU_WHOLE_MAP_SIZE);
+            const uint64_t range = size ? size : WGPU_WHOLE_MAP_SIZE;
+            // Dawn (emdawnwebgpu) requires the const accessor for read-mapped buffers;
+            // GetMappedRange asserts there. wgpu-native accepts either.
+            if (mode == WGPUMapMode_Read)
+                return const_cast<void*>(wgpuBufferGetConstMappedRange(b->buffer, offset, range));
+            return wgpuBufferGetMappedRange(b->buffer, offset, range);
         }
 
         void VRI_CALL UnmapBuffer(VriBuffer* buffer) { wgpuBufferUnmap(Buf(buffer)->buffer); }

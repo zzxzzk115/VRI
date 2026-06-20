@@ -19,22 +19,22 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 | Backend | Platform | Status |
 | --- | --- | --- |
 | Vulkan | desktop (Windows/Linux) | ✅ resources, explicit memory, descriptor sets, graphics + compute pipelines, command recording, swapchain (Win32), interop, feature query+enable |
-| WebGPU (`webgpu-sdk`) | desktop (verified) | ✅ resources, bind groups, graphics pipelines, command recording, swapchain (Win32). Compute pipelines not wired yet |
+| WebGPU (`webgpu-sdk`) | desktop **+ Web** (Emscripten) | ✅ resources, bind groups, graphics pipelines, command recording, swapchain (Win32). Same backend runs native (wgpu-native) and **in-browser** (emdawnwebgpu); compute pipelines not wired yet |
 | OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL 430 via SPIRV-Cross), headless rendering |
 | WebGL 2 (OpenGL ES 3.0) | Web (Emscripten) | ✅ the same GL backend on the GLES3/WebGL2 subset; runs in-browser. No compute (ES 3.0) — reported via `hasComputeShader` |
 | OpenGL ES (native) / D3D11 / D3D12 / Metal | — | ⏳ planned |
 
-> The Web target is currently **OpenGL → WebGL2 via Emscripten**. `webgpu-sdk` also supports **WebGPU on Emscripten** (browser WebGPU), so a WebGPU Web backend is feasible — but VRI hasn't wired or tested the WebGPU backend in the `-p wasm` build yet (only the GL backend is enabled there).
+> **The Web has two backends:** OpenGL→**WebGL2** and **WebGPU** (browser WebGPU via `webgpu-sdk`/emdawnwebgpu), both via Emscripten. The single WebGPU backend compiles for native and the browser — `wgpu-native` specifics are isolated behind `wgpu_native.h`, and the browser's async adapter/device/buffer-map promises are awaited by yielding with `emscripten_sleep` (`-sASYNCIFY`). Verified end-to-end in headless Chrome.
 
 ## Tested feature coverage
 
-The same Slang source + the same VRI calls are verified to produce identical results across backends. Desktop tests (`vri-tests`, doctest) run on Vulkan + WebGPU + OpenGL; the WebGL build is verified end-to-end in headless Chrome (WebGL2 via SwiftShader) in CI as an 11-probe program.
+The same Slang source + the same VRI calls are verified to produce identical results across backends. Desktop tests (`vri-tests`, doctest) run on Vulkan + WebGPU + OpenGL; both Web backends are verified end-to-end in headless Chrome — WebGL2 (via SwiftShader) as an 11-probe program, and browser WebGPU as a render-to-texture readback check.
 
 Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures (separate texture + sampler), vertex buffers + indexed draw, depth test, alpha blending, back-face culling/winding, multiple render targets, instancing (`SV_InstanceID`), scissor, and compute (storage-buffer fill) on backends that support it. The validation layer and the explicit "compute unavailable" contract on WebGL are tested too.
 
 ## Platforms
 
-Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2). macOS / Android / iOS are planned per backend.
+Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU). macOS / Android / iOS are planned per backend.
 
 ## Building
 
