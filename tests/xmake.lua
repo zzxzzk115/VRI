@@ -20,6 +20,7 @@ target("vri-tests")
     add_files("test_cull_xbackend.cpp")       -- back-face culling + winding parity
     add_files("test_mrt_xbackend.cpp")        -- multiple render targets parity
     add_files("test_instance_xbackend.cpp")   -- instanced draw + SV_InstanceID parity
+    add_files("test_baseoffset_xbackend.cpp")  -- base-vertex parity (vertexOffset honored, not silently dropped)
     add_files("test_scissor_xbackend.cpp")    -- scissor-rect clipping parity
     add_files("test_stencil_xbackend.cpp")    -- stencil write/test (front/back ops, masks, ref)
     add_files("test_msaa_xbackend.cpp")       -- 4x MSAA + resolve (antialiased edges)

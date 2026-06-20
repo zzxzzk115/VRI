@@ -665,6 +665,10 @@ namespace vri::gl
             p->device = d;
             p->program = program;
             p->combinedSamplers = std::move(combined);
+            // Base-offset fallback uniforms (present only when the driver lacks
+            // ARB_shader_draw_parameters; -1 means the gl_Base*ARB builtin path is used).
+            p->baseVertexLoc = glGetUniformLocation(program, "SPIRV_Cross_BaseVertex");
+            p->baseInstanceLoc = glGetUniformLocation(program, "SPIRV_Cross_BaseInstance");
             // Vertex input: attribute index i == GLSL location i (matches the VK
             // backend). Flatten each attribute with its stream's stride + slot for
             // the classic glVertexAttribPointer path used at draw time.
@@ -1189,12 +1193,32 @@ namespace vri::gl
                 }
             c->enabledAttribMask = mask;
         }
+        // Set the SPIRV-Cross base-offset fallback uniforms on the bound program. No-op
+        // on the ARB_shader_draw_parameters path (locations are -1); the *Base* draw
+        // call populates gl_Base*ARB there instead. Program is already bound (CmdSetPipeline).
+        void ApplyBaseOffsetUniforms(CommandBufferGL* c, int32_t baseVertex, uint32_t baseInstance)
+        {
+            const PipelineGL* p = c->boundPipeline;
+            if (!p) return;
+            if (p->baseVertexLoc >= 0) glUniform1i(p->baseVertexLoc, baseVertex);
+            if (p->baseInstanceLoc >= 0) glUniform1i(p->baseInstanceLoc, static_cast<GLint>(baseInstance));
+        }
         void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
         {
             CommandBufferGL* c = CB(cmd);
             SetupVertexAttribs(c);
-            // baseInstance is GL 4.2+ only (absent on GLES/WebGL); the portable
-            // path uses glDrawArraysInstanced. baseInstance!=0 is unsupported here.
+            // baseVertex maps to `first` (gl_VertexID already includes it, like VK).
+#if !defined(__EMSCRIPTEN__)
+            if (d->baseInstance != 0 && c->device->Features().baseInstance) // GL 4.2: honor firstInstance
+            {
+                ApplyBaseOffsetUniforms(c, static_cast<int32_t>(d->baseVertex), d->baseInstance);
+                glDrawArraysInstancedBaseInstance(c->topology, static_cast<GLint>(d->baseVertex), static_cast<GLsizei>(d->vertexNum),
+                                                  static_cast<GLsizei>(d->instanceNum), d->baseInstance);
+                return;
+            }
+#endif
+            if (d->baseInstance != 0) // requested but unsupported here: explicit, never silent
+                c->device->ReportError("CmdDraw: baseInstance != 0 requires GL 4.2 (ARB_base_instance); unavailable on this context");
             glDrawArraysInstanced(c->topology, static_cast<GLint>(d->baseVertex), static_cast<GLsizei>(d->vertexNum),
                                   static_cast<GLsizei>(d->instanceNum));
         }
@@ -1205,14 +1229,35 @@ namespace vri::gl
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
             const uint32_t indexSize = c->indexType == GL_UNSIGNED_SHORT ? 2u : 4u;
             const uintptr_t offset = static_cast<uintptr_t>(c->indexOffset) + static_cast<uintptr_t>(d->baseIndex) * indexSize;
-            // vertexOffset (base vertex) needs glDrawElements*BaseVertex (GL 3.2 / not
-            // in GLES3.0); the portable path assumes vertexOffset == 0.
+            const void* ip = reinterpret_cast<const void*>(offset);
+            const GLsizei inst = static_cast<GLsizei>(d->instanceNum ? d->instanceNum : 1u);
+#if !defined(__EMSCRIPTEN__)
+            // Base offsets: vertexOffset is GL 3.2 (glDrawElements*BaseVertex, all desktop
+            // incl. macOS 4.1); baseInstance is GL 4.2. gl_VertexID/gl_InstanceID parity is
+            // handled by SPIRV-Cross (gl_Base*ARB or the fallback uniforms set below).
+            if (d->vertexOffset != 0 || d->baseInstance != 0)
+            {
+                const bool canBaseInstance = c->device->Features().baseInstance;
+                if (d->baseInstance != 0 && !canBaseInstance) // explicit, never silent
+                    c->device->ReportError("CmdDrawIndexed: baseInstance != 0 requires GL 4.2 (ARB_base_instance); unavailable on this context");
+                ApplyBaseOffsetUniforms(c, d->vertexOffset, d->baseInstance);
+                if (d->baseInstance != 0 && canBaseInstance)
+                    glDrawElementsInstancedBaseVertexBaseInstance(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip,
+                                                                  inst, d->vertexOffset, d->baseInstance);
+                else if (inst > 1)
+                    glDrawElementsInstancedBaseVertex(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip, inst, d->vertexOffset);
+                else
+                    glDrawElementsBaseVertex(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip, d->vertexOffset);
+                return;
+            }
+#else
+            if (d->vertexOffset != 0 || d->baseInstance != 0) // WebGL2 has neither base offset
+                c->device->ReportError("CmdDrawIndexed: vertexOffset/baseInstance != 0 is unsupported on WebGL2");
+#endif
             if (d->instanceNum <= 1)
-                glDrawElements(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType,
-                               reinterpret_cast<const void*>(offset));
+                glDrawElements(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip);
             else
-                glDrawElementsInstanced(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType,
-                                        reinterpret_cast<const void*>(offset), static_cast<GLsizei>(d->instanceNum));
+                glDrawElementsInstanced(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip, static_cast<GLsizei>(d->instanceNum));
         }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc* d)

@@ -189,6 +189,13 @@ namespace vri::gl
         // the context lacks separate-format support (classic path uses the default VAO).
         GLuint                     formatVao = 0;
         std::vector<VboBindingGL>  vboBindings; // unique stream slots + strides for glBindVertexBuffer
+        // Base-vertex/base-instance parity (VK's VertexIndex/InstanceIndex include the
+        // base offset; GL's gl_VertexID/gl_InstanceID do not). SPIRV-Cross bridges this
+        // with gl_BaseVertexARB/gl_BaseInstanceARB (auto-set by *BaseVertex/*BaseInstance
+        // draws when ARB_shader_draw_parameters is present) OR a uniform fallback. These
+        // hold the fallback uniform locations (-1 when the ARB builtin path is used).
+        GLint     baseVertexLoc = -1;
+        GLint     baseInstanceLoc = -1;
         GLenum    topology;
         uint32_t  patchVertices = 0; // tessellation: glPatchParameteri(GL_PATCH_VERTICES) when topology == GL_PATCHES
         bool      cullEnable;

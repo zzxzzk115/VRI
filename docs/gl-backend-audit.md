@@ -97,13 +97,18 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
      churn on the shared default VAO. Gated on `GlFeatures::separateAttrib`; pre-4.3 /
      GLES / WebGL2 keep the classic per-draw path (the 4.3+ entry points aren't even
      declared in the Emscripten GLES3 headers, so the modern block is `#if`-compiled out).
-   - **base-vertex/base-instance** — `SV_VertexID`/`SV_InstanceID` parity: Vulkan's
-     `VertexIndex`/`InstanceIndex` include the base offset, GL's `gl_VertexID`/
-     `gl_InstanceID` do not. SPIRV-Cross already bridges this via `gl_BaseVertexARB`/
-     `gl_BaseInstanceARB` (auto-populated by the `*BaseVertex`/`*BaseInstance` draws on
-     `GL_ARB_shader_draw_parameters`, core in 4.6) with a `SPIRV_Cross_Base*` uniform
-     fallback — so honoring the base offsets is calling the right draw variant (+ setting
-     the uniform when its location resolves). Next up.
+   - ✅ **base-vertex/base-instance** — `CmdDraw` now honors `baseInstance`
+     (`glDrawArraysInstancedBaseInstance`, GL 4.2) and `CmdDrawIndexed` honors
+     `vertexOffset` (`glDrawElements(Instanced)BaseVertex`, GL 3.2 — all desktop incl.
+     macOS 4.1) + `baseInstance` (`glDrawElementsInstancedBaseVertexBaseInstance`, 4.2),
+     replacing the previous **silent** drop. Parity for the `VertexIndex`/`InstanceIndex`
+     builtins is handled by SPIRV-Cross (`gl_BaseVertexARB`/`gl_BaseInstanceARB` auto-set
+     by the `*Base*` draws, or the `SPIRV_Cross_Base*` uniform fallback). Where a base
+     offset can't be honored (baseInstance pre-4.2; either on WebGL2), it's reported via
+     the message callback — explicit, never silent. Note: Slang's `SV_VertexID`/
+     `SV_InstanceID` are *local* (D3D semantics, base excluded), so base offsets are
+     observable through attribute fetching — covered by `test_baseoffset_xbackend`
+     (a vertexOffset draw selecting a green vertex set over a red decoy).
    - MDI + persistent-mapped buffers (later).
 5. ✅ **DSA on 4.5** — desktop GL 4.5+ now creates/updates resources by name, no
    bind-to-edit: `glCreateBuffers`/`glNamedBuffer*` (create/map/unmap/copy),
