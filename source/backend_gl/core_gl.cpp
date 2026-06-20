@@ -937,7 +937,13 @@ namespace vri::gl
                     {
                         auto it = s->bound.find(cs.texBinding);
                         if (it != s->bound.end() && it->second && it->second->texture)
-                            glBindTexture(it->second->texture->target, it->second->texture->id);
+                        {
+                            const DescriptorGL* tv = it->second;
+                            glBindTexture(tv->texture->target, tv->texture->id);
+                            // Honor the view's base mip so a mip-range view samples that level.
+                            if (tv->texture->target != GL_TEXTURE_2D_MULTISAMPLE)
+                                glTexParameteri(tv->texture->target, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
+                        }
                     }
                     if (cs.smpSet == setIndex)
                     {
