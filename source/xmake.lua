@@ -49,6 +49,11 @@ target("vri")
         else
             -- public: glad/glfw must link into the final exe (+ their runtime needs)
             add_packages("glad", "glfw", {public = true})
+            -- Windowed GL present (swapchain_gl) retargets the context to the window's
+            -- DC via WGL; GetDC/SetPixelFormat/SwapBuffers live in gdi32.
+            if is_plat("windows") then
+                add_syslinks("gdi32", {public = true})
+            end
         end
     end
     if has_config("vri_backend_d3d11") and is_plat("windows") then

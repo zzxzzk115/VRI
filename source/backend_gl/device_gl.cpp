@@ -1,5 +1,6 @@
 #include "device_gl.h"
 #include "core_gl.h"
+#include "swapchain_gl.h"
 
 #include <GLFW/glfw3.h>
 
@@ -209,6 +210,11 @@ namespace vri::gl
     void DeviceGL::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceGL(), sizeof(VriCoreInterface));
+#if !defined(__EMSCRIPTEN__)
+        // Windowed presentation (Win32 WGL today; other desktop platforms report
+        // Unsupported at CreateSwapChain). Web canvas presentation lands separately.
+        m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceGL(), sizeof(VriSwapChainInterface));
+#endif
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

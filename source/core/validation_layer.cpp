@@ -14,6 +14,7 @@
 // suppressed (not forwarded) so a misuse can't crash the backend under validation.
 
 #include <vri/vri.h>
+#include <vri/ext/vri_ext_swapchain.h>
 
 #include "device_base.h"
 
@@ -31,6 +32,7 @@ namespace vri::core
         struct QueueVal     { DeviceVal* dev; VriQueue* real; };
         struct AllocatorVal { DeviceVal* dev; VriCommandAllocator* real; };
         struct FenceVal     { DeviceVal* dev; VriFence* real; };
+        struct SwapChainVal { DeviceVal* dev; VriSwapChain* real; };
         struct CmdBufVal
         {
             DeviceVal* dev;
@@ -47,6 +49,8 @@ namespace vri::core
             VriCallbackInterface cb;       // app message sink (may be empty)
             bool                 hasCb;
             VriCoreInterface     table;    // the validating table handed to the app
+            VriSwapChainInterface swap;    // the backend's real swapchain table (if supported)
+            bool                 hasSwap = false;
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>   queues;
             std::vector<CmdBufVal*>  cmds;
@@ -70,6 +74,7 @@ namespace vri::core
         inline CmdBufVal*    CV(VriCommandBuffer* h)     { return reinterpret_cast<CmdBufVal*>(h); }
         inline QueueVal*     QV(VriQueue* h)             { return reinterpret_cast<QueueVal*>(h); }
         inline FenceVal*     FV(VriFence* h)             { return reinterpret_cast<FenceVal*>(h); }
+        inline SwapChainVal* SV(VriSwapChain* h)         { return reinterpret_cast<SwapChainVal*>(h); }
 
         // ---- queries -------------------------------------------------------
         const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return DV(device)->core.GetDeviceDesc(DV(device)->real); }
@@ -259,6 +264,41 @@ namespace vri::core
         }
         void VRI_CALL QueueWaitIdle(VriQueue* queue) { QV(queue)->dev->core.QueueWaitIdle(QV(queue)->real); }
 
+        // ---- swapchain (unwrap device/queue/fences; wrap the swapchain handle) ----
+        // The backbuffer textures returned by GetSwapChainTextures are real backend
+        // handles - the app feeds them back through the (forwarding) core wrappers, so
+        // they need no wrapping here.
+        VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
+        {
+            DeviceVal* d = DV(device);
+            VriSwapChainDesc real = *desc;
+            real.queue = desc->queue ? QV(desc->queue)->real : nullptr; // unwrap the present queue
+            VriSwapChain* rsc = nullptr;
+            const VriResult r = d->swap.CreateSwapChain(d->real, &real, &rsc);
+            if (r != VriResult_Success) return r;
+            *out = reinterpret_cast<VriSwapChain*>(new SwapChainVal{d, rsc});
+            return VriResult_Success;
+        }
+        void VRI_CALL DestroySwapChain(VriSwapChain* sc)
+        {
+            if (!sc) return;
+            SwapChainVal* v = SV(sc);
+            v->dev->swap.DestroySwapChain(v->real);
+            delete v;
+        }
+        VriResult VRI_CALL GetSwapChainTextures(VriSwapChain* sc, VriTexture** out, uint32_t* io) { return SV(sc)->dev->swap.GetSwapChainTextures(SV(sc)->real, out, io); }
+        VriResult VRI_CALL AcquireNextTexture(VriSwapChain* sc, VriFence* fence, uint64_t value, uint32_t* outIndex)
+        {
+            SwapChainVal* v = SV(sc);
+            return v->dev->swap.AcquireNextTexture(v->real, fence ? FV(fence)->real : nullptr, value, outIndex);
+        }
+        VriResult VRI_CALL Present(VriSwapChain* sc, VriFence* fence, uint64_t value)
+        {
+            SwapChainVal* v = SV(sc);
+            return v->dev->swap.Present(v->real, fence ? FV(fence)->real : nullptr, value);
+        }
+        VriResult VRI_CALL Resize(VriSwapChain* sc, uint32_t w, uint32_t h) { return SV(sc)->dev->swap.Resize(SV(sc)->real, w, h); }
+
         void BuildTable(DeviceVal* d)
         {
             VriCoreInterface t = d->core; // start from the real table (resource plane passes through)
@@ -317,15 +357,33 @@ namespace vri::core
     VriResult ValidationGetInterface(const VriDevice* device, const char* name, size_t size, void* out)
     {
         DeviceVal* d = DV(device);
-        // Only the core interface is validated; other interfaces forward to the real device.
-        for (const char* p = name, *q = VRI_INTERFACE_CORE; ; ++p, ++q)
+        auto nameIs = [&](const char* want) {
+            for (const char* p = name, *q = want; ; ++p, ++q) { if (*p != *q) return false; if (*p == '\0') return true; }
+        };
+        // Core + swapchain are validated (they take wrapped handles that must be
+        // unwrapped before reaching the backend). Every other interface forwards to the
+        // real device untouched.
+        if (nameIs(VRI_INTERFACE_CORE))
         {
-            if (*p != *q) return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);
-            if (*p == '\0') break;
+            if (size != sizeof(VriCoreInterface)) return VriResult_InvalidArgument;
+            *static_cast<VriCoreInterface*>(out) = d->table;
+            return VriResult_Success;
         }
-        if (size != sizeof(VriCoreInterface)) return VriResult_InvalidArgument;
-        *static_cast<VriCoreInterface*>(out) = d->table;
-        return VriResult_Success;
+        if (nameIs(VRI_INTERFACE_SWAPCHAIN))
+        {
+            if (size != sizeof(VriSwapChainInterface)) return VriResult_InvalidArgument;
+            // Cache the backend's real swapchain table, then hand back a wrapper that
+            // unwraps the device/queue/fences (the app holds wrapped handles).
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(VRI_INTERFACE_SWAPCHAIN, sizeof(d->swap), &d->swap);
+            if (r != VriResult_Success) return r;
+            d->hasSwap = true;
+            static const VriSwapChainInterface wrapped = {
+                CreateSwapChain, DestroySwapChain, GetSwapChainTextures, AcquireNextTexture, Present, Resize,
+            };
+            *static_cast<VriSwapChainInterface*>(out) = wrapped;
+            return VriResult_Success;
+        }
+        return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);
     }
 
     void DestroyValidationDevice(VriDevice* device)

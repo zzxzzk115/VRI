@@ -20,7 +20,7 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 | --- | --- | --- |
 | Vulkan | desktop (Windows/Linux) | ✅ resources, explicit memory, descriptor sets, graphics + compute pipelines, command recording, swapchain (Win32), interop, feature query+enable |
 | WebGPU (`webgpu-sdk`) | desktop **+ Web** (Emscripten) | ✅ resources, bind groups, graphics + compute pipelines, command recording, swapchain (Win32). Same backend runs native (wgpu-native) and **in-browser** (emdawnwebgpu) |
-| OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL 430 via SPIRV-Cross), headless rendering |
+| OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL via SPIRV-Cross), modern-GL fast paths (DSA, separate-format VAOs, base-vertex/instance, indirect draw/dispatch, immutable+persistent buffers — version/feature-gated), headless rendering + windowed swapchain present (Win32) |
 | WebGL 2 (OpenGL ES 3.0) | Web (Emscripten) | ✅ the same GL backend on the GLES3/WebGL2 subset; runs in-browser. No compute (ES 3.0) — reported via `hasComputeShader` |
 | OpenGL ES (native) / D3D11 / D3D12 / Metal | — | ⏳ planned |
 

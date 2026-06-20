@@ -34,13 +34,17 @@ namespace
 int main(int, char**)
 {
     const char* apiEnv = std::getenv("VRI_API");
-    const bool useWebGPU = apiEnv && std::strcmp(apiEnv, "webgpu") == 0;
-    const VriGraphicsAPI api = useWebGPU ? VriGraphicsAPI_WebGPU : VriGraphicsAPI_Vulkan;
+    VriGraphicsAPI api = VriGraphicsAPI_Vulkan;
+    if (apiEnv && std::strcmp(apiEnv, "webgpu") == 0) api = VriGraphicsAPI_WebGPU;
+    else if (apiEnv && (std::strcmp(apiEnv, "opengl") == 0 || std::strcmp(apiEnv, "gl") == 0)) api = VriGraphicsAPI_OpenGL;
+    const bool useWgsl = (api == VriGraphicsAPI_WebGPU); // GL consumes SPIR-V (transpiled), like Vulkan
+    const char* apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : (api == VriGraphicsAPI_OpenGL ? "OpenGL" : "Vulkan");
 
     if (!SDL_Init(SDL_INIT_VIDEO))
         Fail("SDL_Init failed");
-    SDL_Window* window = SDL_CreateWindow(useWebGPU ? "VRI Triangle (WebGPU)" : "VRI Triangle (Vulkan)",
-                                          kWidth, kHeight, 0);
+    char title[64];
+    std::snprintf(title, sizeof(title), "VRI Triangle (%s)", apiName);
+    SDL_Window* window = SDL_CreateWindow(title, kWidth, kHeight, 0);
     if (!window)
         Fail("SDL_CreateWindow failed");
 
@@ -80,8 +84,8 @@ int main(int, char**)
 
     VriShaderDesc shaders[2]{};
     shaders[0].stage = VriShaderStage_Vertex;
-    shaders[0].bytecode = useWebGPU ? (const void*)g_triangleWgsl : (const void*)g_triangleSpv;
-    shaders[0].bytecodeSize = useWebGPU ? sizeof(g_triangleWgsl) : sizeof(g_triangleSpv);
+    shaders[0].bytecode = useWgsl ? static_cast<const void*>(g_triangleWgsl) : static_cast<const void*>(g_triangleSpv);
+    shaders[0].bytecodeSize = useWgsl ? sizeof(g_triangleWgsl) : sizeof(g_triangleSpv);
     shaders[0].entryPointName = "vertexMain";
     shaders[1].stage = VriShaderStage_Fragment;
     shaders[1].bytecode = shaders[0].bytecode;
@@ -232,6 +236,6 @@ int main(int, char**)
     SDL_DestroyWindow(window);
     SDL_Quit();
     std::printf("[example] %s triangle: %llu frames presented\n",
-                useWebGPU ? "WebGPU" : "Vulkan", static_cast<unsigned long long>(frameValue));
+                apiName, static_cast<unsigned long long>(frameValue));
     return 0;
 }
