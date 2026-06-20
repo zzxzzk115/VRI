@@ -962,6 +962,12 @@ namespace vri::vk
                           : VK_ATTACHMENT_LOAD_OP_LOAD;
                 ai.storeOp = src.storeOp == VriAttachmentStoreOp_DontCare ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
                 std::memcpy(ai.clearValue.color.float32, src.clearValue.color.f32, sizeof(float) * 4);
+                if (src.resolveView) // MSAA resolve target
+                {
+                    ai.resolveImageView = Desc(src.resolveView)->imageView;
+                    ai.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                    ai.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+                }
                 colors.push_back(ai);
             }
 

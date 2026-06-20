@@ -742,6 +742,8 @@ namespace vri::wgpu
                 ca.storeOp = src.storeOp == VriAttachmentStoreOp_DontCare ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
                 ca.clearValue = WGPUColor{src.clearValue.color.f32[0], src.clearValue.color.f32[1],
                                           src.clearValue.color.f32[2], src.clearValue.color.f32[3]};
+                if (src.resolveView) // MSAA resolve target
+                    ca.resolveTarget = Desc(src.resolveView)->view;
             }
 
             WGPURenderPassDescriptor rp = {};

@@ -53,10 +53,11 @@ typedef union VriClearValue
 /* ---- dynamic rendering attachments ------------------------------------ */
 typedef struct VriAttachmentDesc
 {
-    VriDescriptor*       view;     /* a texture view descriptor */
+    VriDescriptor*       view;        /* a texture view descriptor */
     VriAttachmentLoadOp  loadOp;
     VriAttachmentStoreOp storeOp;
     VriClearValue        clearValue;
+    VriDescriptor*       resolveView; /* NULL = none; MSAA resolve target (single-sample view) */
 } VriAttachmentDesc;
 
 typedef struct VriAttachmentsDesc

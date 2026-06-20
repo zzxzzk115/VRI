@@ -22,6 +22,7 @@ target("vri-tests")
     add_files("test_instance_xbackend.cpp")   -- instanced draw + SV_InstanceID parity
     add_files("test_scissor_xbackend.cpp")    -- scissor-rect clipping parity
     add_files("test_stencil_xbackend.cpp")    -- stencil write/test (front/back ops, masks, ref)
+    add_files("test_msaa_xbackend.cpp")       -- 4x MSAA + resolve (antialiased edges)
     add_files("test_compute_xbackend.cpp")    -- compute pipeline + dispatch + storage buffer
     add_files("test_geometry_xbackend.cpp")   -- legacy geometry shader (gated where absent)
     add_files("test_tessellation_xbackend.cpp") -- legacy tessellation hull/domain (gated where absent)
