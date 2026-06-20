@@ -28,7 +28,7 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 
 ## Tested feature coverage
 
-The same Slang source + the same VRI calls are verified to produce identical results across backends. Desktop tests (`vri-tests`, doctest) run on Vulkan + WebGPU + OpenGL; both Web backends are verified end-to-end in headless Chrome — WebGL2 (via SwiftShader) as an 11-probe program, and browser WebGPU as a render-to-texture readback check.
+The same Slang source + the same VRI calls are verified to produce identical results across backends. Desktop tests (`vri-tests`, doctest) run on Vulkan + WebGPU + OpenGL; both Web backends are verified end-to-end in headless Chrome — WebGL2 (via SwiftShader) as an 11-probe program, and browser WebGPU as a render-to-texture readback **plus a compute (storage-buffer fill) check** — i.e. compute on the Web, which WebGL2 cannot do.
 
 Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures (separate texture + sampler), vertex buffers + indexed draw, depth test, alpha blending, back-face culling/winding, multiple render targets, instancing (`SV_InstanceID`), scissor, and compute (storage-buffer fill) — verified identical on Vulkan, WebGPU, and desktop OpenGL. The validation layer and the explicit "compute unavailable" contract on WebGL2 (no compute in ES 3.0) are tested too.
 
