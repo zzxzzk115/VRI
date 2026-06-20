@@ -108,7 +108,7 @@ namespace vri::wgpu
 
         VriResult VRI_CALL CreateCommandBuffer(VriCommandAllocator* allocator, VriCommandBuffer** out)
         {
-            *out = ToHandle(new CommandBufferWGPU{CA(allocator)->device, nullptr, nullptr, nullptr, nullptr, nullptr});
+            *out = ToHandle(new CommandBufferWGPU{CA(allocator)->device, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr});
             return VriResult_Success;
         }
 
@@ -118,6 +118,7 @@ namespace vri::wgpu
             WGPUCommandEncoderDescriptor d = {};
             c->encoder = wgpuDeviceCreateCommandEncoder(c->device->Device(), &d);
             c->pass = nullptr;
+            c->computePass = nullptr;
             c->finished = nullptr;
             return c->encoder ? VriResult_Success : VriResult_Failure;
         }
@@ -125,6 +126,12 @@ namespace vri::wgpu
         VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer* cmd)
         {
             CommandBufferWGPU* c = CB(cmd);
+            if (c->computePass) // a trailing dispatch with no following encoder-level op
+            {
+                wgpuComputePassEncoderEnd(c->computePass);
+                wgpuComputePassEncoderRelease(c->computePass);
+                c->computePass = nullptr;
+            }
             WGPUCommandBufferDescriptor d = {};
             c->finished = wgpuCommandEncoderFinish(c->encoder, &d);
             wgpuCommandEncoderRelease(c->encoder);
@@ -537,7 +544,21 @@ namespace vri::wgpu
             return VriResult_Success;
         }
 
-        VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
+        VriResult VRI_CALL CreateComputePipeline(VriDevice* device, const VriComputePipelineDesc* desc, VriPipeline** out)
+        {
+            DeviceWGPU* d = Dev(device);
+            WGPUShaderModule mod = MakeWgslModule(d->Device(), desc->shader.bytecode);
+            WGPUComputePipelineDescriptor pd = {};
+            pd.layout = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : nullptr;
+            pd.compute.module = mod;
+            pd.compute.entryPoint = SV(desc->shader.entryPointName ? desc->shader.entryPointName : "main");
+            WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(d->Device(), &pd);
+            if (mod) wgpuShaderModuleRelease(mod);
+            if (!pipe)
+                return VriResult_Failure;
+            *out = ToHandle(new PipelineWGPU{d, nullptr, pipe, true});
+            return VriResult_Success;
+        }
 
         void VRI_CALL DestroyPipeline(VriPipeline* pipeline)
         {
@@ -652,9 +673,31 @@ namespace vri::wgpu
         }
 
         // ---- command recording ---------------------------------------------
+        // WebGPU has no implicit compute scope; VRI dispatches outside a render pass.
+        // Lazily open a compute pass on first compute command and close it before any
+        // encoder-level op (render pass, copy, finish) needs the encoder back.
+        void EnsureComputePass(CommandBufferWGPU* c)
+        {
+            if (!c->computePass)
+            {
+                WGPUComputePassDescriptor cpd = {};
+                c->computePass = wgpuCommandEncoderBeginComputePass(c->encoder, &cpd);
+            }
+        }
+        void EndComputePass(CommandBufferWGPU* c)
+        {
+            if (c->computePass)
+            {
+                wgpuComputePassEncoderEnd(c->computePass);
+                wgpuComputePassEncoderRelease(c->computePass);
+                c->computePass = nullptr;
+            }
+        }
+
         void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc* a)
         {
             CommandBufferWGPU* c = CB(cmd);
+            EndComputePass(c);
             std::vector<WGPURenderPassColorAttachment> colors(a->colorNum);
             for (uint32_t i = 0; i < a->colorNum; ++i)
             {
@@ -714,6 +757,12 @@ namespace vri::wgpu
         {
             CommandBufferWGPU* c = CB(cmd);
             PipelineWGPU* p = Pipe(pipeline);
+            if (p->isCompute)
+            {
+                EnsureComputePass(c);
+                wgpuComputePassEncoderSetPipeline(c->computePass, p->compute);
+                return;
+            }
             c->boundPipeline = p->render;
             if (p->render && c->pass)
                 wgpuRenderPassEncoderSetPipeline(c->pass, p->render);
@@ -722,9 +771,12 @@ namespace vri::wgpu
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
         {
             CommandBufferWGPU* c = CB(cmd);
-            if (!set || !c->pass) return;
+            if (!set) return;
             const DescriptorSetWGPU* s = reinterpret_cast<const DescriptorSetWGPU*>(set);
-            if (s->bindGroup)
+            if (!s->bindGroup) return;
+            if (c->computePass)
+                wgpuComputePassEncoderSetBindGroup(c->computePass, setIndex, s->bindGroup, 0, nullptr);
+            else if (c->pass)
                 wgpuRenderPassEncoderSetBindGroup(c->pass, setIndex, s->bindGroup, 0, nullptr);
         }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}        // WebGPU has no push constants (core)
@@ -755,18 +807,31 @@ namespace vri::wgpu
             for (uint32_t i = 0; i < drawNum; ++i)
                 wgpuRenderPassEncoderDrawIndirect(CB(cmd)->pass, Buf(buffer)->buffer, offset);
         }
-        void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}         // compute pass: later
-        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
+        void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            EnsureComputePass(c);
+            wgpuComputePassEncoderDispatchWorkgroups(c->computePass, d->x, d->y, d->z);
+        }
+        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            EnsureComputePass(c);
+            wgpuComputePassEncoderDispatchWorkgroupsIndirect(c->computePass, Buf(buffer)->buffer, offset);
+        }
 
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // WebGPU auto-synchronizes
 
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
-            wgpuCommandEncoderCopyBufferToBuffer(CB(cmd)->encoder, Buf(src)->buffer, r->srcOffset, Buf(dst)->buffer, r->dstOffset, r->size);
+            CommandBufferWGPU* c = CB(cmd);
+            EndComputePass(c);
+            wgpuCommandEncoderCopyBufferToBuffer(c->encoder, Buf(src)->buffer, r->srcOffset, Buf(dst)->buffer, r->dstOffset, r->size);
         }
 
         void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriTexture* src, const VriBufferTextureCopyDesc* region)
         {
+            EndComputePass(CB(cmd));
             const TextureWGPU* t = reinterpret_cast<const TextureWGPU*>(src);
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;

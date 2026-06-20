@@ -19,7 +19,7 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 | Backend | Platform | Status |
 | --- | --- | --- |
 | Vulkan | desktop (Windows/Linux) | ✅ resources, explicit memory, descriptor sets, graphics + compute pipelines, command recording, swapchain (Win32), interop, feature query+enable |
-| WebGPU (`webgpu-sdk`) | desktop **+ Web** (Emscripten) | ✅ resources, bind groups, graphics pipelines, command recording, swapchain (Win32). Same backend runs native (wgpu-native) and **in-browser** (emdawnwebgpu); compute pipelines not wired yet |
+| WebGPU (`webgpu-sdk`) | desktop **+ Web** (Emscripten) | ✅ resources, bind groups, graphics + compute pipelines, command recording, swapchain (Win32). Same backend runs native (wgpu-native) and **in-browser** (emdawnwebgpu) |
 | OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL 430 via SPIRV-Cross), headless rendering |
 | WebGL 2 (OpenGL ES 3.0) | Web (Emscripten) | ✅ the same GL backend on the GLES3/WebGL2 subset; runs in-browser. No compute (ES 3.0) — reported via `hasComputeShader` |
 | OpenGL ES (native) / D3D11 / D3D12 / Metal | — | ⏳ planned |
@@ -30,7 +30,7 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 
 The same Slang source + the same VRI calls are verified to produce identical results across backends. Desktop tests (`vri-tests`, doctest) run on Vulkan + WebGPU + OpenGL; both Web backends are verified end-to-end in headless Chrome — WebGL2 (via SwiftShader) as an 11-probe program, and browser WebGPU as a render-to-texture readback check.
 
-Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures (separate texture + sampler), vertex buffers + indexed draw, depth test, alpha blending, back-face culling/winding, multiple render targets, instancing (`SV_InstanceID`), scissor, and compute (storage-buffer fill) on backends that support it. The validation layer and the explicit "compute unavailable" contract on WebGL are tested too.
+Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures (separate texture + sampler), vertex buffers + indexed draw, depth test, alpha blending, back-face culling/winding, multiple render targets, instancing (`SV_InstanceID`), scissor, and compute (storage-buffer fill) — verified identical on Vulkan, WebGPU, and desktop OpenGL. The validation layer and the explicit "compute unavailable" contract on WebGL2 (no compute in ES 3.0) are tested too.
 
 ## Platforms
 

@@ -24,12 +24,13 @@ namespace vri::wgpu
 
     struct CommandBufferWGPU
     {
-        DeviceWGPU*           device;
-        WGPUCommandEncoder    encoder;  // valid between Begin and End
-        WGPURenderPassEncoder pass;     // valid between BeginRendering/EndRendering
-        WGPUCommandBuffer     finished; // produced by End, consumed by Submit
-        VriPipelineLayout*    boundLayout;
-        WGPURenderPipeline    boundPipeline;
+        DeviceWGPU*            device;
+        WGPUCommandEncoder     encoder;     // valid between Begin and End
+        WGPURenderPassEncoder  pass;        // valid between BeginRendering/EndRendering
+        WGPUComputePassEncoder computePass; // lazily begun for dispatch; ended on any encoder-level op
+        WGPUCommandBuffer      finished;    // produced by End, consumed by Submit
+        VriPipelineLayout*     boundLayout;
+        WGPURenderPipeline     boundPipeline;
     };
 
     struct BufferWGPU
