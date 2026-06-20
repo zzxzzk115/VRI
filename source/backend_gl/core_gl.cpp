@@ -144,8 +144,11 @@ namespace vri::gl
                 o.es = d->IsES();
                 o.vulkan_semantics = false;
                 // Flip clip-space Y so GL's bottom-left framebuffer matches the VRI
-                // (Vulkan/WebGPU) top-left convention without glClipControl.
-                o.vertex.flip_vert_y = true;
+                // (Vulkan/WebGPU) top-left convention without glClipControl. Apply it to
+                // the stage that outputs gl_Position to the rasterizer - NOT the tessellation
+                // control stage (its per-vertex output is gl_out[].gl_Position; a bare
+                // gl_Position there is invalid GLSL and strict drivers reject it).
+                o.vertex.flip_vert_y = (model != spv::ExecutionModelTessellationControl);
                 comp.set_common_options(o);
                 if (entry)
                     comp.set_entry_point(entry, model);
@@ -221,14 +224,8 @@ namespace vri::gl
                 }
                 std::string glsl = comp.compile();
                 // Tessellation-control outputs may only be indexed by gl_InvocationID;
-                // strict drivers (NVIDIA) reject SPIRV-Cross's uint(gl_InvocationID)
-                // cast on the output write. Strip the cast (reads stay valid too).
-                // Tessellation-control outputs may only be indexed by gl_InvocationID;
-                // strict drivers reject SPIRV-Cross's uint(gl_InvocationID) cast on the
-                // output write. Strip the cast (reads stay valid). NOTE: GL tessellation
-                // is currently capability-gated off (see device_gl.cpp) because strict
-                // drivers (NVIDIA) still reject the transpiled TCS; this groundwork stays
-                // for when the SPIR-V->GLSL tessellation path is made driver-robust.
+                // strict drivers (NVIDIA) reject SPIRV-Cross's uint(gl_InvocationID) cast
+                // on the output write, so strip it (reads stay valid too).
                 if (model == spv::ExecutionModelTessellationControl)
                 {
                     const std::string from = "uint(gl_InvocationID)";
@@ -236,6 +233,8 @@ namespace vri::gl
                     for (size_t p = glsl.find(from); p != std::string::npos; p = glsl.find(from, p + to.size()))
                         glsl.replace(p, from.size(), to);
                 }
+                if (std::getenv("VRI_DUMP_GLSL"))
+                    std::fprintf(stderr, "=== VRI GLSL model=%d entry=%s ===\n%s\n", static_cast<int>(model), entry ? entry : "?", glsl.c_str());
                 return glsl;
             }
             catch (const std::exception& e)

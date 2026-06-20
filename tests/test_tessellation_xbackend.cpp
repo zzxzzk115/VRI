@@ -1,10 +1,8 @@
 // Legacy tessellation parity. A vertex->hull(TCS)->domain(TES)->fragment pipeline
 // over a 3-control-point patch (PatchList topology) tessellates a triangle and
-// paints it green; the center pixel must be green on backends that report
-// hasTessellation (Vulkan). Backends that report false (WebGPU, WebGL2, and - for
-// now - desktop OpenGL, whose SPIR-V->GLSL TCS transpile isn't yet driver-robust)
-// must reject the pipeline with VriResult_Unsupported - the explicit-capability
-// contract. The GL tessellation backend wiring is in place behind that flag.
+// paints it green; the center pixel must be green on backends with tessellation
+// (Vulkan + desktop OpenGL). Backends without it (WebGPU, WebGL2) report
+// hasTessellation=false and must reject the pipeline with VriResult_Unsupported.
 //
 // Authored in Slang (vertex/hull/domain/fragment in one module); requires Slang
 // >= 2026.11, whose SPIR-V backend emits tessellation hull shaders (2025.11 crashes).
