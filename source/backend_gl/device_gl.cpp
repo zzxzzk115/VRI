@@ -37,7 +37,8 @@ namespace vri::gl
         // also runs on desktop GL. We still create a 4.x core context on desktop
         // so debug tooling and future fast-paths are available. ESSL 300 (ES 3.0)
         // is the WebGL2 baseline; ES 3.1 / ESSL 310 isn't available in WebGL2.
-        m_shaderVersion = m_es ? 300u : 420u;
+        // Desktop uses GLSL 430 so compute shaders (SSBO + local_size) transpile.
+        m_shaderVersion = m_es ? 300u : 430u;
 
         if (!glfwInit())
         {
@@ -124,9 +125,15 @@ namespace vri::gl
         m_desc.viewportMaxNum = 1;
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_desc.queueCount[t] = 1;
-        m_desc.hasComputeShader = VRI_TRUE; // GL 4.3+
-        m_desc.hasGeometryShader = VRI_TRUE;
-        m_desc.hasTessellation = VRI_TRUE;
+        // Compute needs desktop GL 4.3+ or GLES 3.1+. WebGL2 (== ES 3.0) has no
+        // compute, so report it honestly (the validation layer + CreateComputePipeline
+        // gate on this).
+        const uint32_t major = m_desc.apiVersionMajor, minor = m_desc.apiVersionMinor;
+        const bool computeOk = m_es ? (major > 3 || (major == 3 && minor >= 1))
+                                     : (major > 4 || (major == 4 && minor >= 3));
+        m_desc.hasComputeShader = computeOk ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasGeometryShader = m_es ? VRI_FALSE : VRI_TRUE; // GLES has no geometry shaders
+        m_desc.hasTessellation = m_es ? VRI_FALSE : VRI_TRUE;
     }
 
     void DeviceGL::FillRegistry()

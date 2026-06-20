@@ -19,6 +19,7 @@
 #include "shaders/triangle_vbuf_spv.h" // g_triangleVbufSpv (vertex buffer + indexed draw)
 #include "shaders/triangle_mrt_spv.h"  // g_triangleMrtSpv  (two render targets)
 #include "shaders/triangle_inst_spv.h" // g_triangleInstSpv (instanced draw)
+#include "shaders/compute_fill_spv.h"  // g_computeFillSpv  (used only for the negative compute check)
 
 #include <cstdlib>
 
@@ -1026,6 +1027,31 @@ namespace
         vriDestroyDevice(dev);
         return ok;
     }
+
+    // Negative contract: WebGL2 has no compute, so the device must report
+    // hasComputeShader == false AND CreateComputePipeline must return Unsupported.
+    bool RenderComputeUnsupportedProbe(bool& correct)
+    {
+        correct = false;
+        VriDeviceCreationDesc dc{};
+        dc.graphicsAPI = VriGraphicsAPI_OpenGLES; dc.enableValidation = VRI_TRUE; dc.bestEffort = VRI_TRUE;
+        VriDevice* dev = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success) return false;
+        VriCoreInterface c{};
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success) return false;
+
+        const bool reportsNoCompute = c.GetDeviceDesc(dev)->hasComputeShader == VRI_FALSE;
+        VriPipelineLayoutDesc ld{}; VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(dev, &ld, &layout);
+        VriComputePipelineDesc cpd{}; cpd.pipelineLayout = layout;
+        cpd.shader.stage = VriShaderStage_Compute; cpd.shader.bytecode = g_computeFillSpv; cpd.shader.bytecodeSize = sizeof(g_computeFillSpv); cpd.shader.entryPointName = "computeMain";
+        VriPipeline* p = nullptr;
+        const bool unsupported = c.CreateComputePipeline(dev, &cpd, &p) == VriResult_Unsupported;
+        correct = reportsNoCompute && unsupported;
+
+        if (layout) c.DestroyPipelineLayout(layout);
+        vriDestroyDevice(dev);
+        return true;
+    }
 } // namespace
 
 int main()
@@ -1071,9 +1097,13 @@ int main()
     const bool ranScissor = RenderScissorAndProbe(scissorOk);
     const bool scissorPass = ranScissor && scissorOk;
 
-    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass && scissorPass;
-    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d)\n",
-                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk, ranScissor, scissorOk);
+    bool computeNoOk = false;
+    const bool ranComputeNo = RenderComputeUnsupportedProbe(computeNoOk);
+    const bool computeNoPass = ranComputeNo && computeNoOk;
+
+    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass && scissorPass && computeNoPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: ran=%d ok=%d)\n",
+                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk, ranScissor, scissorOk, ranComputeNo, computeNoOk);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.

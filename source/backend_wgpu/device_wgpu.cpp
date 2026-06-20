@@ -168,7 +168,9 @@ namespace vri::wgpu
         m_desc.viewportMaxNum = 1;
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_desc.queueCount[t] = 1;
-        m_desc.hasComputeShader = VRI_TRUE;
+        // WebGPU-native supports compute, but VRI's WebGPU compute path isn't wired
+        // yet (CreateComputePipeline/CmdDispatch); report false so it's not a lie.
+        m_desc.hasComputeShader = VRI_FALSE;
     }
 
     void DeviceWGPU::FillRegistry()

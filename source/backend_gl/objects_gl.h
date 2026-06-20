@@ -164,6 +164,7 @@ namespace vri::gl
     {
         DeviceGL* device;
         GLuint    program;
+        bool      isCompute = false;
         GLenum    topology;
         bool      cullEnable;
         GLenum    cullFace;

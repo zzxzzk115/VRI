@@ -189,6 +189,18 @@ namespace vri::gl
                             comp.set_name(u.base_type_id, UboBlockName(lb->glUnit));
                         }
                     }
+                    // Storage buffers (SSBO / UAV): remap to the flattened SSBO unit;
+                    // layout(binding=) on SSBOs works in GLSL 430 (desktop compute).
+                    for (const spirv_cross::Resource& s : res.storage_buffers)
+                    {
+                        const uint32_t set = comp.get_decoration(s.id, spv::DecorationDescriptorSet);
+                        const uint32_t bind = comp.get_decoration(s.id, spv::DecorationBinding);
+                        if (const LayoutBindingGL* lb = layout->Find(set, bind))
+                        {
+                            comp.unset_decoration(s.id, spv::DecorationDescriptorSet);
+                            comp.set_decoration(s.id, spv::DecorationBinding, lb->glUnit);
+                        }
+                    }
                     for (const spirv_cross::CombinedImageSampler& cis : comp.get_combined_image_samplers())
                     {
                         const uint32_t texSet = comp.get_decoration(cis.image_id, spv::DecorationDescriptorSet);
@@ -571,7 +583,55 @@ namespace vri::gl
             *out = ToHandle(p);
             return VriResult_Success;
         }
-        VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
+        VriResult VRI_CALL CreateComputePipeline(VriDevice* device, const VriComputePipelineDesc* desc, VriPipeline** out)
+        {
+            DeviceGL* d = Dev(device);
+            if (!d->Desc().hasComputeShader)
+                return VriResult_Unsupported; // GLES 3.0 / WebGL2 has no compute
+#if defined(__EMSCRIPTEN__)
+            return VriResult_Unsupported; // GL_COMPUTE_SHADER is not in WebGL2
+#else
+            const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
+            const GLuint cs = CompileShader(d, GL_COMPUTE_SHADER, SpirvToGlsl(d, layout, desc->shader.bytecode, desc->shader.bytecodeSize, desc->shader.entryPointName, spv::ExecutionModelGLCompute, nullptr));
+            if (!cs)
+                return VriResult_Failure;
+            GLuint program = glCreateProgram();
+            glAttachShader(program, cs);
+            glLinkProgram(program);
+            glDetachShader(program, cs);
+            glDeleteShader(cs);
+            GLint ok = 0;
+            glGetProgramiv(program, GL_LINK_STATUS, &ok);
+            if (!ok)
+            {
+                char log[2048] = {};
+                glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+                d->ReportError(log);
+                glDeleteProgram(program);
+                return VriResult_Failure;
+            }
+            // Uniform blocks (if any) still need binding points; SSBOs use the
+            // layout(binding=) emitted by SPIRV-Cross (GLSL 430).
+            if (layout)
+            {
+                glUseProgram(program);
+                for (const LayoutBindingGL& b : layout->bindings)
+                    if (b.type == VriDescriptorType_ConstantBuffer)
+                    {
+                        const GLuint idx = glGetUniformBlockIndex(program, UboBlockName(b.glUnit).c_str());
+                        if (idx != GL_INVALID_INDEX)
+                            glUniformBlockBinding(program, idx, b.glUnit);
+                    }
+                glUseProgram(0);
+            }
+            PipelineGL* p = new PipelineGL{};
+            p->device = d;
+            p->program = program;
+            p->isCompute = true;
+            *out = ToHandle(p);
+            return VriResult_Success;
+#endif // !__EMSCRIPTEN__
+        }
         void VRI_CALL DestroyPipeline(VriPipeline* pipeline)
         {
             if (!pipeline) return;
@@ -696,6 +756,8 @@ namespace vri::gl
             PipelineGL* p = Pipe(pipeline);
             c->boundPipeline = p;
             glUseProgram(p->program);
+            if (p->isCompute)
+                return; // no graphics state to apply
             if (p->cullEnable) { glEnable(GL_CULL_FACE); glCullFace(p->cullFace); }
             else glDisable(GL_CULL_FACE);
             glFrontFace(p->frontFace);
@@ -818,7 +880,17 @@ namespace vri::gl
                                         reinterpret_cast<const void*>(offset), static_cast<GLsizei>(d->instanceNum));
         }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
-        void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}
+        void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc* d)
+        {
+#if defined(__EMSCRIPTEN__)
+            (void)d; // compute is unavailable in WebGL2 (no pipeline can be created)
+#else
+            glDispatchCompute(d->x, d->y, d->z);
+            // Make SSBO writes visible to the subsequent copy/readback (single context,
+            // but the GPU pipeline still needs an explicit memory barrier).
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+#endif
+        }
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // GL is ordered on one context
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)

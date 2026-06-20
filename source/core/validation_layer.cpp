@@ -138,6 +138,13 @@ namespace vri::core
             if (c->insideRenderPass) { Err(c->dev, fn); return false; }
             return true;
         }
+        // Shared by graphics (inside a render pass) and compute (outside): only the
+        // recording state is required.
+        bool RecordingOk(CmdBufVal* c, const char* fn)
+        {
+            if (!c->recording) { Err(c->dev, fn); return false; }
+            return true;
+        }
 
         // ---- resources (device-first wrappers; return real handles) --------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* d, VriBuffer** out) { return DV(device)->core.CreateBuffer(DV(device)->real, d, out); }
@@ -194,10 +201,10 @@ namespace vri::core
         }
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* v, uint32_t n) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetViewports outside a render pass")) return; c->dev->core.CmdSetViewports(c->real, v, n); }
         void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* r, uint32_t n) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetScissors outside a render pass")) return; c->dev->core.CmdSetScissors(c->real, r, n); }
-        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* l) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetPipelineLayout outside a render pass")) return; c->dev->core.CmdSetPipelineLayout(c->real, l); }
-        void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* p) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetPipeline outside a render pass")) return; c->dev->core.CmdSetPipeline(c->real, p); }
-        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t i, const VriDescriptorSet* s) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetDescriptorSet outside a render pass")) return; c->dev->core.CmdSetDescriptorSet(c->real, i, s); }
-        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t i, const void* data, uint32_t size) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetConstants outside a render pass")) return; c->dev->core.CmdSetConstants(c->real, i, data, size); }
+        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* l) { CmdBufVal* c = CV(cmd); if (!RecordingOk(c, "CmdSetPipelineLayout outside command recording")) return; c->dev->core.CmdSetPipelineLayout(c->real, l); }
+        void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* p) { CmdBufVal* c = CV(cmd); if (!RecordingOk(c, "CmdSetPipeline outside command recording")) return; c->dev->core.CmdSetPipeline(c->real, p); }
+        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t i, const VriDescriptorSet* s) { CmdBufVal* c = CV(cmd); if (!RecordingOk(c, "CmdSetDescriptorSet outside command recording")) return; c->dev->core.CmdSetDescriptorSet(c->real, i, s); }
+        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t i, const void* data, uint32_t size) { CmdBufVal* c = CV(cmd); if (!RecordingOk(c, "CmdSetConstants outside command recording")) return; c->dev->core.CmdSetConstants(c->real, i, data, size); }
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t s, const VriVertexBufferBinding* b, uint32_t n) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetVertexBuffers outside a render pass")) return; c->dev->core.CmdSetVertexBuffers(c->real, s, b, n); }
         void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer* cmd, VriBuffer* b, uint64_t off, VriIndexType t) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdSetIndexBuffer outside a render pass")) return; c->dev->core.CmdSetIndexBuffer(c->real, b, off, t); }
         void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d) { CmdBufVal* c = CV(cmd); if (!InsideOk(c, "CmdDraw outside a render pass")) return; c->dev->core.CmdDraw(c->real, d); }
