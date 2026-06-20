@@ -78,11 +78,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Vulkan SDK (MoltenVK)
+      - name: Install Vulkan SDK
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
           vulkan-query-version: latest
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, MoltenVK
+          # This action builds components from source; MoltenVK isn't in its set. Headers
+          # + loader are all the build needs - without a MoltenVK ICD, Vulkan finds no
+          # device at runtime and self-skips (fine for the experimental macOS run).
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
           vulkan-use-cache: true
 
       - name: Setup xmake
