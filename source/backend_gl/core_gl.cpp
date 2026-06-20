@@ -298,8 +298,8 @@ namespace vri::gl
         // ---- resources -----------------------------------------------------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
+            DeviceGL* d = Dev(device);
             GLuint id = 0;
-            glGenBuffers(1, &id);
             GLenum usage = GL_STATIC_DRAW;
             GLbitfield mapAccess = 0;
             if (desc->memoryLocation == VriMemoryLocation_HostReadback) { usage = GL_STREAM_READ; mapAccess = GL_MAP_READ_BIT; }
@@ -307,9 +307,18 @@ namespace vri::gl
             // Index buffers must stay element-class on WebGL (see BufferGL::target);
             // everything else uses the neutral GL_COPY_WRITE_BUFFER binding point.
             const GLenum target = (desc->usage & VriBufferUsage_IndexBuffer) ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
-            glBindBuffer(target, id);
-            glBufferData(target, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
-            glBindBuffer(target, 0);
+            if (d->Features().dsa) // GL 4.5: allocate without disturbing any binding point
+            {
+                glCreateBuffers(1, &id);
+                glNamedBufferData(id, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
+            }
+            else
+            {
+                glGenBuffers(1, &id);
+                glBindBuffer(target, id);
+                glBufferData(target, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
+                glBindBuffer(target, 0);
+            }
             BufferGL* b = new BufferGL{};
             b->device = Dev(device); b->id = id; b->size = desc->size; b->target = target; b->mapAccess = mapAccess;
             *out = ToHandle(b);
@@ -342,6 +351,8 @@ namespace vri::gl
                 }
                 return b->shadow;
             }
+            if (b->device->Features().dsa) // GL 4.5: map without binding
+                return glMapNamedBufferRange(b->id, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
             glBindBuffer(b->target, b->id);
             return glMapBufferRange(b->target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
         }
@@ -360,6 +371,11 @@ namespace vri::gl
                 b->shadow = nullptr;
                 return;
             }
+            if (b->device->Features().dsa) // GL 4.5: unmap without binding
+            {
+                glUnmapNamedBuffer(b->id);
+                return;
+            }
             glBindBuffer(b->target, b->id);
             glUnmapBuffer(b->target);
             glBindBuffer(b->target, 0);
@@ -374,6 +390,7 @@ namespace vri::gl
             const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
             const bool ms = desc->sampleNum > 1;
 
+            const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
             GLuint id = 0;
             GLenum target = GL_TEXTURE_2D;
             bool isRenderbuffer = false;
@@ -392,11 +409,24 @@ namespace vri::gl
                 // Desktop GL: a multisample texture (samplable via sampler2DMS/texelFetch -
                 // more capable than a renderbuffer), attached + resolved like any target.
                 target = GL_TEXTURE_2D_MULTISAMPLE;
-                glGenTextures(1, &id);
-                glBindTexture(target, id);
-                glTexStorage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
-                glBindTexture(target, 0);
+                if (dsa)
+                {
+                    glCreateTextures(target, 1, &id);
+                    glTextureStorage2DMultisample(id, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
+                }
+                else
+                {
+                    glGenTextures(1, &id);
+                    glBindTexture(target, id);
+                    glTexStorage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
+                    glBindTexture(target, 0);
+                }
 #endif
+            }
+            else if (dsa)
+            {
+                glCreateTextures(GL_TEXTURE_2D, 1, &id);
+                glTextureStorage2D(id, mips, gf.internalFormat, w, h);
             }
             else
             {
@@ -466,7 +496,8 @@ namespace vri::gl
         VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, VriDescriptor** out)
         {
             GLuint s = 0;
-            glGenSamplers(1, &s);
+            if (Dev(device)->Features().dsa) glCreateSamplers(1, &s); // GL 4.5: pre-initialized sampler object
+            else glGenSamplers(1, &s);
             glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, desc->magFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, desc->minFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             DescriptorGL* v = new DescriptorGL{};
@@ -800,6 +831,7 @@ namespace vri::gl
             }
             if (a->depth) { const DescriptorGL* dv = Desc(a->depth->view); key.depthId = dv->texture->id; key.depthMip = dv->mip; }
 
+            const bool dsa = c->device->Features().dsa; // GL 4.5: configure + clear the FBO by name
             bool isNew = false;
             const GLuint fbo = c->device->AcquireFbo(key, isNew);
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -812,17 +844,24 @@ namespace vri::gl
                 {
                     const DescriptorGL* v = Desc(a->colors[i].view);
                     if (v->texture->isRenderbuffer) // MSAA renderbuffer attachment
-                        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
+                    {
+                        if (dsa) glNamedFramebufferRenderbuffer(fbo, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
+                        else glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
+                    }
+                    else if (dsa)
+                        glNamedFramebufferTexture(fbo, GL_COLOR_ATTACHMENT0 + i, v->texture->id, static_cast<GLint>(v->mip));
                     else
                         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
                     drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
                 }
-                glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
+                if (dsa) glNamedFramebufferDrawBuffers(fbo, static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
+                else glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
                 if (a->depth)
                 {
                     const DescriptorGL* dv = Desc(a->depth->view);
                     const GLenum attach = dv->texture->glFormat == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
-                    glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
+                    if (dsa) glNamedFramebufferTexture(fbo, attach, dv->texture->id, static_cast<GLint>(dv->mip));
+                    else glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
                 }
             }
 
@@ -836,7 +875,11 @@ namespace vri::gl
                 }
             for (uint32_t i = 0; i < a->colorNum; ++i)
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
-                    glClearBufferfv(GL_COLOR, static_cast<GLint>(i), a->colors[i].clearValue.color.f32);
+                {
+                    const GLfloat* col = a->colors[i].clearValue.color.f32;
+                    if (dsa) glClearNamedFramebufferfv(fbo, GL_COLOR, static_cast<GLint>(i), col);
+                    else glClearBufferfv(GL_COLOR, static_cast<GLint>(i), col);
+                }
             if (a->depth && a->depth->loadOp == VriAttachmentLoadOp_Clear)
             {
                 const bool hasStencil = Desc(a->depth->view)->texture->glFormat == GL_DEPTH_STENCIL;
@@ -844,13 +887,16 @@ namespace vri::gl
                 if (hasStencil)
                 {
                     glStencilMask(0xFFu);
-                    glClearBufferfi(GL_DEPTH_STENCIL, 0, a->depth->clearValue.depthStencil.depth,
-                                    static_cast<GLint>(a->depth->clearValue.depthStencil.stencil));
+                    const GLfloat depth = a->depth->clearValue.depthStencil.depth;
+                    const GLint stencil = static_cast<GLint>(a->depth->clearValue.depthStencil.stencil);
+                    if (dsa) glClearNamedFramebufferfi(fbo, GL_DEPTH_STENCIL, 0, depth, stencil);
+                    else glClearBufferfi(GL_DEPTH_STENCIL, 0, depth, stencil);
                 }
                 else
                 {
                     const GLfloat d = a->depth->clearValue.depthStencil.depth;
-                    glClearBufferfv(GL_DEPTH, 0, &d);
+                    if (dsa) glClearNamedFramebufferfv(fbo, GL_DEPTH, 0, &d);
+                    else glClearBufferfv(GL_DEPTH, 0, &d);
                 }
             }
         }
@@ -965,10 +1011,11 @@ namespace vri::gl
             }
             // Textures + samplers are bound per combined sampler the pipeline declared:
             // GLSL fuses (texture, sampler) into one sampler2D at a texture unit.
+            const bool dsa = c->device->Features().dsa; // GL 4.5: glBindTextureUnit + glTextureParameteri (no active-unit churn)
             if (c->boundPipeline)
                 for (const CombinedSamplerGL& cs : c->boundPipeline->combinedSamplers)
                 {
-                    glActiveTexture(GL_TEXTURE0 + cs.unit);
+                    if (!dsa) glActiveTexture(GL_TEXTURE0 + cs.unit);
                     if (cs.texSet == setIndex)
                     {
                         auto it = s->bound.find(cs.texBinding);
@@ -976,9 +1023,17 @@ namespace vri::gl
                         {
                             const DescriptorGL* tv = it->second;
                             if (tv->texture->isRenderbuffer) continue; // renderbuffers aren't sampled
-                            glBindTexture(tv->texture->target, tv->texture->id);
                             // Honor the view's base mip so a mip-range view samples that level.
-                            glTexParameteri(tv->texture->target, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
+                            if (dsa)
+                            {
+                                glBindTextureUnit(cs.unit, tv->texture->id);
+                                glTextureParameteri(tv->texture->id, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
+                            }
+                            else
+                            {
+                                glBindTexture(tv->texture->target, tv->texture->id);
+                                glTexParameteri(tv->texture->target, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
+                            }
                         }
                     }
                     if (cs.smpSet == setIndex)
@@ -1072,6 +1127,11 @@ namespace vri::gl
             // sees it bound to a non-element target (which would taint it).
             const BufferGL* s = Buf(src);
             const BufferGL* d = Buf(dst);
+            if (s->device->Features().dsa) // GL 4.5: copy without disturbing binding points
+            {
+                glCopyNamedBufferSubData(s->id, d->id, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
+                return;
+            }
             const GLenum rt = s->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_READ_BUFFER;
             const GLenum wt = d->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
             glBindBuffer(rt, s->id);
@@ -1103,12 +1163,18 @@ namespace vri::gl
             TextureGL* t = Tex(dst);
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
-            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id);
-            glBindTexture(t->target, t->id);
-            glTexSubImage2D(t->target, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
-                            static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType,
-                            reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset)));
-            glBindTexture(t->target, 0);
+            const void* off = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
+            if (t->device->Features().dsa) // GL 4.5: upload without binding the texture
+                glTextureSubImage2D(t->id, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
+                                    static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
+            else
+            {
+                glBindTexture(t->target, t->id);
+                glTexSubImage2D(t->target, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
+                                static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
+                glBindTexture(t->target, 0);
+            }
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         }
         void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*, VriBuffer* dst, VriTexture* src, const VriBufferTextureCopyDesc* region)

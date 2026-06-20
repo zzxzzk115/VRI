@@ -94,7 +94,14 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
      GL's `gl_VertexID`/`gl_InstanceID` do not), so cross-backend parity needs handling,
      not just the `*BaseInstance` call.
    - separate attrib-format VAOs (4.3), MDI + persistent-mapped buffers (later).
-5. **DSA on 4.5** — optional, desktop-only resource/FBO management.
+5. ✅ **DSA on 4.5** — desktop GL 4.5+ now creates/updates resources by name, no
+   bind-to-edit: `glCreateBuffers`/`glNamedBuffer*` (create/map/unmap/copy),
+   `glCreateTextures`/`glTextureStorage2D`/`glTextureSubImage2D` (incl. multisample),
+   `glCreateSamplers`, `glBindTextureUnit` + `glTextureParameteri` at descriptor bind,
+   and named render-pass FBO config + clears (`glCreateFramebuffers`/
+   `glNamedFramebuffer*`/`glClearNamedFramebuffer*`). No active-texture / COPY_WRITE /
+   PIXEL_UNPACK binding-state clobber. ES/WebGL2 + pre-4.5 desktop keep the bind path
+   (so CI's macOS 4.1 exercises the fallback; Linux llvmpipe + Windows exercise DSA).
 
 Each step is independent, desktop-gated, and must keep ES/WebGL2 + the full CI matrix
 green.
