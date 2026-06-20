@@ -9,6 +9,7 @@
 // Run:   emrun (headless Chrome) over the generated .html
 
 #include <vri/vri.h>
+#include <vri/ext/vri_ext_swapchain.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -1140,6 +1141,84 @@ namespace
         vriDestroyDevice(dev);
         return ok;
     }
+
+    // Web canvas swapchain: render the red triangle into a backbuffer obtained from the
+    // swapchain interface, Present (blit to the canvas / FBO 0), and read the backbuffer
+    // back -> center red. Exercises the full GL web-swapchain API path in the browser.
+    bool RenderSwapchainAndProbe(bool& centerRed)
+    {
+        centerRed = false;
+        VriDeviceCreationDesc dc{};
+        dc.graphicsAPI = VriGraphicsAPI_OpenGLES; dc.enableValidation = VRI_TRUE; dc.bestEffort = VRI_TRUE;
+        VriDevice* dev = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success) return false;
+        VriCoreInterface c{};
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success) { vriDestroyDevice(dev); return false; }
+        VriSwapChainInterface sw{};
+        if (vriGetInterface(dev, VRI_INTERFACE_SWAPCHAIN, sizeof(sw), &sw) != VriResult_Success)
+        { std::printf("VRI_WEBGL: swapchain interface FAILED\n"); vriDestroyDevice(dev); return false; }
+        VriQueue* queue = nullptr; c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
+
+        VriSwapChainDesc scd{};
+        scd.window.type = VriWindowSystem_Web; scd.window.handle.web.selector = "#canvas";
+        scd.queue = queue; scd.format = VriFormat_RGBA8_UNORM; scd.width = kW; scd.height = kH; scd.textureNum = 2; scd.vsync = VRI_TRUE;
+        VriSwapChain* swc = nullptr;
+        if (sw.CreateSwapChain(dev, &scd, &swc) != VriResult_Success)
+        { std::printf("VRI_WEBGL: CreateSwapChain FAILED\n"); vriDestroyDevice(dev); return false; }
+
+        VriPipelineLayoutDesc ld{}; VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(dev, &ld, &layout);
+        VriShaderDesc sh[2]{};
+        sh[0].stage = VriShaderStage_Vertex;   sh[0].bytecode = g_triangleSpv; sh[0].bytecodeSize = sizeof(g_triangleSpv); sh[0].entryPointName = "vertexMain";
+        sh[1].stage = VriShaderStage_Fragment; sh[1].bytecode = g_triangleSpv; sh[1].bytecodeSize = sizeof(g_triangleSpv); sh[1].entryPointName = "fragmentMain";
+        VriColorAttachmentDesc ca{}; ca.format = VriFormat_RGBA8_UNORM; ca.colorWriteMask = VriColorWrite_RGBA;
+        VriGraphicsPipelineDesc pd{};
+        pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2; pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
+        pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f; pd.multisample.sampleNum = 1; pd.outputMerger.colors = &ca; pd.outputMerger.colorNum = 1;
+        VriPipeline* pipeline = nullptr;
+        if (c.CreateGraphicsPipeline(dev, &pd, &pipeline) != VriResult_Success)
+        { std::printf("VRI_WEBGL: swapchain pipeline FAILED\n"); sw.DestroySwapChain(swc); vriDestroyDevice(dev); return false; }
+
+        VriBufferDesc bd{}; bd.size = static_cast<uint64_t>(kW) * kH * 4; bd.usage = VriBufferUsage_TransferDst; bd.memoryLocation = VriMemoryLocation_HostReadback;
+        VriBuffer* readback = nullptr; c.CreateBuffer(dev, &bd, &readback);
+        VriCommandAllocator* alloc = nullptr; c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
+        VriCommandBuffer* cmd = nullptr; c.CreateCommandBuffer(alloc, &cmd);
+        VriFence* fence = nullptr; c.CreateFence(dev, 0, &fence);
+
+        uint32_t index = 0; sw.AcquireNextTexture(swc, nullptr, 0, &index);
+        VriTexture* texs[8] = {}; uint32_t cnt = 8; sw.GetSwapChainTextures(swc, texs, &cnt);
+        VriTexture* backbuffer = texs[index];
+        VriTextureViewDesc vdsc{}; vdsc.texture = backbuffer; vdsc.viewType = VriTextureViewType_2D; vdsc.format = VriFormat_Unknown; vdsc.aspect = VriImageAspect_Color;
+        VriDescriptor* view = nullptr; c.CreateTextureView(dev, &vdsc, &view);
+
+        c.BeginCommandBuffer(cmd);
+        VriAttachmentDesc rt{}; rt.view = view; rt.loadOp = VriAttachmentLoadOp_Clear; rt.storeOp = VriAttachmentStoreOp_Store; rt.clearValue.color.f32[3] = 1.0f;
+        VriAttachmentsDesc att{}; att.colors = &rt; att.colorNum = 1; att.renderArea.width = kW; att.renderArea.height = kH; att.layerNum = 1;
+        c.CmdBeginRendering(cmd, &att);
+        VriViewport vp{0, 0, static_cast<float>(kW), static_cast<float>(kH), 0, 1}; c.CmdSetViewports(cmd, &vp, 1);
+        VriRect scr{0, 0, kW, kH}; c.CmdSetScissors(cmd, &scr, 1);
+        c.CmdSetPipeline(cmd, pipeline);
+        VriDrawDesc draw{}; draw.vertexNum = 3; draw.instanceNum = 1; c.CmdDraw(cmd, &draw);
+        c.CmdEndRendering(cmd);
+        VriBufferTextureCopyDesc copy{}; copy.texture.aspect = VriImageAspect_Color; copy.texture.layerNum = 1;
+        c.CmdReadbackTextureToBuffer(cmd, readback, backbuffer, &copy);
+        c.EndCommandBuffer(cmd);
+
+        VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = 1;
+        VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
+        c.QueueSubmit(queue, &sub); c.Wait(fence, 1);
+        sw.Present(swc, nullptr, 0); // blit backbuffer -> canvas (exercises the web present path)
+
+        const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, bd.size));
+        bool ok = px != nullptr;
+        if (ok) { const uint32_t o = ((kH / 2) * kW + (kW / 2)) * 4; centerRed = px[o + 0] == 255 && px[o + 1] == 0 && px[o + 2] == 0; c.UnmapBuffer(readback); }
+
+        c.DeviceWaitIdle(dev);
+        c.DestroyFence(fence); c.DestroyCommandAllocator(alloc); c.DestroyPipeline(pipeline); c.DestroyPipelineLayout(layout);
+        c.DestroyBuffer(readback); c.DestroyDescriptor(view);
+        sw.DestroySwapChain(swc);
+        vriDestroyDevice(dev);
+        return ok;
+    }
 } // namespace
 
 int main()
@@ -1193,9 +1272,13 @@ int main()
     const bool ranMsaa = RenderMsaaAndProbe(msaaEdge);
     const bool msaaPass = ranMsaa && msaaEdge;
 
-    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass && scissorPass && computeNoPass && msaaPass;
-    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: ran=%d ok=%d | msaa: ran=%d edge=%d)\n",
-                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk, ranScissor, scissorOk, ranComputeNo, computeNoOk, ranMsaa, msaaEdge);
+    bool swapRed = false;
+    const bool ranSwap = RenderSwapchainAndProbe(swapRed);
+    const bool swapPass = ranSwap && swapRed;
+
+    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass && scissorPass && computeNoPass && msaaPass && swapPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: ran=%d ok=%d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
+                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk, ranScissor, scissorOk, ranComputeNo, computeNoOk, ranMsaa, msaaEdge, ranSwap, swapRed);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.

@@ -100,9 +100,21 @@ namespace vri::gl
             glGenFramebuffers(1, &s->blitFbo);
             *out = ToHandle(s);
             return VriResult_Success;
+#elif defined(__EMSCRIPTEN__)
+            // Web: the device's WebGL2 context already owns the canvas (its default
+            // framebuffer). Backbuffers are offscreen textures; Present blits the acquired
+            // one onto FBO 0 (the canvas). No platform window/context glue is needed.
+            if (desc->window.type != VriWindowSystem_Web && desc->window.type != VriWindowSystem_None)
+                d->ReportError("GL swapchain (web): expected VriWindowSystem_Web (canvas); presenting to the default canvas");
+            SwapChainGL* s = new SwapChainGL{};
+            s->device = d; s->width = w; s->height = h; s->format = desc->format; s->vsync = desc->vsync != VRI_FALSE;
+            for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
+            glGenFramebuffers(1, &s->blitFbo);
+            *out = ToHandle(s);
+            return VriResult_Success;
 #else
             (void)d; (void)desc; (void)out; (void)n; (void)w; (void)h;
-            Dev(device)->ReportError("GL swapchain: windowed present is only implemented on Win32 (desktop) so far");
+            Dev(device)->ReportError("GL swapchain: windowed present is only implemented on Win32 / Web so far");
             return VriResult_Unsupported;
 #endif
         }
@@ -176,6 +188,18 @@ namespace vri::gl
             SwapBuffers(hdc); // vsync follows the window's swap interval (WGL_EXT_swap_control not wired)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             wglMakeCurrent(devDc, rc); // restore the device's drawable so later rendering is unaffected
+            return VriResult_Success;
+#elif defined(__EMSCRIPTEN__)
+            // Web: blit the acquired backbuffer onto the canvas (default framebuffer 0).
+            // The browser presents the canvas when control returns to the event loop.
+            SwapChainGL* s = Swap(swapChain);
+            const TextureGL* bb = s->textures[s->currentIndex];
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // the canvas
+            const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             return VriResult_Success;
 #else
             (void)swapChain;

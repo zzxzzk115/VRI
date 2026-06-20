@@ -210,11 +210,9 @@ namespace vri::gl
     void DeviceGL::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceGL(), sizeof(VriCoreInterface));
-#if !defined(__EMSCRIPTEN__)
-        // Windowed presentation (Win32 WGL today; other desktop platforms report
-        // Unsupported at CreateSwapChain). Web canvas presentation lands separately.
+        // Presentation: Win32 WGL (desktop) + Web canvas (Emscripten). Other desktop
+        // platforms register the interface but report Unsupported at CreateSwapChain.
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceGL(), sizeof(VriSwapChainInterface));
-#endif
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)
