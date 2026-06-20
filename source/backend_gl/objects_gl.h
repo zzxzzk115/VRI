@@ -170,11 +170,25 @@ namespace vri::gl
         uint32_t  bindingSlot; // CmdSetVertexBuffers slot to source from
     };
 
+    // A vertex-buffer binding point used by the pipeline's separate-format VAO:
+    // the stream slot (CmdSetVertexBuffers slot) and its stride. The VAO bakes in
+    // the attribute *format* once; only the buffer+offset+stride is set per draw.
+    struct VboBindingGL
+    {
+        uint32_t slot;
+        GLsizei  stride;
+    };
+
     struct PipelineGL
     {
         DeviceGL* device;
         GLuint    program;
         bool      isCompute = false;
+        // Separate attribute format (GL 4.3+): a per-pipeline VAO with the vertex
+        // format baked in, replacing per-draw glVertexAttribPointer churn. 0 when
+        // the context lacks separate-format support (classic path uses the default VAO).
+        GLuint                     formatVao = 0;
+        std::vector<VboBindingGL>  vboBindings; // unique stream slots + strides for glBindVertexBuffer
         GLenum    topology;
         uint32_t  patchVertices = 0; // tessellation: glPatchParameteri(GL_PATCH_VERTICES) when topology == GL_PATCHES
         bool      cullEnable;

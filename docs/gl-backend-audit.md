@@ -89,11 +89,22 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
    - ✅ **FBO cache** — render-pass FBOs are cached on the device keyed by their
      attachment set (configured once, reused as-is); evicted when a referenced texture
      is destroyed. No per-pass `glGen/DeleteFramebuffers`. All-GL (desktop + WebGL2).
-   - **base-vertex/base-instance** — NOT a clean win: `SV_VertexID`/`SV_InstanceID`
-     semantics differ (Vulkan's `VertexIndex`/`InstanceIndex` include the base offset;
-     GL's `gl_VertexID`/`gl_InstanceID` do not), so cross-backend parity needs handling,
-     not just the `*BaseInstance` call.
-   - separate attrib-format VAOs (4.3), MDI + persistent-mapped buffers (later).
+   - ✅ **separate attribute format + per-pipeline VAO (4.3)** — each graphics
+     pipeline bakes its vertex *format* into its own VAO once (`glVertexArrayAttrib*`
+     under DSA, else `glVertexAttribFormat`/`glVertexAttribBinding`); at draw we only
+     point each stream binding at a buffer (`glVertexArrayVertexBuffer` /
+     `glBindVertexBuffer`), replacing per-draw `glVertexAttribPointer` + enable/disable
+     churn on the shared default VAO. Gated on `GlFeatures::separateAttrib`; pre-4.3 /
+     GLES / WebGL2 keep the classic per-draw path (the 4.3+ entry points aren't even
+     declared in the Emscripten GLES3 headers, so the modern block is `#if`-compiled out).
+   - **base-vertex/base-instance** — `SV_VertexID`/`SV_InstanceID` parity: Vulkan's
+     `VertexIndex`/`InstanceIndex` include the base offset, GL's `gl_VertexID`/
+     `gl_InstanceID` do not. SPIRV-Cross already bridges this via `gl_BaseVertexARB`/
+     `gl_BaseInstanceARB` (auto-populated by the `*BaseVertex`/`*BaseInstance` draws on
+     `GL_ARB_shader_draw_parameters`, core in 4.6) with a `SPIRV_Cross_Base*` uniform
+     fallback — so honoring the base offsets is calling the right draw variant (+ setting
+     the uniform when its location resolves). Next up.
+   - MDI + persistent-mapped buffers (later).
 5. ✅ **DSA on 4.5** — desktop GL 4.5+ now creates/updates resources by name, no
    bind-to-edit: `glCreateBuffers`/`glNamedBuffer*` (create/map/unmap/copy),
    `glCreateTextures`/`glTextureStorage2D`/`glTextureSubImage2D` (incl. multisample),

@@ -298,7 +298,6 @@ namespace vri::gl
         // ---- resources -----------------------------------------------------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
-            DeviceGL* d = Dev(device);
             GLuint id = 0;
             GLenum usage = GL_STATIC_DRAW;
             GLbitfield mapAccess = 0;
@@ -307,12 +306,14 @@ namespace vri::gl
             // Index buffers must stay element-class on WebGL (see BufferGL::target);
             // everything else uses the neutral GL_COPY_WRITE_BUFFER binding point.
             const GLenum target = (desc->usage & VriBufferUsage_IndexBuffer) ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
-            if (d->Features().dsa) // GL 4.5: allocate without disturbing any binding point
+#if !defined(__EMSCRIPTEN__)
+            if (Dev(device)->Features().dsa) // GL 4.5: allocate without disturbing any binding point
             {
                 glCreateBuffers(1, &id);
                 glNamedBufferData(id, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
             }
             else
+#endif
             {
                 glGenBuffers(1, &id);
                 glBindBuffer(target, id);
@@ -351,8 +352,10 @@ namespace vri::gl
                 }
                 return b->shadow;
             }
+#if !defined(__EMSCRIPTEN__)
             if (b->device->Features().dsa) // GL 4.5: map without binding
                 return glMapNamedBufferRange(b->id, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
+#endif
             glBindBuffer(b->target, b->id);
             return glMapBufferRange(b->target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
         }
@@ -371,11 +374,13 @@ namespace vri::gl
                 b->shadow = nullptr;
                 return;
             }
+#if !defined(__EMSCRIPTEN__)
             if (b->device->Features().dsa) // GL 4.5: unmap without binding
             {
                 glUnmapNamedBuffer(b->id);
                 return;
             }
+#endif
             glBindBuffer(b->target, b->id);
             glUnmapBuffer(b->target);
             glBindBuffer(b->target, 0);
@@ -390,7 +395,9 @@ namespace vri::gl
             const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
             const bool ms = desc->sampleNum > 1;
 
+#if !defined(__EMSCRIPTEN__) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
             const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
+#endif
             GLuint id = 0;
             GLenum target = GL_TEXTURE_2D;
             bool isRenderbuffer = false;
@@ -423,11 +430,13 @@ namespace vri::gl
                 }
 #endif
             }
+#if !defined(__EMSCRIPTEN__)
             else if (dsa)
             {
                 glCreateTextures(GL_TEXTURE_2D, 1, &id);
                 glTextureStorage2D(id, mips, gf.internalFormat, w, h);
             }
+#endif
             else
             {
                 glGenTextures(1, &id);
@@ -496,8 +505,11 @@ namespace vri::gl
         VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, VriDescriptor** out)
         {
             GLuint s = 0;
+#if !defined(__EMSCRIPTEN__)
             if (Dev(device)->Features().dsa) glCreateSamplers(1, &s); // GL 4.5: pre-initialized sampler object
-            else glGenSamplers(1, &s);
+            else
+#endif
+            glGenSamplers(1, &s);
             glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, desc->magFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, desc->minFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             DescriptorGL* v = new DescriptorGL{};
@@ -669,6 +681,46 @@ namespace vri::gl
                 }
                 p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, a.offset, stride, bindingSlot});
             }
+            // Separate attribute format (GL 4.3+): bake the vertex format into a
+            // per-pipeline VAO once. At draw we only point each stream binding at a
+            // buffer (glBindVertexBuffer), avoiding per-draw glVertexAttribPointer.
+            // Pre-4.3 / GLES / WebGL2 keep the classic path (formatVao stays 0); the
+            // 4.3+ entry points are undeclared in the Emscripten GLES3 headers.
+#if !defined(__EMSCRIPTEN__)
+            if (d->Features().separateAttrib)
+            {
+                const bool dsa = d->Features().dsa; // 4.5: configure the VAO by name
+                GLuint vao = 0;
+                if (dsa)
+                    glCreateVertexArrays(1, &vao);
+                else { glGenVertexArrays(1, &vao); glBindVertexArray(vao); }
+                for (const VertexAttribGL& a : p->vertexAttribs)
+                {
+                    if (dsa)
+                    {
+                        glEnableVertexArrayAttrib(vao, a.location);
+                        glVertexArrayAttribFormat(vao, a.location, a.size, a.type, a.normalized, a.offset);
+                        glVertexArrayAttribBinding(vao, a.location, a.bindingSlot);
+                    }
+                    else
+                    {
+                        glEnableVertexAttribArray(a.location);
+                        glVertexAttribFormat(a.location, a.size, a.type, a.normalized, a.offset);
+                        glVertexAttribBinding(a.location, a.bindingSlot);
+                    }
+                }
+                if (!dsa) glBindVertexArray(d->DefaultVao()); // restore; DSA never bound it
+                p->formatVao = vao;
+                // Unique stream slots (with stride) to rebind per draw.
+                for (const VertexAttribGL& a : p->vertexAttribs)
+                {
+                    bool seen = false;
+                    for (const VboBindingGL& vb : p->vboBindings)
+                        if (vb.slot == a.bindingSlot) { seen = true; break; }
+                    if (!seen) p->vboBindings.push_back(VboBindingGL{a.bindingSlot, a.stride});
+                }
+            }
+#endif // !__EMSCRIPTEN__ (separate-format VAO)
             p->topology = ToGLTopology(desc->inputAssembly.topology);
             p->patchVertices = desc->tessellation.patchControlPoints;
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
@@ -759,6 +811,7 @@ namespace vri::gl
             if (!pipeline) return;
             PipelineGL* p = Pipe(pipeline);
             glDeleteProgram(p->program);
+            if (p->formatVao) glDeleteVertexArrays(1, &p->formatVao);
             delete p;
         }
 
@@ -831,7 +884,9 @@ namespace vri::gl
             }
             if (a->depth) { const DescriptorGL* dv = Desc(a->depth->view); key.depthId = dv->texture->id; key.depthMip = dv->mip; }
 
-            const bool dsa = c->device->Features().dsa; // GL 4.5: configure + clear the FBO by name
+#if !defined(__EMSCRIPTEN__) // GL 4.5: configure + clear the FBO by name (undeclared on GLES3)
+            const bool dsa = c->device->Features().dsa;
+#endif
             bool isNew = false;
             const GLuint fbo = c->device->AcquireFbo(key, isNew);
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -843,25 +898,39 @@ namespace vri::gl
                 for (uint32_t i = 0; i < a->colorNum; ++i)
                 {
                     const DescriptorGL* v = Desc(a->colors[i].view);
+                    const GLenum att = GL_COLOR_ATTACHMENT0 + i;
                     if (v->texture->isRenderbuffer) // MSAA renderbuffer attachment
                     {
-                        if (dsa) glNamedFramebufferRenderbuffer(fbo, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
-                        else glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
+#if !defined(__EMSCRIPTEN__)
+                        if (dsa) glNamedFramebufferRenderbuffer(fbo, att, GL_RENDERBUFFER, v->texture->id);
+                        else
+#endif
+                        glFramebufferRenderbuffer(GL_FRAMEBUFFER, att, GL_RENDERBUFFER, v->texture->id);
                     }
-                    else if (dsa)
-                        glNamedFramebufferTexture(fbo, GL_COLOR_ATTACHMENT0 + i, v->texture->id, static_cast<GLint>(v->mip));
                     else
-                        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
-                    drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
+                    {
+#if !defined(__EMSCRIPTEN__)
+                        if (dsa) glNamedFramebufferTexture(fbo, att, v->texture->id, static_cast<GLint>(v->mip));
+                        else
+#endif
+                        glFramebufferTexture2D(GL_FRAMEBUFFER, att, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
+                    }
+                    drawBufs[i] = att;
                 }
+#if !defined(__EMSCRIPTEN__)
                 if (dsa) glNamedFramebufferDrawBuffers(fbo, static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
-                else glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
+                else
+#endif
+                glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
                 if (a->depth)
                 {
                     const DescriptorGL* dv = Desc(a->depth->view);
                     const GLenum attach = dv->texture->glFormat == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
+#if !defined(__EMSCRIPTEN__)
                     if (dsa) glNamedFramebufferTexture(fbo, attach, dv->texture->id, static_cast<GLint>(dv->mip));
-                    else glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
+                    else
+#endif
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
                 }
             }
 
@@ -877,8 +946,11 @@ namespace vri::gl
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
                 {
                     const GLfloat* col = a->colors[i].clearValue.color.f32;
+#if !defined(__EMSCRIPTEN__)
                     if (dsa) glClearNamedFramebufferfv(fbo, GL_COLOR, static_cast<GLint>(i), col);
-                    else glClearBufferfv(GL_COLOR, static_cast<GLint>(i), col);
+                    else
+#endif
+                    glClearBufferfv(GL_COLOR, static_cast<GLint>(i), col);
                 }
             if (a->depth && a->depth->loadOp == VriAttachmentLoadOp_Clear)
             {
@@ -889,14 +961,20 @@ namespace vri::gl
                     glStencilMask(0xFFu);
                     const GLfloat depth = a->depth->clearValue.depthStencil.depth;
                     const GLint stencil = static_cast<GLint>(a->depth->clearValue.depthStencil.stencil);
+#if !defined(__EMSCRIPTEN__)
                     if (dsa) glClearNamedFramebufferfi(fbo, GL_DEPTH_STENCIL, 0, depth, stencil);
-                    else glClearBufferfi(GL_DEPTH_STENCIL, 0, depth, stencil);
+                    else
+#endif
+                    glClearBufferfi(GL_DEPTH_STENCIL, 0, depth, stencil);
                 }
                 else
                 {
                     const GLfloat d = a->depth->clearValue.depthStencil.depth;
+#if !defined(__EMSCRIPTEN__)
                     if (dsa) glClearNamedFramebufferfv(fbo, GL_DEPTH, 0, &d);
-                    else glClearBufferfv(GL_DEPTH, 0, &d);
+                    else
+#endif
+                    glClearBufferfv(GL_DEPTH, 0, &d);
                 }
             }
         }
@@ -1011,11 +1089,16 @@ namespace vri::gl
             }
             // Textures + samplers are bound per combined sampler the pipeline declared:
             // GLSL fuses (texture, sampler) into one sampler2D at a texture unit.
-            const bool dsa = c->device->Features().dsa; // GL 4.5: glBindTextureUnit + glTextureParameteri (no active-unit churn)
+#if !defined(__EMSCRIPTEN__) // GL 4.5: glBindTextureUnit + glTextureParameteri (undeclared on GLES3)
+            const bool dsa = c->device->Features().dsa; // no active-unit churn on the modern path
+#endif
             if (c->boundPipeline)
                 for (const CombinedSamplerGL& cs : c->boundPipeline->combinedSamplers)
                 {
-                    if (!dsa) glActiveTexture(GL_TEXTURE0 + cs.unit);
+#if !defined(__EMSCRIPTEN__)
+                    if (!dsa)
+#endif
+                        glActiveTexture(GL_TEXTURE0 + cs.unit);
                     if (cs.texSet == setIndex)
                     {
                         auto it = s->bound.find(cs.texBinding);
@@ -1024,12 +1107,14 @@ namespace vri::gl
                             const DescriptorGL* tv = it->second;
                             if (tv->texture->isRenderbuffer) continue; // renderbuffers aren't sampled
                             // Honor the view's base mip so a mip-range view samples that level.
+#if !defined(__EMSCRIPTEN__)
                             if (dsa)
                             {
                                 glBindTextureUnit(cs.unit, tv->texture->id);
                                 glTextureParameteri(tv->texture->id, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
                             }
                             else
+#endif
                             {
                                 glBindTexture(tv->texture->target, tv->texture->id);
                                 glTexParameteri(tv->texture->target, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
@@ -1063,6 +1148,28 @@ namespace vri::gl
         // separate attribute format). Disables any attribs the previous draw enabled.
         void SetupVertexAttribs(CommandBufferGL* c)
         {
+            // Separate-format path (GL 4.3+): bind the pipeline's pre-baked VAO and
+            // only point each stream at its buffer (format is already in the VAO).
+            // formatVao is always 0 on Emscripten (the 4.3+ path compiles out there).
+#if !defined(__EMSCRIPTEN__)
+            if (c->boundPipeline && c->boundPipeline->formatVao)
+            {
+                const PipelineGL* p = c->boundPipeline;
+                const bool dsa = c->device->Features().dsa;
+                glBindVertexArray(p->formatVao);
+                for (const VboBindingGL& vb : p->vboBindings)
+                {
+                    auto it = c->vertexBuffers.find(vb.slot);
+                    if (it == c->vertexBuffers.end())
+                        continue;
+                    if (dsa)
+                        glVertexArrayVertexBuffer(p->formatVao, vb.slot, it->second.id, static_cast<GLintptr>(it->second.offset), vb.stride);
+                    else
+                        glBindVertexBuffer(vb.slot, it->second.id, static_cast<GLintptr>(it->second.offset), vb.stride);
+                }
+                return;
+            }
+#endif
             glBindVertexArray(c->device->DefaultVao());
             for (uint32_t loc = 0; loc < 32; ++loc)
                 if (c->enabledAttribMask & (1u << loc))
@@ -1127,11 +1234,13 @@ namespace vri::gl
             // sees it bound to a non-element target (which would taint it).
             const BufferGL* s = Buf(src);
             const BufferGL* d = Buf(dst);
+#if !defined(__EMSCRIPTEN__)
             if (s->device->Features().dsa) // GL 4.5: copy without disturbing binding points
             {
                 glCopyNamedBufferSubData(s->id, d->id, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
                 return;
             }
+#endif
             const GLenum rt = s->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_READ_BUFFER;
             const GLenum wt = d->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
             glBindBuffer(rt, s->id);
@@ -1165,10 +1274,12 @@ namespace vri::gl
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
             const void* off = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
+#if !defined(__EMSCRIPTEN__)
             if (t->device->Features().dsa) // GL 4.5: upload without binding the texture
                 glTextureSubImage2D(t->id, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
                                     static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
             else
+#endif
             {
                 glBindTexture(t->target, t->id);
                 glTexSubImage2D(t->target, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,

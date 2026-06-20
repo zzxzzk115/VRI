@@ -30,10 +30,14 @@ namespace vri::gl
             return it->second;
         }
         GLuint fbo = 0;
+#if !defined(__EMSCRIPTEN__)
         // DSA (4.5) requires glCreateFramebuffers so the object exists before any
         // glNamedFramebuffer* call; the classic path uses gen + bind-to-configure.
+        // (glCreateFramebuffers isn't declared in the Emscripten GLES3 headers.)
         if (m_features.dsa) glCreateFramebuffers(1, &fbo);
-        else glGenFramebuffers(1, &fbo);
+        else
+#endif
+        glGenFramebuffers(1, &fbo);
         m_fboCache.emplace(key, fbo);
         isNew = true;
         return fbo;
