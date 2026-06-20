@@ -12,6 +12,7 @@ target("vri-tests")
     add_files("test_main.cpp")
     add_files("test_api_usage.cpp")
     add_files("test_descriptor_xbackend.cpp") -- runs on whichever backends are enabled
+    add_files("test_texture_xbackend.cpp")    -- sampled-texture (separate texture+sampler) parity
     add_files("test_coordsys_xbackend.cpp")   -- Y-up coordinate parity across backends
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then

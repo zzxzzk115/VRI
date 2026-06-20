@@ -5,6 +5,7 @@
 
 #include <vri/vri.h>
 
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -26,12 +27,15 @@ namespace vri::gl
     // a deferred stream for multi-threaded recording is a later enhancement.
     struct PipelineLayoutGL;
 
+    struct PipelineGL;
+
     struct CommandBufferGL
     {
         DeviceGL*               device;
-        GLuint                  fbo;         // transient FBO for the active render pass
-        GLenum                  topology;    // from the bound pipeline
-        const PipelineLayoutGL* boundLayout; // from CmdSetPipelineLayout (descriptor remap)
+        GLuint                  fbo;           // transient FBO for the active render pass
+        GLenum                  topology;      // from the bound pipeline
+        const PipelineLayoutGL* boundLayout;   // from CmdSetPipelineLayout (descriptor remap)
+        const PipelineGL*       boundPipeline; // from CmdSetPipeline (combined-sampler pairing)
     };
 
     struct BufferGL
@@ -116,6 +120,18 @@ namespace vri::gl
         std::unordered_map<uint32_t, const DescriptorGL*> bound; // binding -> view
     };
 
+    // A SPIRV-Cross-combined sampler (GLSL has no separate texture/sampler): the
+    // VRI texture at (texSet,texBinding) and sampler at (smpSet,smpBinding) both
+    // bind to GL texture unit `unit`. The combined sampler uniform is pointed at
+    // `unit` via glUniform1i at pipeline creation (name kept for that lookup).
+    struct CombinedSamplerGL
+    {
+        uint32_t    unit;
+        uint32_t    texSet, texBinding;
+        uint32_t    smpSet, smpBinding;
+        std::string name;
+    };
+
     struct PipelineGL
     {
         DeviceGL* device;
@@ -130,6 +146,7 @@ namespace vri::gl
         bool      blendEnable;
         GLenum    srcRGB, dstRGB, rgbOp, srcA, dstA, aOp;
         GLboolean colorMask[4];
+        std::vector<CombinedSamplerGL> combinedSamplers;
     };
 
     struct FenceGL

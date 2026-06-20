@@ -15,6 +15,7 @@
 
 #include "shaders/triangle_spv.h"     // g_triangleSpv     (solid red, vertex-id only)
 #include "shaders/triangle_ubo_spv.h" // g_triangleUboSpv  (color from a UBO descriptor)
+#include "shaders/triangle_tex_spv.h" // g_triangleTexSpv  (color sampled from a texture)
 
 #if defined(__EMSCRIPTEN__)
 #    include <emscripten/emscripten.h>
@@ -249,6 +250,137 @@ namespace
         vriDestroyDevice(dev);
         return ok;
     }
+
+    // Renders a triangle sampling a solid-blue texture (separate Texture + Sampler
+    // descriptors) and returns whether the center pixel is blue -- exercises the GL
+    // combined-sampler path on WebGL.
+    bool RenderTexAndProbe(bool& centerBlue)
+    {
+        centerBlue = false;
+
+        VriDeviceCreationDesc dc{};
+        dc.graphicsAPI = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation = VRI_TRUE;
+        dc.bestEffort = VRI_TRUE;
+        VriDevice* dev = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+
+        VriCoreInterface c{};
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success)
+            return false;
+        VriQueue* queue = nullptr;
+        c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
+
+        VriTextureDesc td{};
+        td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM;
+        td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
+        td.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc;
+        td.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* color = nullptr; c.CreateTexture(dev, &td, &color);
+        VriTextureViewDesc cvd{}; cvd.texture = color; cvd.viewType = VriTextureViewType_2D; cvd.format = VriFormat_Unknown; cvd.aspect = VriImageAspect_Color;
+        VriDescriptor* colorView = nullptr; c.CreateTextureView(dev, &cvd, &colorView);
+
+        constexpr uint32_t kTexW = 64, kTexH = 64;
+        VriTextureDesc std_{};
+        std_.type = VriTextureType_2D; std_.format = VriFormat_RGBA8_UNORM;
+        std_.width = kTexW; std_.height = kTexH; std_.depth = 1; std_.mipNum = 1; std_.layerNum = 1; std_.sampleNum = 1;
+        std_.usage = VriTextureUsage_ShaderResource | VriTextureUsage_TransferDst;
+        std_.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* sampled = nullptr; c.CreateTexture(dev, &std_, &sampled);
+        VriTextureViewDesc svd{}; svd.texture = sampled; svd.viewType = VriTextureViewType_2D; svd.format = VriFormat_Unknown; svd.aspect = VriImageAspect_Color;
+        VriDescriptor* texView = nullptr; c.CreateTextureView(dev, &svd, &texView);
+        VriSamplerDesc smpDesc{}; smpDesc.magFilter = VriFilter_Nearest; smpDesc.minFilter = VriFilter_Nearest;
+        smpDesc.addressModeU = VriAddressMode_ClampToEdge; smpDesc.addressModeV = VriAddressMode_ClampToEdge; smpDesc.addressModeW = VriAddressMode_ClampToEdge; smpDesc.maxLod = 1.0f;
+        VriDescriptor* sampler = nullptr; c.CreateSampler(dev, &smpDesc, &sampler);
+
+        const uint64_t texBytes = static_cast<uint64_t>(kTexW) * kTexH * 4;
+        VriBufferDesc sb{}; sb.size = texBytes; sb.usage = VriBufferUsage_TransferSrc; sb.memoryLocation = VriMemoryLocation_HostUpload;
+        VriBuffer* staging = nullptr; c.CreateBuffer(dev, &sb, &staging);
+        {
+            uint8_t* m = static_cast<uint8_t*>(c.MapBuffer(staging, 0, texBytes));
+            if (!m) return false;
+            for (uint64_t i = 0; i < texBytes; i += 4) { m[i + 0] = 0; m[i + 1] = 0; m[i + 2] = 255; m[i + 3] = 255; }
+            c.UnmapBuffer(staging);
+        }
+        VriBufferDesc rb{}; rb.size = static_cast<uint64_t>(kW) * kH * 4; rb.usage = VriBufferUsage_TransferDst; rb.memoryLocation = VriMemoryLocation_HostReadback;
+        VriBuffer* readback = nullptr; c.CreateBuffer(dev, &rb, &readback);
+
+        VriDescriptorRangeDesc ranges[2]{};
+        ranges[0].baseRegister = 0; ranges[0].descriptorNum = 1; ranges[0].descriptorType = VriDescriptorType_Texture; ranges[0].shaderStages = VriShaderStage_Fragment;
+        ranges[1].baseRegister = 1; ranges[1].descriptorNum = 1; ranges[1].descriptorType = VriDescriptorType_Sampler; ranges[1].shaderStages = VriShaderStage_Fragment;
+        VriDescriptorSetDesc setDesc{}; setDesc.registerSpace = 0; setDesc.ranges = ranges; setDesc.rangeNum = 2;
+        VriPipelineLayoutDesc ld{}; ld.descriptorSets = &setDesc; ld.descriptorSetNum = 1;
+        VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(dev, &ld, &layout);
+
+        VriShaderDesc sh[2]{};
+        sh[0].stage = VriShaderStage_Vertex;   sh[0].bytecode = g_triangleTexSpv; sh[0].bytecodeSize = sizeof(g_triangleTexSpv); sh[0].entryPointName = "vertexMain";
+        sh[1].stage = VriShaderStage_Fragment; sh[1].bytecode = g_triangleTexSpv; sh[1].bytecodeSize = sizeof(g_triangleTexSpv); sh[1].entryPointName = "fragmentMain";
+        VriColorAttachmentDesc ca{}; ca.format = VriFormat_RGBA8_UNORM; ca.colorWriteMask = VriColorWrite_RGBA;
+        VriGraphicsPipelineDesc pd{};
+        pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2;
+        pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
+        pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f;
+        pd.multisample.sampleNum = 1; pd.outputMerger.colors = &ca; pd.outputMerger.colorNum = 1;
+        VriPipeline* pipeline = nullptr;
+        if (c.CreateGraphicsPipeline(dev, &pd, &pipeline) != VriResult_Success)
+        {
+            std::printf("VRI_WEBGL: tex pipeline creation FAILED\n");
+            return false;
+        }
+
+        VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 1; pdsc.textureMaxNum = 1; pdsc.samplerMaxNum = 1;
+        VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(dev, &pdsc, &pool);
+        VriDescriptorSet* set = nullptr; c.AllocateDescriptorSets(pool, layout, 0, &set, 1);
+        const VriDescriptor* texDescs[1] = {texView};
+        const VriDescriptor* smpDescs[1] = {sampler};
+        VriDescriptorRangeUpdateDesc upd[2]{};
+        upd[0].descriptors = texDescs; upd[0].descriptorNum = 1; upd[0].baseDescriptor = 0;
+        upd[1].descriptors = smpDescs; upd[1].descriptorNum = 1; upd[1].baseDescriptor = 0;
+        c.UpdateDescriptorRanges(set, 0, 2, upd);
+
+        VriCommandAllocator* alloc = nullptr; c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
+        VriCommandBuffer* cmd = nullptr; c.CreateCommandBuffer(alloc, &cmd);
+        VriFence* fence = nullptr; c.CreateFence(dev, 0, &fence);
+
+        c.BeginCommandBuffer(cmd);
+        VriBufferTextureCopyDesc up{}; up.bufferOffset = 0; up.texture.aspect = VriImageAspect_Color; up.texture.layerNum = 1; up.texture.width = kTexW; up.texture.height = kTexH;
+        c.CmdUploadBufferToTexture(cmd, sampled, staging, &up);
+        VriAttachmentDesc rt{}; rt.view = colorView; rt.loadOp = VriAttachmentLoadOp_Clear; rt.storeOp = VriAttachmentStoreOp_Store; rt.clearValue.color.f32[3] = 1.0f;
+        VriAttachmentsDesc att{}; att.colors = &rt; att.colorNum = 1; att.renderArea.width = kW; att.renderArea.height = kH; att.layerNum = 1;
+        c.CmdBeginRendering(cmd, &att);
+        VriViewport vp{0, 0, static_cast<float>(kW), static_cast<float>(kH), 0, 1}; c.CmdSetViewports(cmd, &vp, 1);
+        VriRect sc{0, 0, kW, kH}; c.CmdSetScissors(cmd, &sc, 1);
+        c.CmdSetPipeline(cmd, pipeline);
+        c.CmdSetPipelineLayout(cmd, layout);
+        c.CmdSetDescriptorSet(cmd, 0, set);
+        VriDrawDesc draw{}; draw.vertexNum = 3; draw.instanceNum = 1; c.CmdDraw(cmd, &draw);
+        c.CmdEndRendering(cmd);
+        VriBufferTextureCopyDesc tc{}; tc.texture.aspect = VriImageAspect_Color; tc.texture.layerNum = 1;
+        c.CmdReadbackTextureToBuffer(cmd, readback, color, &tc);
+        c.EndCommandBuffer(cmd);
+
+        VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = 1;
+        VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
+        c.QueueSubmit(queue, &sub);
+        c.Wait(fence, 1);
+
+        const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rb.size));
+        bool ok = px != nullptr;
+        if (ok)
+        {
+            const uint32_t o = ((kH / 2) * kW + (kW / 2)) * 4;
+            centerBlue = (px[o + 0] == 0 && px[o + 1] == 0 && px[o + 2] == 255);
+            c.UnmapBuffer(readback);
+        }
+
+        c.DeviceWaitIdle(dev);
+        c.DestroyFence(fence); c.DestroyCommandAllocator(alloc); c.DestroyDescriptorPool(pool); c.DestroyPipeline(pipeline); c.DestroyPipelineLayout(layout);
+        c.DestroyDescriptor(sampler); c.DestroyDescriptor(texView); c.DestroyTexture(sampled);
+        c.DestroyBuffer(staging); c.DestroyBuffer(readback); c.DestroyDescriptor(colorView); c.DestroyTexture(color);
+        vriDestroyDevice(dev);
+        return ok;
+    }
 } // namespace
 
 int main()
@@ -262,9 +394,13 @@ int main()
     const bool ranUbo = RenderUboAndProbe(centerGreen);
     const bool uboPass = ranUbo && centerGreen;
 
-    const bool pass = triPass && uboPass;
-    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d)\n",
-                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen);
+    bool centerBlue = false;
+    const bool ranTex = RenderTexAndProbe(centerBlue);
+    const bool texPass = ranTex && centerBlue;
+
+    const bool pass = triPass && uboPass && texPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d)\n",
+                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.

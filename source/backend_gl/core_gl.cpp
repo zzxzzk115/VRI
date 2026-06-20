@@ -125,7 +125,8 @@ namespace vri::gl
         // / WebGL2 can't use layout(binding=) on uniform blocks).
         std::string UboBlockName(uint32_t glUnit) { return "VriUbo_" + std::to_string(glUnit); }
 
-        std::string SpirvToGlsl(const DeviceGL* d, const PipelineLayoutGL* layout, const void* bytecode, size_t bytecodeSize, const char* entry, spv::ExecutionModel model)
+        std::string SpirvToGlsl(const DeviceGL* d, const PipelineLayoutGL* layout, const void* bytecode, size_t bytecodeSize,
+                                const char* entry, spv::ExecutionModel model, std::vector<CombinedSamplerGL>* outCombined)
         {
             const uint32_t* words = static_cast<const uint32_t*>(bytecode);
             const size_t wordCount = bytecodeSize / 4;
@@ -149,12 +150,34 @@ namespace vri::gl
                 if (entry)
                     comp.set_entry_point(entry, model);
 
+                // GLSL has no separate texture/sampler: fuse each Vulkan (texture,
+                // sampler) pair into one combined sampler2D. Must run before
+                // get_shader_resources()/compile().
+                comp.build_combined_image_samplers();
+
+                const spirv_cross::ShaderResources res = comp.get_shader_resources();
+
+                // ESSL 300 / WebGL2 match inter-stage varyings by NAME (location
+                // qualifiers aren't allowed there), but compiling the stages separately
+                // yields mismatched names. Rename each varying deterministically by its
+                // location so the vertex output and fragment input agree.
+                auto renameByLocation = [&](const spirv_cross::SmallVector<spirv_cross::Resource>& vars) {
+                    for (const spirv_cross::Resource& r : vars)
+                    {
+                        const uint32_t loc = comp.get_decoration(r.id, spv::DecorationLocation);
+                        comp.set_name(r.id, "vriVarying" + std::to_string(loc));
+                    }
+                };
+                if (model == spv::ExecutionModelVertex)
+                    renameByLocation(res.stage_outputs);
+                else if (model == spv::ExecutionModelFragment)
+                    renameByLocation(res.stage_inputs);
+
                 // Remap each Vulkan (set, binding) to the flattened GL unit from the
-                // pipeline layout, and give uniform blocks a deterministic name so the
-                // binding point can be assigned via glUniformBlockBinding after link.
+                // pipeline layout, and give resources deterministic names so binding
+                // points can be assigned after link (glUniformBlockBinding / glUniform1i).
                 if (layout)
                 {
-                    const spirv_cross::ShaderResources res = comp.get_shader_resources();
                     for (const spirv_cross::Resource& u : res.uniform_buffers)
                     {
                         const uint32_t set = comp.get_decoration(u.id, spv::DecorationDescriptorSet);
@@ -165,6 +188,23 @@ namespace vri::gl
                             comp.set_decoration(u.id, spv::DecorationBinding, lb->glUnit);
                             comp.set_name(u.base_type_id, UboBlockName(lb->glUnit));
                         }
+                    }
+                    for (const spirv_cross::CombinedImageSampler& cis : comp.get_combined_image_samplers())
+                    {
+                        const uint32_t texSet = comp.get_decoration(cis.image_id, spv::DecorationDescriptorSet);
+                        const uint32_t texBind = comp.get_decoration(cis.image_id, spv::DecorationBinding);
+                        const uint32_t smpSet = comp.get_decoration(cis.sampler_id, spv::DecorationDescriptorSet);
+                        const uint32_t smpBind = comp.get_decoration(cis.sampler_id, spv::DecorationBinding);
+                        const LayoutBindingGL* lb = layout->Find(texSet, texBind);
+                        if (!lb)
+                            continue;
+                        const uint32_t unit = lb->glUnit;
+                        const std::string name = "VriTex_" + std::to_string(unit);
+                        comp.set_name(cis.combined_id, name);
+                        comp.unset_decoration(cis.combined_id, spv::DecorationDescriptorSet);
+                        comp.set_decoration(cis.combined_id, spv::DecorationBinding, unit);
+                        if (outCombined)
+                            outCombined->push_back(CombinedSamplerGL{unit, texSet, texBind, smpSet, smpBind, name});
                     }
                 }
                 return comp.compile();
@@ -396,16 +436,21 @@ namespace vri::gl
                 for (uint32_t r = 0; r < sd.rangeNum; ++r)
                 {
                     const VriDescriptorRangeDesc& rd = sd.ranges[r];
-                    uint32_t* counter = &texNext;
+                    // Samplers don't take a unit of their own: GLSL fuses them with a
+                    // texture, so the combined sampler rides the texture's unit.
+                    uint32_t* counter = nullptr;
                     if (rd.descriptorType == VriDescriptorType_ConstantBuffer) counter = &uboNext;
                     else if (rd.descriptorType == VriDescriptorType_StorageBuffer ||
                              rd.descriptorType == VriDescriptorType_StructuredBuffer) counter = &ssboNext;
+                    else if (rd.descriptorType == VriDescriptorType_Texture ||
+                             rd.descriptorType == VriDescriptorType_StorageTexture) counter = &texNext;
                     LayoutBindingGL b{};
                     b.set = sd.registerSpace;
                     b.binding = rd.baseRegister;
                     b.type = rd.descriptorType;
-                    b.glUnit = *counter;
-                    *counter += (rd.descriptorNum ? rd.descriptorNum : 1u);
+                    b.glUnit = counter ? *counter : 0u;
+                    if (counter)
+                        *counter += (rd.descriptorNum ? rd.descriptorNum : 1u);
                     l->bindings.push_back(b);
                 }
             }
@@ -418,14 +463,15 @@ namespace vri::gl
         {
             DeviceGL* d = Dev(device);
             const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
+            std::vector<CombinedSamplerGL> combined;
             GLuint vs = 0, fs = 0;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
-                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex));
+                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined));
                 else if (s.stage == VriShaderStage_Fragment)
-                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment));
+                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined));
             }
             if (!vs || !fs)
             {
@@ -462,10 +508,24 @@ namespace vri::gl
                         if (idx != GL_INVALID_INDEX)
                             glUniformBlockBinding(program, idx, b.glUnit);
                     }
+            // Point each combined sampler uniform at its texture unit (glUniform1i is
+            // the portable way; ESSL 300 / WebGL2 can't use layout(binding=) either).
+            if (!combined.empty())
+            {
+                glUseProgram(program);
+                for (const CombinedSamplerGL& cs : combined)
+                {
+                    const GLint loc = glGetUniformLocation(program, cs.name.c_str());
+                    if (loc >= 0)
+                        glUniform1i(loc, static_cast<GLint>(cs.unit));
+                }
+                glUseProgram(0);
+            }
 
             PipelineGL* p = new PipelineGL{};
             p->device = d;
             p->program = program;
+            p->combinedSamplers = std::move(combined);
             p->topology = ToGLTopology(desc->inputAssembly.topology);
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
             p->cullFace = desc->rasterization.cullMode == VriCullMode_Front ? GL_FRONT : GL_BACK;
@@ -602,6 +662,7 @@ namespace vri::gl
         {
             CommandBufferGL* c = CB(cmd);
             PipelineGL* p = Pipe(pipeline);
+            c->boundPipeline = p;
             glUseProgram(p->program);
             if (p->cullEnable) { glEnable(GL_CULL_FACE); glCullFace(p->cullFace); }
             else glDisable(GL_CULL_FACE);
@@ -640,8 +701,26 @@ namespace vri::gl
                                       static_cast<GLintptr>(view->bufferOffset),
                                       static_cast<GLsizeiptr>(view->bufferRange ? view->bufferRange : view->buffer->size));
                 }
-                // Texture/sampler binding lands with the sampled-texture parity work.
             }
+            // Textures + samplers are bound per combined sampler the pipeline declared:
+            // GLSL fuses (texture, sampler) into one sampler2D at a texture unit.
+            if (c->boundPipeline)
+                for (const CombinedSamplerGL& cs : c->boundPipeline->combinedSamplers)
+                {
+                    glActiveTexture(GL_TEXTURE0 + cs.unit);
+                    if (cs.texSet == setIndex)
+                    {
+                        auto it = s->bound.find(cs.texBinding);
+                        if (it != s->bound.end() && it->second && it->second->texture)
+                            glBindTexture(it->second->texture->target, it->second->texture->id);
+                    }
+                    if (cs.smpSet == setIndex)
+                    {
+                        auto it = s->bound.find(cs.smpBinding);
+                        if (it != s->bound.end() && it->second && it->second->sampler)
+                            glBindSampler(cs.unit, it->second->sampler);
+                    }
+                }
         }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer*, uint32_t, const VriVertexBufferBinding*, uint32_t) {}
