@@ -426,6 +426,7 @@ namespace vri::gl
         {
             if (!texture) return;
             TextureGL* t = Tex(texture);
+            t->device->EvictFbosReferencing(t->id); // drop cached render-pass FBOs using it
             if (t->isRenderbuffer) glDeleteRenderbuffers(1, &t->id);
             else glDeleteTextures(1, &t->id);
             delete t;
@@ -786,56 +787,72 @@ namespace vri::gl
         void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc* a)
         {
             CommandBufferGL* c = CB(cmd);
-            GLuint fbo = 0;
-            glGenFramebuffers(1, &fbo);
-            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-            c->pendingResolves.clear();
-            std::vector<GLenum> drawBufs(a->colorNum);
-            for (uint32_t i = 0; i < a->colorNum; ++i)
+
+            // FBO identity = the attachment set. Reuse a cached, already-configured FBO
+            // (no per-pass gen/delete); only a freshly-created one needs configuring.
+            FboKey key{};
+            key.colorCount = a->colorNum <= FboKey::kMaxColor ? a->colorNum : FboKey::kMaxColor;
+            for (uint32_t i = 0; i < key.colorCount; ++i)
             {
                 const DescriptorGL* v = Desc(a->colors[i].view);
-                if (v->texture->isRenderbuffer) // MSAA renderbuffer attachment
-                    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
-                else
-                    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
-                drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
-                if (a->colors[i].resolveView) // resolve this MSAA attachment at EndRendering
+                key.colorId[i] = v->texture->id;
+                key.colorMip[i] = v->mip;
+            }
+            if (a->depth) { const DescriptorGL* dv = Desc(a->depth->view); key.depthId = dv->texture->id; key.depthMip = dv->mip; }
+
+            bool isNew = false;
+            const GLuint fbo = c->device->AcquireFbo(key, isNew);
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+            c->fbo = fbo;
+
+            if (isNew) // configure attachments + draw buffers once for this attachment set
+            {
+                std::vector<GLenum> drawBufs(a->colorNum);
+                for (uint32_t i = 0; i < a->colorNum; ++i)
+                {
+                    const DescriptorGL* v = Desc(a->colors[i].view);
+                    if (v->texture->isRenderbuffer) // MSAA renderbuffer attachment
+                        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
+                    else
+                        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
+                    drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
+                }
+                glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
+                if (a->depth)
+                {
+                    const DescriptorGL* dv = Desc(a->depth->view);
+                    const GLenum attach = dv->texture->glFormat == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
+                }
+            }
+
+            // Per-pass: MSAA resolve targets (recorded for EndRendering) + load/clear ops.
+            c->pendingResolves.clear();
+            for (uint32_t i = 0; i < a->colorNum; ++i)
+                if (a->colors[i].resolveView)
                 {
                     const DescriptorGL* rv = Desc(a->colors[i].resolveView);
                     c->pendingResolves.push_back({GL_COLOR_ATTACHMENT0 + i, rv->texture, static_cast<GLuint>(rv->mip)});
                 }
-            }
-            glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
-
             for (uint32_t i = 0; i < a->colorNum; ++i)
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
                     glClearBufferfv(GL_COLOR, static_cast<GLint>(i), a->colors[i].clearValue.color.f32);
-
-            if (a->depth)
+            if (a->depth && a->depth->loadOp == VriAttachmentLoadOp_Clear)
             {
-                const DescriptorGL* dv = Desc(a->depth->view);
-                const bool hasStencil = dv->texture->glFormat == GL_DEPTH_STENCIL;
-                const GLenum attach = hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
-                glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
-                if (a->depth->loadOp == VriAttachmentLoadOp_Clear)
+                const bool hasStencil = Desc(a->depth->view)->texture->glFormat == GL_DEPTH_STENCIL;
+                glDepthMask(GL_TRUE); // clears respect the write masks
+                if (hasStencil)
                 {
-                    // Clears respect the depth/stencil write masks.
-                    glDepthMask(GL_TRUE);
-                    if (hasStencil)
-                    {
-                        glStencilMask(0xFFu);
-                        glClearBufferfi(GL_DEPTH_STENCIL, 0, a->depth->clearValue.depthStencil.depth,
-                                        static_cast<GLint>(a->depth->clearValue.depthStencil.stencil));
-                    }
-                    else
-                    {
-                        const GLfloat d = a->depth->clearValue.depthStencil.depth;
-                        glClearBufferfv(GL_DEPTH, 0, &d);
-                    }
+                    glStencilMask(0xFFu);
+                    glClearBufferfi(GL_DEPTH_STENCIL, 0, a->depth->clearValue.depthStencil.depth,
+                                    static_cast<GLint>(a->depth->clearValue.depthStencil.stencil));
+                }
+                else
+                {
+                    const GLfloat d = a->depth->clearValue.depthStencil.depth;
+                    glClearBufferfv(GL_DEPTH, 0, &d);
                 }
             }
-
-            c->fbo = fbo;
         }
         void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
         {
@@ -864,7 +881,7 @@ namespace vri::gl
                 c->pendingResolves.clear();
             }
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            if (c->fbo) { glDeleteFramebuffers(1, &c->fbo); c->fbo = 0; }
+            c->fbo = 0; // the render-pass FBO is owned by the device cache, not deleted here
         }
         void VRI_CALL CmdSetViewports(VriCommandBuffer*, const VriViewport* vps, uint32_t num)
         {

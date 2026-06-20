@@ -81,9 +81,19 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
    is unchanged (both conventions read back top-left). ES/WebGL2/pre-4.5 keep the in-shader
    flip. Coordsys/cull/depth/tessellation all green; WebGL2 E2E unchanged.
 3. **ARB_gl_spirv on 4.6** — `glShaderBinary` SPIR-V ingestion; SPIRV-Cross only for
-   ES/legacy/Apple.
-4. **AZDO draw path** — FBO cache, separate attrib-format VAOs, base-vertex/instance,
-   (later) MDI + persistent-mapped buffers.
+   ES/legacy/Apple. **Prereq:** a SPIR-V binding-remap patcher — GL ingests the raw
+   `(set,binding)`, but VRI flattens those to per-type GL units across sets and fuses
+   texture+sampler, so the Vulkan SPIR-V must be patched first. Driver-gate (Mesa
+   llvmpipe `gl_spirv` support is uncertain). Self-contained sub-project.
+4. **AZDO draw path:**
+   - ✅ **FBO cache** — render-pass FBOs are cached on the device keyed by their
+     attachment set (configured once, reused as-is); evicted when a referenced texture
+     is destroyed. No per-pass `glGen/DeleteFramebuffers`. All-GL (desktop + WebGL2).
+   - **base-vertex/base-instance** — NOT a clean win: `SV_VertexID`/`SV_InstanceID`
+     semantics differ (Vulkan's `VertexIndex`/`InstanceIndex` include the base offset;
+     GL's `gl_VertexID`/`gl_InstanceID` do not), so cross-backend parity needs handling,
+     not just the `*BaseInstance` call.
+   - separate attrib-format VAOs (4.3), MDI + persistent-mapped buffers (later).
 5. **DSA on 4.5** — optional, desktop-only resource/FBO management.
 
 Each step is independent, desktop-gated, and must keep ES/WebGL2 + the full CI matrix

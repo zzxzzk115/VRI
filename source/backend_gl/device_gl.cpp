@@ -12,10 +12,45 @@ namespace vri::gl
     {
         if (m_window)
         {
+            for (auto& [key, fbo] : m_fboCache)
+                glDeleteFramebuffers(1, &fbo);
+            m_fboCache.clear();
             glfwMakeContextCurrent(nullptr);
             glfwDestroyWindow(m_window);
         }
         // Intentionally not calling glfwTerminate() (another device may exist).
+    }
+
+    GLuint DeviceGL::AcquireFbo(const FboKey& key, bool& isNew)
+    {
+        auto it = m_fboCache.find(key);
+        if (it != m_fboCache.end())
+        {
+            isNew = false;
+            return it->second;
+        }
+        GLuint fbo = 0;
+        glGenFramebuffers(1, &fbo);
+        m_fboCache.emplace(key, fbo);
+        isNew = true;
+        return fbo;
+    }
+
+    void DeviceGL::EvictFbosReferencing(GLuint glId)
+    {
+        for (auto it = m_fboCache.begin(); it != m_fboCache.end();)
+        {
+            bool refs = it->first.depthId == glId;
+            for (uint32_t i = 0; i < it->first.colorCount && !refs; ++i)
+                refs = it->first.colorId[i] == glId;
+            if (refs)
+            {
+                glDeleteFramebuffers(1, &it->second);
+                it = m_fboCache.erase(it);
+            }
+            else
+                ++it;
+        }
     }
 
     void DeviceGL::ReportError(const char* message) const

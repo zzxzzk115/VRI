@@ -8,6 +8,9 @@
 
 #include <vri/vri.h>
 
+#include <cstdint>
+#include <unordered_map>
+
 #include "core/device_base.h"
 #include "objects_gl.h"
 
@@ -15,6 +18,38 @@ struct GLFWwindow;
 
 namespace vri::gl
 {
+    // Render-pass FBO identity: the set of color (+ depth) attachments. Two passes with
+    // the same attachments share one fully-configured FBO (cached on the device), so we
+    // stop gen/deleting an FBO every CmdBeginRendering. Configuration depends only on
+    // which texture/renderbuffer + mip is attached where (load/clear ops are per-pass).
+    struct FboKey
+    {
+        static constexpr int kMaxColor = 8;
+        uint32_t colorId[kMaxColor] = {};
+        uint32_t colorMip[kMaxColor] = {};
+        uint32_t colorCount = 0;
+        uint32_t depthId = 0;
+        uint32_t depthMip = 0;
+        bool operator==(const FboKey& o) const
+        {
+            if (colorCount != o.colorCount || depthId != o.depthId || depthMip != o.depthMip) return false;
+            for (uint32_t i = 0; i < colorCount; ++i)
+                if (colorId[i] != o.colorId[i] || colorMip[i] != o.colorMip[i]) return false;
+            return true;
+        }
+    };
+    struct FboKeyHash
+    {
+        size_t operator()(const FboKey& k) const
+        {
+            size_t h = 1469598103934665603ull;
+            auto mix = [&](uint32_t v) { h = (h ^ v) * 1099511628211ull; };
+            mix(k.colorCount); mix(k.depthId); mix(k.depthMip);
+            for (uint32_t i = 0; i < k.colorCount; ++i) { mix(k.colorId[i]); mix(k.colorMip[i]); }
+            return h;
+        }
+    };
+
     // Detected desktop-GL capability tiers. The backend uses the highest path each
     // context supports (never a blanket GLES/WebGL2 downgrade); ES/WebGL2 keep the
     // LCD paths (all flags false). See docs/gl-backend-audit.md.
@@ -48,6 +83,12 @@ namespace vri::gl
         const GlFeatures&    Features() const { return m_features; }
         void                 ReportError(const char* message) const;
 
+        // Render-pass FBO cache. AcquireFbo returns a cached FBO for the attachment set
+        // (isNew=true means the caller must configure its attachments once); textures
+        // evict the FBOs that reference them on destroy.
+        GLuint AcquireFbo(const FboKey& key, bool& isNew);
+        void   EvictFbosReferencing(GLuint glId);
+
     private:
         void FillDeviceDesc();
         void DetectFeatures();
@@ -58,6 +99,7 @@ namespace vri::gl
         bool                m_es = false;        // OpenGL ES / WebGL profile
         uint32_t            m_shaderVersion = 420; // GLSL #version for SPIRV-Cross
         GlFeatures          m_features = {};       // detected desktop-GL capability tiers
+        std::unordered_map<FboKey, GLuint, FboKeyHash> m_fboCache; // render-pass FBOs by attachment set
         VriGraphicsAPI      m_api = VriGraphicsAPI_OpenGL;
         QueueGL             m_queue = {};
         VriDeviceDesc       m_desc = {};
