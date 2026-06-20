@@ -70,13 +70,16 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
 - compute (ES needs 3.1; WebGL2 none), geometry/tessellation (desktop only),
   multisample **textures** (WebGL2 uses renderbuffers instead — already handled).
 
-## Proposed roadmap (priority)
+## Roadmap (priority)
 
-1. **GlFeatures detection** (version + `glGetStringi` extension scan) feeding a per-device
-   feature set; keep the capability flags derived from it.
-2. **glClipControl on 4.5+** — drop `flip_vert_y`, the winding swap, and the readback
-   row-flip on that path; keep the in-shader flip for ES/legacy. (Coordsys/cull/depth
-   tests must stay green.)
+1. ✅ **GlFeatures detection** (`device_gl.h`/`.cpp`) — per-device tier flags derived
+   from the GL version; capability flags stay derived from it. (version-gated; extension
+   scan can refine later)
+2. ✅ **glClipControl on 4.5+** — desktop now uses `glClipControl(UPPER_LEFT, ZERO_TO_ONE)`:
+   no `flip_vert_y`, depth is native `[0,1]` (was `[-1,1]`→compressed). Winding branches
+   on clipControl (VRI CCW = GL CCW with clipControl; GL CW on the flip path). Readback
+   is unchanged (both conventions read back top-left). ES/WebGL2/pre-4.5 keep the in-shader
+   flip. Coordsys/cull/depth/tessellation all green; WebGL2 E2E unchanged.
 3. **ARB_gl_spirv on 4.6** — `glShaderBinary` SPIR-V ingestion; SPIRV-Cross only for
    ES/legacy/Apple.
 4. **AZDO draw path** — FBO cache, separate attrib-format VAOs, base-vertex/instance,

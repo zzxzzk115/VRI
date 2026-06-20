@@ -15,6 +15,21 @@ struct GLFWwindow;
 
 namespace vri::gl
 {
+    // Detected desktop-GL capability tiers. The backend uses the highest path each
+    // context supports (never a blanket GLES/WebGL2 downgrade); ES/WebGL2 keep the
+    // LCD paths (all flags false). See docs/gl-backend-audit.md.
+    struct GlFeatures
+    {
+        uint32_t major = 0, minor = 0;
+        bool     clipControl    = false; // GL 4.5: glClipControl -> native top-left + depth [0,1], no in-shader flip
+        bool     dsa            = false; // GL 4.5: direct state access
+        bool     spirvIngest    = false; // GL 4.6: ARB_gl_spirv (glShaderBinary + glSpecializeShader)
+        bool     separateAttrib = false; // GL 4.3: glVertexAttribFormat / glBindVertexBuffer
+        bool     baseInstance   = false; // GL 4.2: *BaseInstance draws
+        bool     drawIndirect   = false; // GL 4.3: multi-draw-indirect
+        bool     bufferStorage  = false; // GL 4.4: persistent-mapped buffers
+    };
+
     class DeviceGL final : public core::DeviceBase
     {
     public:
@@ -30,16 +45,19 @@ namespace vri::gl
         // flip is done in-shader via SPIRV-Cross flip_vert_y (see core_gl.cpp).
         bool                 IsES() const { return m_es; }
         uint32_t             ShaderVersion() const { return m_shaderVersion; }
+        const GlFeatures&    Features() const { return m_features; }
         void                 ReportError(const char* message) const;
 
     private:
         void FillDeviceDesc();
+        void DetectFeatures();
         void FillRegistry();
 
         GLFWwindow*          m_window = nullptr; // hidden context-owning window
         GLuint              m_vao = 0;           // default VAO (GL core requires one bound)
         bool                m_es = false;        // OpenGL ES / WebGL profile
         uint32_t            m_shaderVersion = 420; // GLSL #version for SPIRV-Cross
+        GlFeatures          m_features = {};       // detected desktop-GL capability tiers
         VriGraphicsAPI      m_api = VriGraphicsAPI_OpenGL;
         QueueGL             m_queue = {};
         VriDeviceDesc       m_desc = {};

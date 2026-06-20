@@ -78,18 +78,24 @@ namespace vri::gl
         }
 #endif
 
-        // Coordinate system: GLES/WebGL have no glClipControl, so we do NOT use it
-        // on any profile. The VRI Y-up convention is honored by flipping clip-space
-        // Y in-shader (SPIRV-Cross flip_vert_y), which makes the bottom-left GL
-        // framebuffer read back top-left like Vulkan/WebGPU. (Depth stays GL's
-        // [-1,1] for now; remapping to [0,1] is a later, depth-only concern.)
-
         // GL core (and GLES) require a VAO bound for any draw. Non-DSA: gen+bind.
         glGenVertexArrays(1, &m_vao);
         glBindVertexArray(m_vao);
 
         m_queue.device = this;
-        FillDeviceDesc();
+        FillDeviceDesc();   // queries the GL version
+        DetectFeatures();   // derives the desktop-GL capability tiers from it
+
+        // Coordinate system: on GL 4.5+ use the native VRI convention via glClipControl
+        // (top-left origin + depth [0,1], matching Vulkan/WebGPU) - no per-vertex flip,
+        // and depth is exact rather than the [-1,1]->[0,1] compression. ES/WebGL2 and
+        // pre-4.5 desktop have no glClipControl, so they flip clip-space Y in-shader
+        // (SPIRV-Cross flip_vert_y); both conventions read back top-left identically.
+#if !defined(__EMSCRIPTEN__)
+        if (m_features.clipControl)
+            glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
+#endif
+
         FillRegistry();
         return VriResult_Success;
     }
@@ -134,6 +140,28 @@ namespace vri::gl
         m_desc.hasComputeShader = computeOk ? VRI_TRUE : VRI_FALSE;
         m_desc.hasGeometryShader = m_es ? VRI_FALSE : VRI_TRUE; // GLES has no geometry shaders
         m_desc.hasTessellation = m_es ? VRI_FALSE : VRI_TRUE;   // desktop GL only (GLES3/WebGL2 has none)
+    }
+
+    void DeviceGL::DetectFeatures()
+    {
+        GlFeatures f{};
+        f.major = m_desc.apiVersionMajor;
+        f.minor = m_desc.apiVersionMinor;
+        const auto atLeast = [&](uint32_t mj, uint32_t mn) { return f.major > mj || (f.major == mj && f.minor >= mn); };
+        // Desktop GL only: pick the highest path each version unlocks. ES/WebGL2 keep
+        // every flag false (the LCD paths). Version gating is sufficient on the core
+        // context we request; extension scanning can refine this later if needed.
+        if (!m_es)
+        {
+            f.baseInstance   = atLeast(4, 2);
+            f.separateAttrib = atLeast(4, 3);
+            f.drawIndirect   = atLeast(4, 3);
+            f.bufferStorage  = atLeast(4, 4);
+            f.clipControl    = atLeast(4, 5);
+            f.dsa            = atLeast(4, 5);
+            f.spirvIngest    = atLeast(4, 6); // ARB_gl_spirv is core in 4.6
+        }
+        m_features = f;
     }
 
     void DeviceGL::FillRegistry()

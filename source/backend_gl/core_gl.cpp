@@ -143,12 +143,12 @@ namespace vri::gl
                 o.version = d->ShaderVersion();
                 o.es = d->IsES();
                 o.vulkan_semantics = false;
-                // Flip clip-space Y so GL's bottom-left framebuffer matches the VRI
-                // (Vulkan/WebGPU) top-left convention without glClipControl. Apply it to
-                // the stage that outputs gl_Position to the rasterizer - NOT the tessellation
-                // control stage (its per-vertex output is gl_out[].gl_Position; a bare
+                // Y orientation: with glClipControl (GL 4.5+) the context already uses the
+                // VRI top-left convention, so NO in-shader flip. Otherwise (ES/WebGL2,
+                // pre-4.5 desktop) flip clip-space Y in-shader - but never on the
+                // tessellation-control stage (its output is gl_out[].gl_Position; a bare
                 // gl_Position there is invalid GLSL and strict drivers reject it).
-                o.vertex.flip_vert_y = (model != spv::ExecutionModelTessellationControl);
+                o.vertex.flip_vert_y = !d->Features().clipControl && model != spv::ExecutionModelTessellationControl;
                 comp.set_common_options(o);
                 if (entry)
                     comp.set_entry_point(entry, model);
@@ -641,9 +641,11 @@ namespace vri::gl
             p->patchVertices = desc->tessellation.patchControlPoints;
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
             p->cullFace = desc->rasterization.cullMode == VriCullMode_Front ? GL_FRONT : GL_BACK;
-            // flip_vert_y negates clip Y, reversing window-space winding, so a VRI
-            // CCW front face is GL CW (and vice versa).
-            p->frontFace = desc->rasterization.frontFace == VriFrontFace_CounterClockwise ? GL_CW : GL_CCW;
+            // Window-space winding depends on how VRI's Y is oriented: glClipControl
+            // (UPPER_LEFT) makes window Y-down like VRI, so a VRI CCW face stays GL CCW;
+            // the in-shader flip_vert_y path negates clip Y, reversing it (CCW -> GL CW).
+            const bool ccw = desc->rasterization.frontFace == VriFrontFace_CounterClockwise;
+            p->frontFace = d->Features().clipControl ? (ccw ? GL_CCW : GL_CW) : (ccw ? GL_CW : GL_CCW);
             p->depthTest = desc->depthStencil.depthTest != VRI_FALSE;
             p->depthWrite = desc->depthStencil.depthWrite != VRI_FALSE;
             p->depthFunc = ToGLCompareOp(desc->depthStencil.depthCompareOp);
