@@ -276,12 +276,15 @@ namespace vri::gl
             GLbitfield mapAccess = 0;
             if (desc->memoryLocation == VriMemoryLocation_HostReadback) { usage = GL_STREAM_READ; mapAccess = GL_MAP_READ_BIT; }
             else if (desc->memoryLocation == VriMemoryLocation_HostUpload) { usage = GL_STREAM_DRAW; mapAccess = GL_MAP_WRITE_BIT; }
-            // GL_COPY_WRITE_BUFFER is a neutral binding point that doesn't disturb
-            // vertex/index/uniform binding state.
-            glBindBuffer(GL_COPY_WRITE_BUFFER, id);
-            glBufferData(GL_COPY_WRITE_BUFFER, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
-            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-            *out = ToHandle(new BufferGL{Dev(device), id, desc->size, mapAccess});
+            // Index buffers must stay element-class on WebGL (see BufferGL::target);
+            // everything else uses the neutral GL_COPY_WRITE_BUFFER binding point.
+            const GLenum target = (desc->usage & VriBufferUsage_IndexBuffer) ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
+            glBindBuffer(target, id);
+            glBufferData(target, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
+            glBindBuffer(target, 0);
+            BufferGL* b = new BufferGL{};
+            b->device = Dev(device); b->id = id; b->size = desc->size; b->target = target; b->mapAccess = mapAccess;
+            *out = ToHandle(b);
             return VriResult_Success;
         }
         void VRI_CALL DestroyBuffer(VriBuffer* buffer)
@@ -305,14 +308,14 @@ namespace vri::gl
                 b->mapWrite = (access & GL_MAP_WRITE_BIT) != 0;
                 if (access & GL_MAP_READ_BIT)
                 {
-                    glBindBuffer(GL_COPY_READ_BUFFER, b->id);
-                    glGetBufferSubData(GL_COPY_READ_BUFFER, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), b->shadow);
-                    glBindBuffer(GL_COPY_READ_BUFFER, 0);
+                    glBindBuffer(b->target, b->id);
+                    glGetBufferSubData(b->target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), b->shadow);
+                    glBindBuffer(b->target, 0);
                 }
                 return b->shadow;
             }
-            glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
-            return glMapBufferRange(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
+            glBindBuffer(b->target, b->id);
+            return glMapBufferRange(b->target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
         }
         void VRI_CALL UnmapBuffer(VriBuffer* buffer)
         {
@@ -321,17 +324,17 @@ namespace vri::gl
             {
                 if (b->mapWrite)
                 {
-                    glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
-                    glBufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(b->mapOffset), static_cast<GLsizeiptr>(b->mapLen), b->shadow);
-                    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+                    glBindBuffer(b->target, b->id);
+                    glBufferSubData(b->target, static_cast<GLintptr>(b->mapOffset), static_cast<GLsizeiptr>(b->mapLen), b->shadow);
+                    glBindBuffer(b->target, 0);
                 }
                 std::free(b->shadow);
                 b->shadow = nullptr;
                 return;
             }
-            glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
-            glUnmapBuffer(GL_COPY_WRITE_BUFFER);
-            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+            glBindBuffer(b->target, b->id);
+            glUnmapBuffer(b->target);
+            glBindBuffer(b->target, 0);
         }
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
@@ -526,6 +529,22 @@ namespace vri::gl
             p->device = d;
             p->program = program;
             p->combinedSamplers = std::move(combined);
+            // Vertex input: attribute index i == GLSL location i (matches the VK
+            // backend). Flatten each attribute with its stream's stride + slot for
+            // the classic glVertexAttribPointer path used at draw time.
+            for (uint32_t i = 0; i < desc->vertexInput.attributeNum; ++i)
+            {
+                const VriVertexAttributeDesc& a = desc->vertexInput.attributes[i];
+                const GLVertexFormat vf = ToGLVertexFormat(a.format);
+                GLsizei stride = 0;
+                uint32_t bindingSlot = a.streamIndex;
+                if (a.streamIndex < desc->vertexInput.streamNum)
+                {
+                    stride = static_cast<GLsizei>(desc->vertexInput.streams[a.streamIndex].stride);
+                    bindingSlot = desc->vertexInput.streams[a.streamIndex].bindingSlot;
+                }
+                p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, a.offset, stride, bindingSlot});
+            }
             p->topology = ToGLTopology(desc->inputAssembly.topology);
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
             p->cullFace = desc->rasterization.cullMode == VriCullMode_Front ? GL_FRONT : GL_BACK;
@@ -723,29 +742,85 @@ namespace vri::gl
                 }
         }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
-        void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer*, uint32_t, const VriVertexBufferBinding*, uint32_t) {}
-        void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer*, VriBuffer*, uint64_t, VriIndexType) {}
+        void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
+        {
+            CommandBufferGL* c = CB(cmd);
+            for (uint32_t i = 0; i < num; ++i)
+                c->vertexBuffers[baseSlot + i] = VertexBufferBindingGL{Buf(bindings[i].buffer)->id, bindings[i].offset};
+        }
+        void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriIndexType type)
+        {
+            CommandBufferGL* c = CB(cmd);
+            c->indexBuffer = Buf(buffer)->id;
+            c->indexOffset = offset;
+            c->indexType = type == VriIndexType_UInt16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
+        }
+        // Configure the default VAO's attribute pointers for the bound pipeline +
+        // vertex buffers (classic glVertexAttribPointer path; GLES3/WebGL2 has no
+        // separate attribute format). Disables any attribs the previous draw enabled.
+        void SetupVertexAttribs(CommandBufferGL* c)
+        {
+            glBindVertexArray(c->device->DefaultVao());
+            for (uint32_t loc = 0; loc < 32; ++loc)
+                if (c->enabledAttribMask & (1u << loc))
+                    glDisableVertexAttribArray(loc);
+            uint32_t mask = 0;
+            if (c->boundPipeline)
+                for (const VertexAttribGL& a : c->boundPipeline->vertexAttribs)
+                {
+                    auto it = c->vertexBuffers.find(a.bindingSlot);
+                    if (it == c->vertexBuffers.end())
+                        continue;
+                    glBindBuffer(GL_ARRAY_BUFFER, it->second.id);
+                    glEnableVertexAttribArray(a.location);
+                    glVertexAttribPointer(a.location, a.size, a.type, a.normalized, a.stride,
+                                          reinterpret_cast<const void*>(static_cast<uintptr_t>(it->second.offset + a.offset)));
+                    mask |= (1u << a.location);
+                }
+            c->enabledAttribMask = mask;
+        }
         void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
         {
             CommandBufferGL* c = CB(cmd);
-            glBindVertexArray(c->device->DefaultVao());
+            SetupVertexAttribs(c);
             // baseInstance is GL 4.2+ only (absent on GLES/WebGL); the portable
             // path uses glDrawArraysInstanced. baseInstance!=0 is unsupported here.
             glDrawArraysInstanced(c->topology, static_cast<GLint>(d->baseVertex), static_cast<GLsizei>(d->vertexNum),
                                   static_cast<GLsizei>(d->instanceNum));
         }
-        void VRI_CALL CmdDrawIndexed(VriCommandBuffer*, const VriDrawIndexedDesc*) {}
+        void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
+        {
+            CommandBufferGL* c = CB(cmd);
+            SetupVertexAttribs(c);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
+            const uint32_t indexSize = c->indexType == GL_UNSIGNED_SHORT ? 2u : 4u;
+            const uintptr_t offset = static_cast<uintptr_t>(c->indexOffset) + static_cast<uintptr_t>(d->baseIndex) * indexSize;
+            // vertexOffset (base vertex) needs glDrawElements*BaseVertex (GL 3.2 / not
+            // in GLES3.0); the portable path assumes vertexOffset == 0.
+            if (d->instanceNum <= 1)
+                glDrawElements(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType,
+                               reinterpret_cast<const void*>(offset));
+            else
+                glDrawElementsInstanced(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType,
+                                        reinterpret_cast<const void*>(offset), static_cast<GLsizei>(d->instanceNum));
+        }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // GL is ordered on one context
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
-            glBindBuffer(GL_COPY_READ_BUFFER, Buf(src)->id);
-            glBindBuffer(GL_COPY_WRITE_BUFFER, Buf(dst)->id);
-            glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
-            glBindBuffer(GL_COPY_READ_BUFFER, 0);
-            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+            // Keep an element-class buffer on GL_ELEMENT_ARRAY_BUFFER so WebGL never
+            // sees it bound to a non-element target (which would taint it).
+            const BufferGL* s = Buf(src);
+            const BufferGL* d = Buf(dst);
+            const GLenum rt = s->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_READ_BUFFER;
+            const GLenum wt = d->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
+            glBindBuffer(rt, s->id);
+            glBindBuffer(wt, d->id);
+            glCopyBufferSubData(rt, wt, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
+            glBindBuffer(rt, 0);
+            glBindBuffer(wt, 0);
         }
         void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc*)
         {

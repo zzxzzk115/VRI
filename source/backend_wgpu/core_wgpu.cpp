@@ -430,7 +430,34 @@ namespace vri::wgpu
             WGPUVertexState vertex = {};
             vertex.module = vsMod;
             vertex.entryPoint = SV(vsEntry);
-            // (vertex buffers land alongside vertex-buffer-driven pipelines)
+            // Vertex buffer layout: one WGPUVertexBufferLayout per stream, with its
+            // attributes (shaderLocation = attribute index, matching VK/GL).
+            std::vector<WGPUVertexBufferLayout> vbLayouts;
+            std::vector<std::vector<WGPUVertexAttribute>> vbAttrs(desc->vertexInput.streamNum);
+            vbLayouts.reserve(desc->vertexInput.streamNum);
+            for (uint32_t s = 0; s < desc->vertexInput.streamNum; ++s)
+            {
+                const VriVertexStreamDesc& stream = desc->vertexInput.streams[s];
+                for (uint32_t a = 0; a < desc->vertexInput.attributeNum; ++a)
+                {
+                    const VriVertexAttributeDesc& attr = desc->vertexInput.attributes[a];
+                    if (attr.streamIndex != s)
+                        continue;
+                    WGPUVertexAttribute va = {};
+                    va.format = ToWgpuVertexFormat(attr.format);
+                    va.offset = attr.offset;
+                    va.shaderLocation = a; // global attribute index == GLSL/SPIR-V location
+                    vbAttrs[s].push_back(va);
+                }
+                WGPUVertexBufferLayout vl = {};
+                vl.arrayStride = stream.stride;
+                vl.stepMode = stream.stepRate == VriVertexStepRate_PerInstance ? WGPUVertexStepMode_Instance : WGPUVertexStepMode_Vertex;
+                vl.attributeCount = vbAttrs[s].size();
+                vl.attributes = vbAttrs[s].data();
+                vbLayouts.push_back(vl);
+            }
+            vertex.bufferCount = vbLayouts.size();
+            vertex.buffers = vbLayouts.empty() ? nullptr : vbLayouts.data();
 
             std::vector<WGPUColorTargetState> targets;
             std::vector<WGPUBlendState> blends;

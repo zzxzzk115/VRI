@@ -36,6 +36,29 @@ namespace vri::gl
         }
     }
 
+    // Vertex-attribute format: component count + GL component type + normalized.
+    struct GLVertexFormat
+    {
+        GLint     size;       // components (1..4)
+        GLenum    type;       // GL_FLOAT / GL_UNSIGNED_BYTE / ...
+        GLboolean normalized;
+    };
+
+    inline GLVertexFormat ToGLVertexFormat(VriFormat f)
+    {
+        switch (f)
+        {
+            case VriFormat_R32_SFLOAT:    return {1, GL_FLOAT, GL_FALSE};
+            case VriFormat_RG32_SFLOAT:   return {2, GL_FLOAT, GL_FALSE};
+            case VriFormat_RGB32_SFLOAT:  return {3, GL_FLOAT, GL_FALSE};
+            case VriFormat_RGBA32_SFLOAT: return {4, GL_FLOAT, GL_FALSE};
+            case VriFormat_RGBA8_UNORM:   return {4, GL_UNSIGNED_BYTE, GL_TRUE};
+            case VriFormat_RG8_UNORM:     return {2, GL_UNSIGNED_BYTE, GL_TRUE};
+            case VriFormat_R8_UNORM:      return {1, GL_UNSIGNED_BYTE, GL_TRUE};
+            default:                      return {4, GL_FLOAT, GL_FALSE};
+        }
+    }
+
     inline GLenum ToGLTopology(VriPrimitiveTopology t)
     {
         switch (t)

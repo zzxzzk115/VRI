@@ -29,6 +29,12 @@ namespace vri::gl
 
     struct PipelineGL;
 
+    struct VertexBufferBindingGL
+    {
+        GLuint   id;
+        uint64_t offset;
+    };
+
     struct CommandBufferGL
     {
         DeviceGL*               device;
@@ -36,6 +42,11 @@ namespace vri::gl
         GLenum                  topology;      // from the bound pipeline
         const PipelineLayoutGL* boundLayout;   // from CmdSetPipelineLayout (descriptor remap)
         const PipelineGL*       boundPipeline; // from CmdSetPipeline (combined-sampler pairing)
+        std::unordered_map<uint32_t, VertexBufferBindingGL> vertexBuffers; // slot -> buffer
+        GLuint                  indexBuffer = 0;
+        uint64_t                indexOffset = 0;
+        GLenum                  indexType = 0x1405; // GL_UNSIGNED_INT
+        uint32_t                enabledAttribMask = 0; // attrib locations enabled by the last draw
     };
 
     struct BufferGL
@@ -43,6 +54,10 @@ namespace vri::gl
         DeviceGL*  device;
         GLuint     id;
         uint64_t   size;
+        // WebGL forbids ever binding an ELEMENT_ARRAY_BUFFER to a non-element target
+        // (and vice versa), so index buffers must use GL_ELEMENT_ARRAY_BUFFER for all
+        // create/map/copy binds. Other buffers use the neutral GL_COPY_WRITE_BUFFER.
+        GLenum     target;
         GLbitfield mapAccess;          // GL_MAP_READ_BIT / GL_MAP_WRITE_BIT for MapBuffer
         // WebGL2 has no real buffer mapping, so on ES we emulate Map/Unmap with a CPU
         // shadow filled via glGetBufferSubData and flushed back via glBufferSubData.
@@ -132,6 +147,19 @@ namespace vri::gl
         std::string name;
     };
 
+    // One vertex attribute, flattened for the classic glVertexAttribPointer path
+    // (couples format+stream+stride; GLES3/WebGL2 has no separate-format DSA).
+    struct VertexAttribGL
+    {
+        GLuint    location;   // GLSL attribute location (= attribute index)
+        GLint     size;       // components
+        GLenum    type;
+        GLboolean normalized;
+        GLuint    offset;     // within the vertex
+        GLsizei   stride;     // of the owning stream
+        uint32_t  bindingSlot; // CmdSetVertexBuffers slot to source from
+    };
+
     struct PipelineGL
     {
         DeviceGL* device;
@@ -147,6 +175,7 @@ namespace vri::gl
         GLenum    srcRGB, dstRGB, rgbOp, srcA, dstA, aOp;
         GLboolean colorMask[4];
         std::vector<CombinedSamplerGL> combinedSamplers;
+        std::vector<VertexAttribGL>    vertexAttribs;
     };
 
     struct FenceGL
