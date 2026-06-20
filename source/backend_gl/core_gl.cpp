@@ -219,7 +219,24 @@ namespace vri::gl
                             outCombined->push_back(CombinedSamplerGL{unit, texSet, texBind, smpSet, smpBind, name});
                     }
                 }
-                return comp.compile();
+                std::string glsl = comp.compile();
+                // Tessellation-control outputs may only be indexed by gl_InvocationID;
+                // strict drivers (NVIDIA) reject SPIRV-Cross's uint(gl_InvocationID)
+                // cast on the output write. Strip the cast (reads stay valid too).
+                // Tessellation-control outputs may only be indexed by gl_InvocationID;
+                // strict drivers reject SPIRV-Cross's uint(gl_InvocationID) cast on the
+                // output write. Strip the cast (reads stay valid). NOTE: GL tessellation
+                // is currently capability-gated off (see device_gl.cpp) because strict
+                // drivers (NVIDIA) still reject the transpiled TCS; this groundwork stays
+                // for when the SPIR-V->GLSL tessellation path is made driver-robust.
+                if (model == spv::ExecutionModelTessellationControl)
+                {
+                    const std::string from = "uint(gl_InvocationID)";
+                    const std::string to = "gl_InvocationID";
+                    for (size_t p = glsl.find(from); p != std::string::npos; p = glsl.find(from, p + to.size()))
+                        glsl.replace(p, from.size(), to);
+                }
+                return glsl;
             }
             catch (const std::exception& e)
             {
@@ -490,7 +507,7 @@ namespace vri::gl
             }
 
             std::vector<CombinedSamplerGL> combined;
-            GLuint vs = 0, fs = 0, gs = 0;
+            GLuint vs = 0, fs = 0, gs = 0, tcs = 0, tes = 0;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
@@ -498,29 +515,44 @@ namespace vri::gl
                     vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined));
                 else if (s.stage == VriShaderStage_Fragment)
                     fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined));
-#if !defined(__EMSCRIPTEN__) // GL_GEOMETRY_SHADER is desktop-only (absent in GLES3/WebGL2 headers)
+#if !defined(__EMSCRIPTEN__) // geometry/tessellation shaders are desktop-only (absent in GLES3/WebGL2 headers)
                 else if (s.stage == VriShaderStage_Geometry)
                     gs = CompileShader(d, GL_GEOMETRY_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelGeometry, &combined));
+                else if (s.stage == VriShaderStage_TessControl)
+                    tcs = CompileShader(d, GL_TESS_CONTROL_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelTessellationControl, &combined));
+                else if (s.stage == VriShaderStage_TessEval)
+                    tes = CompileShader(d, GL_TESS_EVALUATION_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelTessellationEvaluation, &combined));
 #endif
             }
-            if (!vs || !fs)
-            {
+            auto deleteStages = [&] {
                 if (vs) glDeleteShader(vs);
                 if (fs) glDeleteShader(fs);
                 if (gs) glDeleteShader(gs);
+                if (tcs) glDeleteShader(tcs);
+                if (tes) glDeleteShader(tes);
+            };
+            if (!vs || !fs)
+            {
+                deleteStages();
                 return VriResult_Failure;
             }
             GLuint program = glCreateProgram();
             glAttachShader(program, vs);
             glAttachShader(program, fs);
             if (gs) glAttachShader(program, gs);
+            if (tcs) glAttachShader(program, tcs);
+            if (tes) glAttachShader(program, tes);
             glLinkProgram(program);
             glDetachShader(program, vs);
             glDetachShader(program, fs);
             if (gs) glDetachShader(program, gs);
+            if (tcs) glDetachShader(program, tcs);
+            if (tes) glDetachShader(program, tes);
             glDeleteShader(vs);
             glDeleteShader(fs);
             if (gs) glDeleteShader(gs);
+            if (tcs) glDeleteShader(tcs);
+            if (tes) glDeleteShader(tes);
             GLint ok = 0;
             glGetProgramiv(program, GL_LINK_STATUS, &ok);
             if (!ok)
@@ -577,6 +609,7 @@ namespace vri::gl
                 p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, a.offset, stride, bindingSlot});
             }
             p->topology = ToGLTopology(desc->inputAssembly.topology);
+            p->patchVertices = desc->tessellation.patchControlPoints;
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
             p->cullFace = desc->rasterization.cullMode == VriCullMode_Front ? GL_FRONT : GL_BACK;
             // flip_vert_y negates clip Y, reversing window-space winding, so a VRI
@@ -792,6 +825,10 @@ namespace vri::gl
             else glDisable(GL_BLEND);
             glColorMask(p->colorMask[0], p->colorMask[1], p->colorMask[2], p->colorMask[3]);
             c->topology = p->topology;
+#if !defined(__EMSCRIPTEN__) && defined(GL_PATCHES) && defined(GL_PATCH_VERTICES) // tessellation: desktop GL only
+            if (p->topology == GL_PATCHES && p->patchVertices > 0)
+                glPatchParameteri(GL_PATCH_VERTICES, static_cast<GLint>(p->patchVertices));
+#endif
         }
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
         {

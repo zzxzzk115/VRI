@@ -138,6 +138,7 @@ namespace vri::vk
             case VriPrimitiveTopology_LineList:      return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
             case VriPrimitiveTopology_LineStrip:     return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
             case VriPrimitiveTopology_TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+            case VriPrimitiveTopology_PatchList:     return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
             default:                                 return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         }
     }

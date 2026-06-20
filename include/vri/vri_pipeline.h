@@ -125,6 +125,12 @@ typedef struct VriMultisampleDesc
     uint32_t sampleNum; /* 1 = disabled */
 } VriMultisampleDesc;
 
+/* ---- tessellation ----------------------------------------------------- */
+typedef struct VriTessellationDesc
+{
+    uint32_t patchControlPoints; /* 0 = no tessellation; vertices per patch otherwise */
+} VriTessellationDesc;
+
 /* ---- pipelines -------------------------------------------------------- */
 typedef struct VriGraphicsPipelineDesc
 {
@@ -133,6 +139,7 @@ typedef struct VriGraphicsPipelineDesc
     uint32_t                    shaderNum;
     VriVertexInputDesc          vertexInput;
     VriInputAssemblyDesc        inputAssembly;
+    VriTessellationDesc         tessellation;
     VriRasterizationDesc        rasterization;
     VriMultisampleDesc          multisample;
     VriDepthStencilDesc         depthStencil;

@@ -191,6 +191,15 @@ add_rules("clangd.config")
 
 -- add repositories
 add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")
+-- local package overrides (prebuilt Slang 2026.11 for vri-shaderc; see the package)
+add_repositories("vri-local-repo xmake/xmake-repo")
+
+-- vri-shaderc links a prebuilt Slang that can emit tessellation SPIR-V (the Vulkan
+-- SDK's 2025.11 crashes on hull shaders). Local-developer tool only (tools are off
+-- in CI), so requiring it here is gated on the tools option.
+if has_config("vri_build_tools") then
+    add_requires("slang-prebuilt 2026.11")
+end
 
 -- tasks (e.g. `xmake shaders` to compile test .slang -> SPIR-V headers)
 includes("xmake/tasks/shaders.lua")

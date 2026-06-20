@@ -133,7 +133,12 @@ namespace vri::gl
                                      : (major > 4 || (major == 4 && minor >= 3));
         m_desc.hasComputeShader = computeOk ? VRI_TRUE : VRI_FALSE;
         m_desc.hasGeometryShader = m_es ? VRI_FALSE : VRI_TRUE; // GLES has no geometry shaders
-        m_desc.hasTessellation = m_es ? VRI_FALSE : VRI_TRUE;
+        // Desktop GL has tessellation, but VRI's SPIR-V->GLSL transpile of the
+        // tessellation-control stage isn't yet driver-robust (strict drivers reject the
+        // SPIRV-Cross output), so report it unsupported rather than fail at pipeline
+        // creation. Backend wiring (TCS/TES compile, GL_PATCHES, patch vertices) is in
+        // place; flip this to !m_es once the transpile is verified across drivers.
+        m_desc.hasTessellation = VRI_FALSE;
     }
 
     void DeviceGL::FillRegistry()

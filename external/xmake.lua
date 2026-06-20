@@ -25,7 +25,9 @@ end
 -- on wasm the GL loader (WebGL2) and GLFW come from Emscripten ports, so glad/glfw
 -- packages are native-only.
 if has_config("vri_backend_gl") then
-    add_requires("spirv-cross")
+    -- Pin a recent spirv-cross: 1.3.268 emits invalid tessellation-control GLSL
+    -- (non-array output, not indexed by gl_InvocationID); vulkan-sdk-1.4.335 fixes it.
+    add_requires("spirv-cross vulkan-sdk-1.4.335")
     if not is_plat("wasm") then
         add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
         add_requires("glfw")

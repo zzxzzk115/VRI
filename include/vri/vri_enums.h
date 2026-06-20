@@ -101,6 +101,7 @@ typedef enum VriPrimitiveTopology
     VriPrimitiveTopology_LineStrip,
     VriPrimitiveTopology_TriangleList,
     VriPrimitiveTopology_TriangleStrip,
+    VriPrimitiveTopology_PatchList, /* tessellation control points (see VriTessellationDesc) */
     VriPrimitiveTopology_MaxEnum = 0x7fffffff
 } VriPrimitiveTopology;
 

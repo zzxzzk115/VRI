@@ -632,6 +632,11 @@ namespace vri::vk
             vp.viewportCount = 1;
             vp.scissorCount = 1;
 
+            // Tessellation: patch control points (only consumed with a tess pipeline /
+            // PatchList topology, but harmless to fill).
+            VkPipelineTessellationStateCreateInfo tess = {VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
+            tess.patchControlPoints = desc->tessellation.patchControlPoints;
+
             const VriRasterizationDesc& rs = desc->rasterization;
             VkPipelineRasterizationStateCreateInfo raster = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
             raster.polygonMode = ToVkPolygonMode(rs.polygonMode);
@@ -696,6 +701,7 @@ namespace vri::vk
             ci.pStages = stages.data();
             ci.pVertexInputState = &vi;
             ci.pInputAssemblyState = &ia;
+            ci.pTessellationState = &tess;
             ci.pViewportState = &vp;
             ci.pRasterizationState = &raster;
             ci.pMultisampleState = &ms;

@@ -166,6 +166,7 @@ namespace vri::gl
         GLuint    program;
         bool      isCompute = false;
         GLenum    topology;
+        uint32_t  patchVertices = 0; // tessellation: glPatchParameteri(GL_PATCH_VERTICES) when topology == GL_PATCHES
         bool      cullEnable;
         GLenum    cullFace;
         GLenum    frontFace;

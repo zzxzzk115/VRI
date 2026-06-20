@@ -67,6 +67,9 @@ namespace vri::gl
             case VriPrimitiveTopology_LineList:      return GL_LINES;
             case VriPrimitiveTopology_LineStrip:     return GL_LINE_STRIP;
             case VriPrimitiveTopology_TriangleStrip: return GL_TRIANGLE_STRIP;
+#if defined(GL_PATCHES) // tessellation is desktop-GL only (absent in GLES3/WebGL2)
+            case VriPrimitiveTopology_PatchList:     return GL_PATCHES;
+#endif
             default:                                 return GL_TRIANGLES;
         }
     }
