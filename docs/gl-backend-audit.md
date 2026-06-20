@@ -114,7 +114,14 @@ rejected with `VriResult_Unsupported` — correct per the philosophy:
      when `GlFeatures::drawIndirect`/4.3 is present) and `CmdDispatchIndirect` issues
      `glDispatchComputeIndirect` (4.3). The indirect command layout matches VK/WebGPU.
      Unavailable on WebGL2 → reported, not silent. Covered by `test_indirect_xbackend`.
-   - persistent-mapped buffers (later).
+   - ✅ **immutable storage + persistent-coherent mapping (4.4)** — on the DSA (4.5) path
+     buffers use `glNamedBufferStorage` (immutable) instead of `glNamedBufferData`;
+     mappable buffers (HostUpload/HostReadback) are mapped once at creation with
+     `GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT`, so `MapBuffer` returns the cached
+     pointer and `UnmapBuffer` is a no-op — no per-map driver round-trip. Coherency
+     (client→server for staging, server→client for readback after `glFinish`) is handled
+     by the coherent flag. Pre-4.5 desktop / GLES / WebGL2 keep mutable `glBufferData` +
+     per-call map (so macOS 4.1 exercises the fallback).
 5. ✅ **DSA on 4.5** — desktop GL 4.5+ now creates/updates resources by name, no
    bind-to-edit: `glCreateBuffers`/`glNamedBuffer*` (create/map/unmap/copy),
    `glCreateTextures`/`glTextureStorage2D`/`glTextureSubImage2D` (incl. multisample),

@@ -74,6 +74,10 @@ namespace vri::gl
         uint64_t   mapOffset = 0;
         uint64_t   mapLen = 0;
         bool       mapWrite = false;
+        // GL 4.4 immutable storage + persistent-coherent mapping: a mappable buffer is
+        // mapped once at creation and stays mapped; MapBuffer returns persistentPtr+offset
+        // and UnmapBuffer is a no-op (coherent). Null when not persistently mapped.
+        void*      persistentPtr = nullptr;
     };
 
     struct TextureGL

@@ -306,11 +306,21 @@ namespace vri::gl
             // Index buffers must stay element-class on WebGL (see BufferGL::target);
             // everything else uses the neutral GL_COPY_WRITE_BUFFER binding point.
             const GLenum target = (desc->usage & VriBufferUsage_IndexBuffer) ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
+            void* persistentPtr = nullptr;
 #if !defined(__EMSCRIPTEN__)
-            if (Dev(device)->Features().dsa) // GL 4.5: allocate without disturbing any binding point
+            if (Dev(device)->Features().dsa) // GL 4.5 DSA (implies 4.4 immutable buffer storage)
             {
                 glCreateBuffers(1, &id);
-                glNamedBufferData(id, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
+                // Immutable storage. Mappable buffers are persistently + coherently mapped
+                // once here (MapBuffer just returns that pointer; UnmapBuffer is a no-op),
+                // avoiding per-map driver overhead; device-local buffers get DYNAMIC_STORAGE
+                // so glNamedBufferSubData stays legal (copies work on immutable storage too).
+                GLbitfield storageFlags = mapAccess ? (mapAccess | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)
+                                                    : GL_DYNAMIC_STORAGE_BIT;
+                glNamedBufferStorage(id, static_cast<GLsizeiptr>(desc->size), nullptr, storageFlags);
+                if (mapAccess)
+                    persistentPtr = glMapNamedBufferRange(id, 0, static_cast<GLsizeiptr>(desc->size),
+                                                          mapAccess | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
             }
             else
 #endif
@@ -322,6 +332,7 @@ namespace vri::gl
             }
             BufferGL* b = new BufferGL{};
             b->device = Dev(device); b->id = id; b->size = desc->size; b->target = target; b->mapAccess = mapAccess;
+            b->persistentPtr = persistentPtr;
             *out = ToHandle(b);
             return VriResult_Success;
         }
@@ -329,6 +340,9 @@ namespace vri::gl
         {
             if (!buffer) return;
             BufferGL* b = Buf(buffer);
+#if !defined(__EMSCRIPTEN__)
+            if (b->persistentPtr) glUnmapNamedBuffer(b->id); // release the persistent mapping (glDeleteBuffers would too)
+#endif
             glDeleteBuffers(1, &b->id);
             delete b;
         }
@@ -352,6 +366,8 @@ namespace vri::gl
                 }
                 return b->shadow;
             }
+            if (b->persistentPtr) // GL 4.4: persistently mapped at creation, return that pointer
+                return static_cast<char*>(b->persistentPtr) + offset;
 #if !defined(__EMSCRIPTEN__)
             if (b->device->Features().dsa) // GL 4.5: map without binding
                 return glMapNamedBufferRange(b->id, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
@@ -362,6 +378,8 @@ namespace vri::gl
         void VRI_CALL UnmapBuffer(VriBuffer* buffer)
         {
             BufferGL* b = Buf(buffer);
+            if (b->persistentPtr) // GL 4.4 coherent persistent mapping: nothing to flush/unmap
+                return;
             if (b->shadow)
             {
                 if (b->mapWrite)
