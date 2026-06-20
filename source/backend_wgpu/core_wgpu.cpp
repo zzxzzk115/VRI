@@ -510,6 +510,18 @@ namespace vri::wgpu
             pd.multisample.mask = 0xFFFFFFFFu;
             pd.fragment = &fragment;
 
+            WGPUDepthStencilState depthStencil = {};
+            if (desc->outputMerger.depthStencilFormat != VriFormat_Unknown)
+            {
+                depthStencil.format = ToWgpuFormat(desc->outputMerger.depthStencilFormat);
+                depthStencil.depthWriteEnabled = desc->depthStencil.depthWrite ? WGPUOptionalBool_True : WGPUOptionalBool_False;
+                depthStencil.depthCompare = desc->depthStencil.depthTest ? ToWgpuCompareOp(desc->depthStencil.depthCompareOp) : WGPUCompareFunction_Always;
+                // Stencil defaults (no stencil test); both faces must be Always/Keep.
+                depthStencil.stencilFront.compare = WGPUCompareFunction_Always;
+                depthStencil.stencilBack.compare = WGPUCompareFunction_Always;
+                pd.depthStencil = &depthStencil;
+            }
+
             WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(d->Device(), &pd);
 
             if (vsMod) wgpuShaderModuleRelease(vsMod);
@@ -656,6 +668,17 @@ namespace vri::wgpu
             WGPURenderPassDescriptor rp = {};
             rp.colorAttachmentCount = static_cast<uint32_t>(colors.size());
             rp.colorAttachments = colors.data();
+
+            WGPURenderPassDepthStencilAttachment ds = {};
+            if (a->depth)
+            {
+                ds.view = Desc(a->depth->view)->view;
+                ds.depthLoadOp = a->depth->loadOp == VriAttachmentLoadOp_Load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+                ds.depthStoreOp = a->depth->storeOp == VriAttachmentStoreOp_DontCare ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
+                ds.depthClearValue = a->depth->clearValue.depthStencil.depth;
+                rp.depthStencilAttachment = &ds;
+            }
+
             c->pass = wgpuCommandEncoderBeginRenderPass(c->encoder, &rp);
         }
 

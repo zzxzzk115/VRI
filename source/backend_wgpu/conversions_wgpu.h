@@ -86,6 +86,22 @@ namespace vri::wgpu
         return f == VriFrontFace_Clockwise ? WGPUFrontFace_CW : WGPUFrontFace_CCW;
     }
 
+    inline WGPUCompareFunction ToWgpuCompareOp(VriCompareOp o)
+    {
+        switch (o)
+        {
+            case VriCompareOp_Never:        return WGPUCompareFunction_Never;
+            case VriCompareOp_Less:         return WGPUCompareFunction_Less;
+            case VriCompareOp_Equal:        return WGPUCompareFunction_Equal;
+            case VriCompareOp_LessOrEqual:    return WGPUCompareFunction_LessEqual;
+            case VriCompareOp_Greater:        return WGPUCompareFunction_Greater;
+            case VriCompareOp_NotEqual:       return WGPUCompareFunction_NotEqual;
+            case VriCompareOp_GreaterOrEqual: return WGPUCompareFunction_GreaterEqual;
+            case VriCompareOp_Always:       return WGPUCompareFunction_Always;
+            default:                        return WGPUCompareFunction_Always;
+        }
+    }
+
     inline WGPUVertexFormat ToWgpuVertexFormat(VriFormat f)
     {
         switch (f)

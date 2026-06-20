@@ -652,6 +652,19 @@ namespace vri::gl
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
                     glClearBufferfv(GL_COLOR, static_cast<GLint>(i), a->colors[i].clearValue.color.f32);
 
+            if (a->depth)
+            {
+                const DescriptorGL* dv = Desc(a->depth->view);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
+                if (a->depth->loadOp == VriAttachmentLoadOp_Clear)
+                {
+                    // glClear*/clearbuffer of depth respects the depth write mask.
+                    glDepthMask(GL_TRUE);
+                    const GLfloat d = a->depth->clearValue.depthStencil.depth;
+                    glClearBufferfv(GL_DEPTH, 0, &d);
+                }
+            }
+
             c->fbo = fbo;
         }
         void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
