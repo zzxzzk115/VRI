@@ -34,7 +34,7 @@ Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures 
 
 ## Platforms
 
-Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU). macOS / Android / iOS are planned per backend.
+Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU), all built + tested in CI. macOS is **built + run in CI** (compile-verified; GPU backends pending real-device validation — CI has no MoltenVK ICD, and desktop GL caps at 4.1). Android / iOS are planned per backend.
 
 ## Building
 
