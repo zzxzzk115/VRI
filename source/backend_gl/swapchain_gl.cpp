@@ -3,6 +3,15 @@
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #    define WIN32_LEAN_AND_MEAN
 #    include <windows.h> // WGL (wglGetCurrentContext/wglMakeCurrent) + GDI (GetDC/SwapBuffers/...)
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+// Declare the few GLX entry points we need ourselves (resolved from libGL via glfw's
+// link) instead of including <GL/glx.h>, which pulls <GL/gl.h> and clashes with glad.
+// GLXContext is an opaque pointer; Display* is opaque (void*); GLXDrawable is an XID
+// (unsigned long); Bool is int.
+extern "C" void*         glXGetCurrentContext(void);
+extern "C" unsigned long glXGetCurrentDrawable(void);
+extern "C" int           glXMakeCurrent(void* dpy, unsigned long drawable, void* ctx);
+extern "C" void          glXSwapBuffers(void* dpy, unsigned long drawable);
 #endif
 
 #include "swapchain_gl.h"
@@ -100,6 +109,23 @@ namespace vri::gl
             glGenFramebuffers(1, &s->blitFbo);
             *out = ToHandle(s);
             return VriResult_Success;
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+            // X11/GLX: present by retargeting the device's GLX context to the app window
+            // (same idea as Win32). The window's visual must be compatible with the
+            // device context's FBConfig; both default to a standard RGBA visual, but if
+            // they differ glXMakeCurrent fails at Present (reported, not silent).
+            if (desc->window.type != VriWindowSystem_Xlib)
+            {
+                d->ReportError("GL swapchain: only the Xlib window system is implemented on Linux (Wayland GLX TBD)");
+                return VriResult_Unsupported;
+            }
+            SwapChainGL* s = new SwapChainGL{};
+            s->device = d; s->xdisplay = desc->window.handle.xlib.display; s->xwindow = desc->window.handle.xlib.window;
+            s->width = w; s->height = h; s->format = desc->format; s->vsync = desc->vsync != VRI_FALSE;
+            for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
+            glGenFramebuffers(1, &s->blitFbo);
+            *out = ToHandle(s);
+            return VriResult_Success;
 #elif defined(__EMSCRIPTEN__)
             // Web: the device's WebGL2 context already owns the canvas (its default
             // framebuffer). Backbuffers are offscreen textures; Present blits the acquired
@@ -188,6 +214,29 @@ namespace vri::gl
             SwapBuffers(hdc); // vsync follows the window's swap interval (WGL_EXT_swap_control not wired)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             wglMakeCurrent(devDc, rc); // restore the device's drawable so later rendering is unaffected
+            return VriResult_Success;
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+            SwapChainGL* s = Swap(swapChain);
+            DeviceGL* d = s->device;
+            void* rc = glXGetCurrentContext();
+            const unsigned long devDrawable = glXGetCurrentDrawable();
+            if (!rc) { d->ReportError("GL swapchain: no current GLX context at Present"); return VriResult_Failure; }
+            if (!glXMakeCurrent(s->xdisplay, s->xwindow, rc))
+            {
+                d->ReportError("GL swapchain: glXMakeCurrent(window) failed (visual/FBConfig mismatch?)");
+                return VriResult_Failure;
+            }
+            const TextureGL* bb = s->textures[s->currentIndex];
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glDrawBuffer(GL_BACK);
+            const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
+            glXSwapBuffers(s->xdisplay, s->xwindow);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            glXMakeCurrent(s->xdisplay, devDrawable, rc); // restore the device's drawable
             return VriResult_Success;
 #elif defined(__EMSCRIPTEN__)
             // Web: blit the acquired backbuffer onto the canvas (default framebuffer 0).

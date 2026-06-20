@@ -49,10 +49,13 @@ target("vri")
         else
             -- public: glad/glfw must link into the final exe (+ their runtime needs)
             add_packages("glad", "glfw", {public = true})
-            -- Windowed GL present (swapchain_gl) retargets the context to the window's
-            -- DC via WGL; GetDC/SetPixelFormat/SwapBuffers live in gdi32.
+            -- Windowed GL present (swapchain_gl) retargets the context to the window via
+            -- WGL/GLX: GetDC/SetPixelFormat/SwapBuffers live in gdi32 (Windows), and the
+            -- glX* entry points live in libGL (Linux).
             if is_plat("windows") then
                 add_syslinks("gdi32", {public = true})
+            elseif is_plat("linux") then
+                add_syslinks("GL", {public = true})
             end
         end
     end

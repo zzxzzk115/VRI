@@ -35,6 +35,9 @@ namespace vri::gl
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
         void*                   hwnd = nullptr;     // HWND target window
         void*                   hdc = nullptr;      // HDC for that window (GetDC)
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
+        void*                   xdisplay = nullptr; // X11 Display*
+        unsigned long           xwindow = 0;        // X11 Window / GLXDrawable
 #endif
     };
 
