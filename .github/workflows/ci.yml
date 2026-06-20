@@ -67,6 +67,40 @@ jobs:
         if: runner.os == 'Windows'
         run: xmake run vri-tests
 
+  # macOS: compile gate (catch macOS build regressions) + an experimental test run.
+  # macOS is not yet validated at runtime - MoltenVK's Vulkan 1.3 coverage, WebGPU via
+  # Metal headless, and desktop GL capping at 4.1 (so compute/tessellation/GL_PATCHES
+  # are unavailable and the GL backend self-skips). The build is a hard gate; the run
+  # is continue-on-error until macOS runtime is verified (then drop continue-on-error).
+  macos:
+    name: desktop (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK (MoltenVK)
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: latest
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, MoltenVK
+          vulkan-use-cache: true
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - name: Configure
+        run: >-
+          xmake f -y -m release -p macosx
+          --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y
+          --vri_build_tests=y --vri_build_tools=n --vri_build_examples=n
+
+      - name: Build (compile gate)
+        run: xmake build -y vri-tests
+
+      - name: Test (macOS, experimental - backends self-skip without a device)
+        continue-on-error: true
+        run: xmake run vri-tests
+
   # End-to-end WebGL: build the GL backend to wasm and render the triangle + UBO
   # triangle in headless Chrome (WebGL2 via SwiftShader - no GPU needed).
   webgl:
