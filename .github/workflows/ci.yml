@@ -103,3 +103,38 @@ jobs:
             build/wasm/wasm32/release/vri-webgl-triangle.html 2>&1 | tee emrun.log
           echo "--- grading ---"
           grep -q "VRI_WEBGL_RESULT: PASS" emrun.log
+
+  # End-to-end browser WebGPU: build the WebGPU backend to wasm (emdawnwebgpu) and
+  # render the triangle in headless Chrome via Vulkan-SwiftShader (no GPU needed).
+  webgpu:
+    name: webgpu (emscripten + headless chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Configure (wasm)
+        run: xmake f -y -p wasm --vri_backend_vulkan=n --vri_backend_wgpu=y --vri_backend_gl=n
+
+      - name: Build WebGPU E2E
+        run: xmake build -y vri-webgpu-triangle
+
+      - name: Run headless (Chrome + WebGPU/SwiftShader)
+        run: |
+          set -o pipefail
+          emrun \
+            --browser="${{ steps.setup-chrome.outputs.chrome-path }}" \
+            --browser_args="--headless=new --enable-unsafe-webgpu --enable-features=Vulkan --enable-unsafe-swiftshader --no-sandbox --disable-gpu-sandbox" \
+            --kill_exit --timeout 90 \
+            build/wasm/wasm32/release/vri-webgpu-triangle.html 2>&1 | tee emrun.log
+          echo "--- grading ---"
+          grep -q "VRI_WEBGPU_RESULT: PASS" emrun.log
