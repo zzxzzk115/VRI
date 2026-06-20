@@ -22,6 +22,7 @@ target("vri-tests")
     add_files("test_instance_xbackend.cpp")   -- instanced draw + SV_InstanceID parity
     add_files("test_scissor_xbackend.cpp")    -- scissor-rect clipping parity
     add_files("test_compute_xbackend.cpp")    -- compute pipeline + dispatch + storage buffer
+    add_files("test_geometry_xbackend.cpp")   -- legacy geometry shader (gated where absent)
     add_files("test_coordsys_xbackend.cpp")   -- Y-up coordinate parity across backends
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then

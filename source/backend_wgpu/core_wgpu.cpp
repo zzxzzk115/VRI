@@ -420,6 +420,13 @@ namespace vri::wgpu
         VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
         {
             DeviceWGPU* d = Dev(device);
+            // WebGPU has no geometry/tessellation stages - reject rather than ignore.
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+            {
+                const VriShaderStageBits st = desc->shaders[i].stage;
+                if (st == VriShaderStage_Geometry || st == VriShaderStage_TessControl || st == VriShaderStage_TessEval)
+                    return VriResult_Unsupported;
+            }
             WGPUShaderModule vsMod = nullptr, fsMod = nullptr;
             const char* vsEntry = "main";
             const char* fsEntry = "main";

@@ -158,7 +158,25 @@ namespace vri::core
         VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc* d, VriDescriptor** out) { return DV(device)->core.CreateTextureView(DV(device)->real, d, out); }
         VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* d, VriDescriptor** out) { return DV(device)->core.CreateSampler(DV(device)->real, d, out); }
         VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc* d, VriPipelineLayout** out) { return DV(device)->core.CreatePipelineLayout(DV(device)->real, d, out); }
-        VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* d, VriPipeline** out) { return DV(device)->core.CreateGraphicsPipeline(DV(device)->real, d, out); }
+        VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* d, VriPipeline** out)
+        {
+            DeviceVal* dv = DV(device);
+            for (uint32_t i = 0; i < d->shaderNum; ++i)
+            {
+                const VriShaderStageBits st = d->shaders[i].stage;
+                if (st == VriShaderStage_Geometry && !dv->desc.hasGeometryShader)
+                {
+                    Err(dv, "CreateGraphicsPipeline uses a geometry shader but device.hasGeometryShader is false (no geometry stage on this backend, e.g. WebGPU/WebGL2)");
+                    return VriResult_Unsupported;
+                }
+                if ((st == VriShaderStage_TessControl || st == VriShaderStage_TessEval) && !dv->desc.hasTessellation)
+                {
+                    Err(dv, "CreateGraphicsPipeline uses a tessellation shader but device.hasTessellation is false (no tessellation stage on this backend, e.g. WebGPU/WebGL2)");
+                    return VriResult_Unsupported;
+                }
+            }
+            return dv->core.CreateGraphicsPipeline(dv->real, d, out);
+        }
         VriResult VRI_CALL CreateComputePipeline(VriDevice* device, const VriComputePipelineDesc* d, VriPipeline** out)
         {
             DeviceVal* dv = DV(device);

@@ -44,11 +44,16 @@ task("shaders")
             local spvVar = "g_" .. stem(base) .. "Spv"
             os.runv(exe, {slang, "-o", spvHeader, "--var", spvVar, "--target", "spirv"})
 
+            -- WGSL is best-effort: WebGPU has no geometry/tessellation stages, so
+            -- those shaders only produce SPIR-V (consumed by Vulkan + desktop GL).
             local wgslHeader = path.join(dir, base .. "_wgsl.h")
             local wgslVar = "g_" .. stem(base) .. "Wgsl"
-            os.runv(exe, {slang, "-o", wgslHeader, "--var", wgslVar, "--target", "wgsl"})
-
-            cprint("${green}[shaders]${clear} %s -> %s + %s", path.filename(slang), path.filename(spvHeader), path.filename(wgslHeader))
+            local ok = try { function() os.runv(exe, {slang, "-o", wgslHeader, "--var", wgslVar, "--target", "wgsl"}) return true end }
+            if ok then
+                cprint("${green}[shaders]${clear} %s -> %s + %s", path.filename(slang), path.filename(spvHeader), path.filename(wgslHeader))
+            else
+                cprint("${yellow}[shaders]${clear} %s -> %s (no WGSL: unsupported stage)", path.filename(slang), path.filename(spvHeader))
+            end
         end
     end)
 task_end()

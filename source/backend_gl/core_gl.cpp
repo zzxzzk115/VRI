@@ -478,8 +478,19 @@ namespace vri::gl
         {
             DeviceGL* d = Dev(device);
             const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
+            // Legacy stages (geometry/tessellation) exist only on desktop GL, not on
+            // GLES3/WebGL2 - reject explicitly rather than silently dropping them.
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+            {
+                const VriShaderStageBits st = desc->shaders[i].stage;
+                if (st == VriShaderStage_Geometry && !d->Desc().hasGeometryShader)
+                    return VriResult_Unsupported;
+                if ((st == VriShaderStage_TessControl || st == VriShaderStage_TessEval) && !d->Desc().hasTessellation)
+                    return VriResult_Unsupported;
+            }
+
             std::vector<CombinedSamplerGL> combined;
-            GLuint vs = 0, fs = 0;
+            GLuint vs = 0, fs = 0, gs = 0;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
@@ -487,21 +498,29 @@ namespace vri::gl
                     vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined));
                 else if (s.stage == VriShaderStage_Fragment)
                     fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined));
+#if !defined(__EMSCRIPTEN__) // GL_GEOMETRY_SHADER is desktop-only (absent in GLES3/WebGL2 headers)
+                else if (s.stage == VriShaderStage_Geometry)
+                    gs = CompileShader(d, GL_GEOMETRY_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelGeometry, &combined));
+#endif
             }
             if (!vs || !fs)
             {
                 if (vs) glDeleteShader(vs);
                 if (fs) glDeleteShader(fs);
+                if (gs) glDeleteShader(gs);
                 return VriResult_Failure;
             }
             GLuint program = glCreateProgram();
             glAttachShader(program, vs);
             glAttachShader(program, fs);
+            if (gs) glAttachShader(program, gs);
             glLinkProgram(program);
             glDetachShader(program, vs);
             glDetachShader(program, fs);
+            if (gs) glDetachShader(program, gs);
             glDeleteShader(vs);
             glDeleteShader(fs);
+            if (gs) glDeleteShader(gs);
             GLint ok = 0;
             glGetProgramiv(program, GL_LINK_STATUS, &ok);
             if (!ok)

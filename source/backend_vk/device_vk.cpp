@@ -244,6 +244,7 @@ namespace vri::vk
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         VkPhysicalDeviceMeshShaderFeaturesEXT meshSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceVulkan12Features v12Sup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        VkPhysicalDeviceFeatures baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
             VkPhysicalDeviceFeatures2 sup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
             void** q = &sup.pNext;
@@ -252,6 +253,7 @@ namespace vri::vk
             if (hasExt(VK_EXT_MESH_SHADER_EXTENSION_NAME))            { *q = &meshSup; q = &meshSup.pNext; }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
+            baseSup = sup.features;
         }
 
         // ---- base enabled features (always on) ----
@@ -272,6 +274,10 @@ namespace vri::vk
 
         VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         features2.pNext = &f11;
+        // Legacy graphics stages + non-solid fill: enable when the GPU supports them.
+        features2.features.geometryShader     = baseSup.geometryShader;
+        features2.features.tessellationShader = baseSup.tessellationShader;
+        features2.features.fillModeNonSolid   = baseSup.fillModeNonSolid; // polygonMode Line/Point
 
         std::vector<const char*> extensions;
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -439,8 +445,10 @@ namespace vri::vk
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_desc.queueCount[t] = 1;
         m_desc.hasComputeShader = VRI_TRUE;
-        m_desc.hasGeometryShader = VRI_TRUE;
-        m_desc.hasTessellation = VRI_TRUE;
+        VkPhysicalDeviceFeatures baseFeatures;
+        vkGetPhysicalDeviceFeatures(m_physicalDevice, &baseFeatures);
+        m_desc.hasGeometryShader = baseFeatures.geometryShader ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasTessellation = baseFeatures.tessellationShader ? VRI_TRUE : VRI_FALSE;
 
         m_desc.enabledFeatures = m_enabledFeatures;
         m_desc.hasRayTracing = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;

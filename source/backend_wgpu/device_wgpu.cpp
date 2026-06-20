@@ -170,6 +170,9 @@ namespace vri::wgpu
         // WebGPU compute is wired (CreateComputePipeline + compute pass / CmdDispatch),
         // on both native (wgpu-native) and the browser (emdawnwebgpu).
         m_desc.hasComputeShader = VRI_TRUE;
+        // WebGPU has no geometry or tessellation stages.
+        m_desc.hasGeometryShader = VRI_FALSE;
+        m_desc.hasTessellation = VRI_FALSE;
     }
 
     void DeviceWGPU::FillRegistry()
