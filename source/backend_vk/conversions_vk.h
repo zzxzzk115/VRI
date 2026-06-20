@@ -178,6 +178,22 @@ namespace vri::vk
         }
     }
 
+    inline VkStencilOp ToVkStencilOp(VriStencilOp o)
+    {
+        switch (o)
+        {
+            case VriStencilOp_Keep:              return VK_STENCIL_OP_KEEP;
+            case VriStencilOp_Zero:              return VK_STENCIL_OP_ZERO;
+            case VriStencilOp_Replace:           return VK_STENCIL_OP_REPLACE;
+            case VriStencilOp_IncrementAndClamp: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+            case VriStencilOp_DecrementAndClamp: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+            case VriStencilOp_Invert:            return VK_STENCIL_OP_INVERT;
+            case VriStencilOp_IncrementAndWrap:  return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+            case VriStencilOp_DecrementAndWrap:  return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+            default:                             return VK_STENCIL_OP_KEEP;
+        }
+    }
+
     inline VkShaderStageFlagBits ToVkShaderStage(VriShaderStageBits s)
     {
         switch (s)

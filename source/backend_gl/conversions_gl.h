@@ -89,6 +89,22 @@ namespace vri::gl
         }
     }
 
+    inline GLenum ToGLStencilOp(VriStencilOp o)
+    {
+        switch (o)
+        {
+            case VriStencilOp_Keep:              return GL_KEEP;
+            case VriStencilOp_Zero:              return GL_ZERO;
+            case VriStencilOp_Replace:           return GL_REPLACE;
+            case VriStencilOp_IncrementAndClamp: return GL_INCR;
+            case VriStencilOp_DecrementAndClamp: return GL_DECR;
+            case VriStencilOp_Invert:            return GL_INVERT;
+            case VriStencilOp_IncrementAndWrap:  return GL_INCR_WRAP;
+            case VriStencilOp_DecrementAndWrap:  return GL_DECR_WRAP;
+            default:                             return GL_KEEP;
+        }
+    }
+
     inline GLenum ToGLBlendFactor(VriBlendFactor f)
     {
         switch (f)

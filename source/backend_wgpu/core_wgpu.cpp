@@ -301,6 +301,7 @@ namespace vri::wgpu
             v->kind = DescriptorWGPU::Kind::TextureView;
             v->device = Dev(device);
             v->view = view;
+            v->format = vd.format;
             *out = ToHandle(v);
             return VriResult_Success;
         }
@@ -534,9 +535,28 @@ namespace vri::wgpu
                 depthStencil.format = ToWgpuFormat(desc->outputMerger.depthStencilFormat);
                 depthStencil.depthWriteEnabled = desc->depthStencil.depthWrite ? WGPUOptionalBool_True : WGPUOptionalBool_False;
                 depthStencil.depthCompare = desc->depthStencil.depthTest ? ToWgpuCompareOp(desc->depthStencil.depthCompareOp) : WGPUCompareFunction_Always;
-                // Stencil defaults (no stencil test); both faces must be Always/Keep.
-                depthStencil.stencilFront.compare = WGPUCompareFunction_Always;
-                depthStencil.stencilBack.compare = WGPUCompareFunction_Always;
+                const VriDepthStencilDesc& dss = desc->depthStencil;
+                if (dss.stencilTest)
+                {
+                    auto toFace = [](const VriStencilOpDesc& s) {
+                        WGPUStencilFaceState f = {};
+                        f.compare = ToWgpuCompareOp(s.compareOp);
+                        f.failOp = ToWgpuStencilOp(s.failOp);
+                        f.depthFailOp = ToWgpuStencilOp(s.depthFailOp);
+                        f.passOp = ToWgpuStencilOp(s.passOp);
+                        return f;
+                    };
+                    depthStencil.stencilFront = toFace(dss.front);
+                    depthStencil.stencilBack = toFace(dss.back);
+                    depthStencil.stencilReadMask = dss.front.compareMask;  // WGPU masks are not per-face
+                    depthStencil.stencilWriteMask = dss.front.writeMask;
+                }
+                else
+                {
+                    // No stencil test: both faces must be Always/Keep.
+                    depthStencil.stencilFront.compare = WGPUCompareFunction_Always;
+                    depthStencil.stencilBack.compare = WGPUCompareFunction_Always;
+                }
                 pd.depthStencil = &depthStencil;
             }
 
@@ -547,7 +567,10 @@ namespace vri::wgpu
             if (!pipeline)
                 return VriResult_Failure;
 
-            *out = ToHandle(new PipelineWGPU{d, pipeline, nullptr, false});
+            PipelineWGPU* pw = new PipelineWGPU{d, pipeline, nullptr, false};
+            pw->stencilTest = desc->depthStencil.stencilTest != VRI_FALSE;
+            pw->stencilReference = desc->depthStencil.front.reference;
+            *out = ToHandle(pw);
             return VriResult_Success;
         }
 
@@ -732,6 +755,15 @@ namespace vri::wgpu
                 ds.depthLoadOp = a->depth->loadOp == VriAttachmentLoadOp_Load ? WGPULoadOp_Load : WGPULoadOp_Clear;
                 ds.depthStoreOp = a->depth->storeOp == VriAttachmentStoreOp_DontCare ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
                 ds.depthClearValue = a->depth->clearValue.depthStencil.depth;
+                // Stencil aspect: WGPU requires stencil load/store ops iff the format has stencil.
+                const WGPUTextureFormat dsFmt = Desc(a->depth->view)->format;
+                if (dsFmt == WGPUTextureFormat_Depth24PlusStencil8 || dsFmt == WGPUTextureFormat_Depth32FloatStencil8 ||
+                    dsFmt == WGPUTextureFormat_Stencil8)
+                {
+                    ds.stencilLoadOp = a->depth->loadOp == VriAttachmentLoadOp_Load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+                    ds.stencilStoreOp = a->depth->storeOp == VriAttachmentStoreOp_DontCare ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
+                    ds.stencilClearValue = a->depth->clearValue.depthStencil.stencil;
+                }
                 rp.depthStencilAttachment = &ds;
             }
 
@@ -772,7 +804,11 @@ namespace vri::wgpu
             }
             c->boundPipeline = p->render;
             if (p->render && c->pass)
+            {
                 wgpuRenderPassEncoderSetPipeline(c->pass, p->render);
+                if (p->stencilTest)
+                    wgpuRenderPassEncoderSetStencilReference(c->pass, p->stencilReference);
+            }
         }
 
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)

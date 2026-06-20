@@ -176,6 +176,9 @@ namespace vri::gl
         bool      blendEnable;
         GLenum    srcRGB, dstRGB, rgbOp, srcA, dstA, aOp;
         GLboolean colorMask[4];
+        // stencil: per-face func (compareOp), ops (fail/depthFail/pass), masks, ref
+        bool      stencilEnable = false;
+        struct StencilFaceGL { GLenum func, sfail, dpfail, dppass; GLuint compareMask, writeMask; GLint ref; } stencilFront, stencilBack;
         std::vector<CombinedSamplerGL> combinedSamplers;
         std::vector<VertexAttribGL>    vertexAttribs;
     };

@@ -102,6 +102,22 @@ namespace vri::wgpu
         }
     }
 
+    inline WGPUStencilOperation ToWgpuStencilOp(VriStencilOp o)
+    {
+        switch (o)
+        {
+            case VriStencilOp_Keep:              return WGPUStencilOperation_Keep;
+            case VriStencilOp_Zero:              return WGPUStencilOperation_Zero;
+            case VriStencilOp_Replace:           return WGPUStencilOperation_Replace;
+            case VriStencilOp_IncrementAndClamp: return WGPUStencilOperation_IncrementClamp;
+            case VriStencilOp_DecrementAndClamp: return WGPUStencilOperation_DecrementClamp;
+            case VriStencilOp_Invert:            return WGPUStencilOperation_Invert;
+            case VriStencilOp_IncrementAndWrap:  return WGPUStencilOperation_IncrementWrap;
+            case VriStencilOp_DecrementAndWrap:  return WGPUStencilOperation_DecrementWrap;
+            default:                             return WGPUStencilOperation_Keep;
+        }
+    }
+
     inline WGPUVertexFormat ToWgpuVertexFormat(VriFormat f)
     {
         switch (f)

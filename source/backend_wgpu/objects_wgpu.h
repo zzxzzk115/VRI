@@ -60,6 +60,7 @@ namespace vri::wgpu
         enum class Kind { TextureView, BufferView, Sampler } kind;
         DeviceWGPU*       device;
         WGPUTextureView   view;
+        WGPUTextureFormat format = WGPUTextureFormat_Undefined; // for render-pass stencil-aspect detection
         WGPUSampler       sampler;
         const BufferWGPU* buffer;
         uint64_t          bufferOffset;
@@ -101,6 +102,8 @@ namespace vri::wgpu
         WGPURenderPipeline render;
         WGPUComputePipeline compute;
         bool               isCompute;
+        bool               stencilTest = false;     // set the stencil reference on bind
+        uint32_t           stencilReference = 0;
     };
 
     struct FenceWGPU

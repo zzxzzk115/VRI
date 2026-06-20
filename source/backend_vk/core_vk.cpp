@@ -661,6 +661,19 @@ namespace vri::vk
             ds.depthWriteEnable = dss.depthWrite ? VK_TRUE : VK_FALSE;
             ds.depthCompareOp = ToVkCompareOp(dss.depthCompareOp);
             ds.stencilTestEnable = dss.stencilTest ? VK_TRUE : VK_FALSE;
+            auto toVkStencil = [](const VriStencilOpDesc& s) {
+                VkStencilOpState o = {};
+                o.failOp = ToVkStencilOp(s.failOp);
+                o.passOp = ToVkStencilOp(s.passOp);
+                o.depthFailOp = ToVkStencilOp(s.depthFailOp);
+                o.compareOp = ToVkCompareOp(s.compareOp);
+                o.compareMask = s.compareMask;
+                o.writeMask = s.writeMask;
+                o.reference = s.reference;
+                return o;
+            };
+            ds.front = toVkStencil(dss.front);
+            ds.back = toVkStencil(dss.back);
 
             // color blend + dynamic-rendering formats
             std::vector<VkPipelineColorBlendAttachmentState> blends;
@@ -693,7 +706,13 @@ namespace vri::vk
             rendering.colorAttachmentCount = static_cast<uint32_t>(colorFormats.size());
             rendering.pColorAttachmentFormats = colorFormats.data();
             if (desc->outputMerger.depthStencilFormat != VriFormat_Unknown)
-                rendering.depthAttachmentFormat = ToVkFormat(desc->outputMerger.depthStencilFormat);
+            {
+                const VkFormat dsf = ToVkFormat(desc->outputMerger.depthStencilFormat);
+                rendering.depthAttachmentFormat = dsf;
+                if (dsf == VK_FORMAT_S8_UINT || dsf == VK_FORMAT_D16_UNORM_S8_UINT ||
+                    dsf == VK_FORMAT_D24_UNORM_S8_UINT || dsf == VK_FORMAT_D32_SFLOAT_S8_UINT)
+                    rendering.stencilAttachmentFormat = dsf;
+            }
 
             VkGraphicsPipelineCreateInfo ci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
             ci.pNext = &rendering;
@@ -955,6 +974,7 @@ namespace vri::vk
             ri.pColorAttachments = colors.data();
 
             VkRenderingAttachmentInfo depth = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+            VkRenderingAttachmentInfo stencil = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
             if (a->depth && a->depth->view)
             {
                 const DescriptorVK* view = Desc(a->depth->view);
@@ -965,6 +985,14 @@ namespace vri::vk
                 depth.clearValue.depthStencil.depth = a->depth->clearValue.depthStencil.depth;
                 depth.clearValue.depthStencil.stencil = a->depth->clearValue.depthStencil.stencil;
                 ri.pDepthAttachment = &depth;
+                // Attach the stencil aspect too when the format carries stencil.
+                const VkFormat f = view->format;
+                if (f == VK_FORMAT_S8_UINT || f == VK_FORMAT_D16_UNORM_S8_UINT ||
+                    f == VK_FORMAT_D24_UNORM_S8_UINT || f == VK_FORMAT_D32_SFLOAT_S8_UINT)
+                {
+                    stencil = depth;
+                    ri.pStencilAttachment = &stencil;
+                }
             }
 
             vkCmdBeginRendering(c->cmd, &ri);

@@ -632,6 +632,13 @@ namespace vri::gl
             p->colorMask[1] = (m & VriColorWrite_G) ? GL_TRUE : GL_FALSE;
             p->colorMask[2] = (m & VriColorWrite_B) ? GL_TRUE : GL_FALSE;
             p->colorMask[3] = (m & VriColorWrite_A) ? GL_TRUE : GL_FALSE;
+            p->stencilEnable = desc->depthStencil.stencilTest != VRI_FALSE;
+            auto toGLFace = [](const VriStencilOpDesc& s) {
+                return PipelineGL::StencilFaceGL{ToGLCompareOp(s.compareOp), ToGLStencilOp(s.failOp), ToGLStencilOp(s.depthFailOp),
+                                                 ToGLStencilOp(s.passOp), s.compareMask, s.writeMask, static_cast<GLint>(s.reference)};
+            };
+            p->stencilFront = toGLFace(desc->depthStencil.front);
+            p->stencilBack = toGLFace(desc->depthStencil.back);
             *out = ToHandle(p);
             return VriResult_Success;
         }
@@ -767,13 +774,24 @@ namespace vri::gl
             if (a->depth)
             {
                 const DescriptorGL* dv = Desc(a->depth->view);
-                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
+                const bool hasStencil = dv->texture->glFormat == GL_DEPTH_STENCIL;
+                const GLenum attach = hasStencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
+                glFramebufferTexture2D(GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
                 if (a->depth->loadOp == VriAttachmentLoadOp_Clear)
                 {
-                    // glClear*/clearbuffer of depth respects the depth write mask.
+                    // Clears respect the depth/stencil write masks.
                     glDepthMask(GL_TRUE);
-                    const GLfloat d = a->depth->clearValue.depthStencil.depth;
-                    glClearBufferfv(GL_DEPTH, 0, &d);
+                    if (hasStencil)
+                    {
+                        glStencilMask(0xFFu);
+                        glClearBufferfi(GL_DEPTH_STENCIL, 0, a->depth->clearValue.depthStencil.depth,
+                                        static_cast<GLint>(a->depth->clearValue.depthStencil.stencil));
+                    }
+                    else
+                    {
+                        const GLfloat d = a->depth->clearValue.depthStencil.depth;
+                        glClearBufferfv(GL_DEPTH, 0, &d);
+                    }
                 }
             }
 
@@ -824,6 +842,19 @@ namespace vri::gl
             }
             else glDisable(GL_BLEND);
             glColorMask(p->colorMask[0], p->colorMask[1], p->colorMask[2], p->colorMask[3]);
+            if (p->stencilEnable)
+            {
+                glEnable(GL_STENCIL_TEST);
+                const auto& f = p->stencilFront;
+                const auto& b = p->stencilBack;
+                glStencilFuncSeparate(GL_FRONT, f.func, f.ref, f.compareMask);
+                glStencilOpSeparate(GL_FRONT, f.sfail, f.dpfail, f.dppass);
+                glStencilMaskSeparate(GL_FRONT, f.writeMask);
+                glStencilFuncSeparate(GL_BACK, b.func, b.ref, b.compareMask);
+                glStencilOpSeparate(GL_BACK, b.sfail, b.dpfail, b.dppass);
+                glStencilMaskSeparate(GL_BACK, b.writeMask);
+            }
+            else glDisable(GL_STENCIL_TEST);
             c->topology = p->topology;
 #if !defined(__EMSCRIPTEN__) && defined(GL_PATCHES) && defined(GL_PATCH_VERTICES) // tessellation: desktop GL only
             if (p->topology == GL_PATCHES && p->patchVertices > 0)
