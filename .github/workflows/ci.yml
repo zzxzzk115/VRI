@@ -25,7 +25,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Vulkan SDK
         uses: humbletim/setup-vulkan-sdk@v1.2.1
@@ -74,7 +74,7 @@ jobs:
     name: desktop (macos-latest)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Vulkan SDK
         uses: humbletim/setup-vulkan-sdk@v1.2.1
@@ -107,7 +107,7 @@ jobs:
     name: webgl (emscripten + headless chrome)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # xmake must be set up BEFORE emsdk: with EMSDK active the setup action
       # cross-builds xmake itself to wasm and fails. Install it first (host build).
@@ -119,7 +119,7 @@ jobs:
 
       - name: Setup Chrome
         id: setup-chrome
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
 
       - name: Configure (wasm)
         run: xmake f -y -p wasm --vri_backend_vulkan=n --vri_backend_wgpu=n --vri_backend_gl=y
@@ -144,7 +144,7 @@ jobs:
     name: webgpu (emscripten + headless chrome)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
@@ -154,7 +154,7 @@ jobs:
 
       - name: Setup Chrome
         id: setup-chrome
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
 
       - name: Configure (wasm)
         run: xmake f -y -p wasm --vri_backend_vulkan=n --vri_backend_wgpu=y --vri_backend_gl=n
