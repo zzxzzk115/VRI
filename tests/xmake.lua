@@ -11,6 +11,7 @@ target("vri-tests")
 
     add_files("test_main.cpp")
     add_files("test_api_usage.cpp")
+    add_files("test_validation.cpp")          -- VRI Validation layer catches misuse
     add_files("test_descriptor_xbackend.cpp") -- runs on whichever backends are enabled
     add_files("test_texture_xbackend.cpp")    -- sampled-texture (separate texture+sampler) parity
     add_files("test_vertex_xbackend.cpp")     -- vertex-buffer + indexed-draw parity

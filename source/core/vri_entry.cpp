@@ -20,6 +20,17 @@
 
 using vri::core::DeviceBase;
 
+namespace vri::core
+{
+    // VRI Validation layer (validation_layer.cpp). Active when the device was
+    // created with enableValidation; wraps the device so it can't be confused with
+    // a raw backend handle.
+    VriDevice* WrapValidationDevice(VriDevice* realDevice, const VriDeviceCreationDesc& desc);
+    bool       IsValidationDevice(const VriDevice* device);
+    VriResult  ValidationGetInterface(const VriDevice* device, const char* name, size_t size, void* out);
+    void       DestroyValidationDevice(VriDevice* device);
+} // namespace vri::core
+
 namespace
 {
     DeviceBase* ToBase(VriDevice* d) { return reinterpret_cast<DeviceBase*>(d); }
@@ -73,13 +84,20 @@ VriResult VRI_CALL vriCreateDevice(const VriDeviceCreationDesc* desc, VriDevice*
     if (device == nullptr)
         return result; // backend reported the precise reason (e.g. Unsupported)
 
-    *outDevice = ToHandle(device);
+    VriDevice* handle = ToHandle(device);
+    // Insert the VRI Validation layer if requested (debug builds default it on).
+    *outDevice = desc->enableValidation ? vri::core::WrapValidationDevice(handle, *desc) : handle;
     return VriResult_Success;
 }
 
 void VRI_CALL vriDestroyDevice(VriDevice* device)
 {
-    delete ToBase(device);
+    if (device == nullptr)
+        return;
+    if (vri::core::IsValidationDevice(device))
+        vri::core::DestroyValidationDevice(device);
+    else
+        delete ToBase(device);
 }
 
 VriResult VRI_CALL vriGetInterface(const VriDevice* device, const char* name, size_t size, void* out)
@@ -87,6 +105,8 @@ VriResult VRI_CALL vriGetInterface(const VriDevice* device, const char* name, si
     if (device == nullptr || name == nullptr)
         return VriResult_InvalidArgument;
 
+    if (vri::core::IsValidationDevice(device))
+        return vri::core::ValidationGetInterface(device, name, size, out);
     return ToBase(device)->GetInterface(name, size, out);
 }
 
