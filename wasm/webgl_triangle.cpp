@@ -18,6 +18,7 @@
 #include "shaders/triangle_tex_spv.h"  // g_triangleTexSpv  (color sampled from a texture)
 #include "shaders/triangle_vbuf_spv.h" // g_triangleVbufSpv (vertex buffer + indexed draw)
 #include "shaders/triangle_mrt_spv.h"  // g_triangleMrtSpv  (two render targets)
+#include "shaders/triangle_inst_spv.h" // g_triangleInstSpv (instanced draw)
 
 #include <cstdlib>
 
@@ -882,6 +883,77 @@ namespace
         vriDestroyDevice(dev);
         return true;
     }
+
+    // Instanced draw: 2 instances via SV_InstanceID -> red left, green right.
+    bool RenderInstanceAndProbe(bool& ok2)
+    {
+        ok2 = false;
+        VriDeviceCreationDesc dc{};
+        dc.graphicsAPI = VriGraphicsAPI_OpenGLES; dc.enableValidation = VRI_TRUE; dc.bestEffort = VRI_TRUE;
+        VriDevice* dev = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success) return false;
+        VriCoreInterface c{};
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success) return false;
+        VriQueue* queue = nullptr; c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
+
+        VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM;
+        td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
+        td.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc; td.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* color = nullptr; c.CreateTexture(dev, &td, &color);
+        VriTextureViewDesc cvd{}; cvd.texture = color; cvd.viewType = VriTextureViewType_2D; cvd.format = VriFormat_Unknown; cvd.aspect = VriImageAspect_Color;
+        VriDescriptor* colorView = nullptr; c.CreateTextureView(dev, &cvd, &colorView);
+        VriBufferDesc rbd{}; rbd.size = static_cast<uint64_t>(kW) * kH * 4; rbd.usage = VriBufferUsage_TransferDst; rbd.memoryLocation = VriMemoryLocation_HostReadback;
+        VriBuffer* readback = nullptr; c.CreateBuffer(dev, &rbd, &readback);
+
+        VriPipelineLayoutDesc ld{}; VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(dev, &ld, &layout);
+        VriShaderDesc sh[2]{};
+        sh[0].stage = VriShaderStage_Vertex;   sh[0].bytecode = g_triangleInstSpv; sh[0].bytecodeSize = sizeof(g_triangleInstSpv); sh[0].entryPointName = "vertexMain";
+        sh[1].stage = VriShaderStage_Fragment; sh[1].bytecode = g_triangleInstSpv; sh[1].bytecodeSize = sizeof(g_triangleInstSpv); sh[1].entryPointName = "fragmentMain";
+        VriColorAttachmentDesc ca{}; ca.format = VriFormat_RGBA8_UNORM; ca.colorWriteMask = VriColorWrite_RGBA;
+        VriGraphicsPipelineDesc pd{};
+        pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2;
+        pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
+        pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f;
+        pd.multisample.sampleNum = 1; pd.outputMerger.colors = &ca; pd.outputMerger.colorNum = 1;
+        VriPipeline* pipeline = nullptr;
+        if (c.CreateGraphicsPipeline(dev, &pd, &pipeline) != VriResult_Success) { std::printf("VRI_WEBGL: inst pipeline FAILED\n"); return false; }
+
+        VriCommandAllocator* alloc = nullptr; c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
+        VriCommandBuffer* cmd = nullptr; c.CreateCommandBuffer(alloc, &cmd);
+        VriFence* fence = nullptr; c.CreateFence(dev, 0, &fence);
+        c.BeginCommandBuffer(cmd);
+        VriAttachmentDesc rt{}; rt.view = colorView; rt.loadOp = VriAttachmentLoadOp_Clear; rt.storeOp = VriAttachmentStoreOp_Store; rt.clearValue.color.f32[3] = 1.0f;
+        VriAttachmentsDesc att{}; att.colors = &rt; att.colorNum = 1; att.renderArea.width = kW; att.renderArea.height = kH; att.layerNum = 1;
+        c.CmdBeginRendering(cmd, &att);
+        VriViewport vp{0, 0, static_cast<float>(kW), static_cast<float>(kH), 0, 1}; c.CmdSetViewports(cmd, &vp, 1);
+        VriRect sc{0, 0, kW, kH}; c.CmdSetScissors(cmd, &sc, 1);
+        c.CmdSetPipeline(cmd, pipeline);
+        VriDrawDesc draw{}; draw.vertexNum = 3; draw.instanceNum = 2; c.CmdDraw(cmd, &draw);
+        c.CmdEndRendering(cmd);
+        VriBufferTextureCopyDesc tc{}; tc.texture.aspect = VriImageAspect_Color; tc.texture.layerNum = 1;
+        c.CmdReadbackTextureToBuffer(cmd, readback, color, &tc);
+        c.EndCommandBuffer(cmd);
+        VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = 1;
+        VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
+        c.QueueSubmit(queue, &sub); c.Wait(fence, 1);
+
+        const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rbd.size));
+        bool ok = px != nullptr;
+        if (ok)
+        {
+            const uint32_t oL = ((kH / 2) * kW + 19) * 4;
+            const uint32_t oR = ((kH / 2) * kW + 45) * 4;
+            const bool leftRed = px[oL + 0] == 255 && px[oL + 1] == 0 && px[oL + 2] == 0;
+            const bool rightGreen = px[oR + 0] == 0 && px[oR + 1] == 255 && px[oR + 2] == 0;
+            ok2 = leftRed && rightGreen;
+            c.UnmapBuffer(readback);
+        }
+        c.DeviceWaitIdle(dev);
+        c.DestroyFence(fence); c.DestroyCommandAllocator(alloc); c.DestroyPipeline(pipeline); c.DestroyPipelineLayout(layout);
+        c.DestroyBuffer(readback); c.DestroyDescriptor(colorView); c.DestroyTexture(color);
+        vriDestroyDevice(dev);
+        return ok;
+    }
 } // namespace
 
 int main()
@@ -919,9 +991,13 @@ int main()
     const bool ranMrt = RenderMrtAndProbe(mrtOk);
     const bool mrtPass = ranMrt && mrtOk;
 
-    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass;
-    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d)\n",
-                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk);
+    bool instOk = false;
+    const bool ranInst = RenderInstanceAndProbe(instOk);
+    const bool instPass = ranInst && instOk;
+
+    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d)\n",
+                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.
