@@ -225,8 +225,9 @@ if has_config("vri_build_examples") then
     includes("examples")
 end
 
--- Emscripten end-to-end targets: headless triangles that render via the GL (WebGL2)
--- and/or WebGPU backends and report a pass/fail pixel check. Browser-run via emrun.
+-- Emscripten end-to-end tests (tests/wasm/): headless triangles that render via the
+-- GL (WebGL2) and/or WebGPU backends and report a pass/fail pixel check. Browser-run
+-- via emrun. Wasm-only, so they live outside the desktop `tests` target but with it.
 if is_plat("wasm") then
-    includes("wasm")
+    includes("tests/wasm")
 end

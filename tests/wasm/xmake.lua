@@ -1,4 +1,5 @@
--- Emscripten end-to-end targets. Only meaningful on -p wasm.
+-- Emscripten end-to-end tests (the wasm counterpart of the desktop `tests`). Only
+-- meaningful on -p wasm; built explicitly (set_default(false)) and graded by emrun.
 
 -- WebGL2 (GL backend) headless triangle/feature suite.
 if has_config("vri_backend_gl") then
