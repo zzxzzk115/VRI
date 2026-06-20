@@ -62,4 +62,11 @@ target("vri")
     if has_config("vri_backend_d3d11") and is_plat("windows") then
         add_defines("VRI_BACKEND_D3D11")
     end
+    if has_config("vri_backend_d3d12") and is_plat("windows") then
+        add_defines("VRI_BACKEND_D3D12")
+        add_files("backend_d3d12/**.cpp")
+        add_includedirs("backend_d3d12", {public = false})
+        -- D3D12 core + DXGI; d3dcompiler (FXC) for runtime HLSL->DXBC in early bring-up
+        add_syslinks("d3d12", "dxgi", "d3dcompiler", {public = true})
+    end
 target_end()

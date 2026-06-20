@@ -64,6 +64,12 @@ option("vri_backend_d3d11")
     set_description("Enable the Direct3D 11 backend (Windows only)")
 option_end()
 
+option("vri_backend_d3d12")
+    set_default(false)
+    set_showmenu(true)
+    set_description("Enable the Direct3D 12 backend (Windows only)")
+option_end()
+
 option("vri_validation")
     set_default(is_mode("debug"))
     set_showmenu(true)

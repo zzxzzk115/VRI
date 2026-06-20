@@ -17,6 +17,9 @@
 #if defined(VRI_BACKEND_GL)
 #    include "device_gl.h"
 #endif
+#if defined(VRI_BACKEND_D3D12)
+#    include "device_d3d12.h"
+#endif
 
 using vri::core::DeviceBase;
 
@@ -76,6 +79,9 @@ VriResult VRI_CALL vriCreateDevice(const VriDeviceCreationDesc* desc, VriDevice*
         // device picks the context + shader target from graphicsAPI.
         case VriGraphicsAPI_OpenGL:
         case VriGraphicsAPI_OpenGLES: device = vri::gl::CreateDevice(*desc, result); break;
+#endif
+#if defined(VRI_BACKEND_D3D12)
+        case VriGraphicsAPI_D3D12: device = vri::d3d12::CreateDevice(*desc, result); break;
 #endif
         default:
             return VriResult_Unsupported;

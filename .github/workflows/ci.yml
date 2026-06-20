@@ -50,7 +50,7 @@ jobs:
         run: >-
           xmake f -y -m release
           -p ${{ runner.os == 'Windows' && 'windows' || 'linux' }}
-          --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y
+          --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y --vri_backend_d3d12=y
           --vri_build_tests=y --vri_build_tools=n --vri_build_examples=n
 
       - name: Build
