@@ -19,6 +19,7 @@ target("vri-tests")
     add_files("test_cull_xbackend.cpp")       -- back-face culling + winding parity
     add_files("test_mrt_xbackend.cpp")        -- multiple render targets parity
     add_files("test_instance_xbackend.cpp")   -- instanced draw + SV_InstanceID parity
+    add_files("test_scissor_xbackend.cpp")    -- scissor-rect clipping parity
     add_files("test_coordsys_xbackend.cpp")   -- Y-up coordinate parity across backends
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
