@@ -89,6 +89,7 @@ namespace vri::gl
         uint32_t  mipNum;
         uint32_t  layerNum;
         uint32_t  texelSize;
+        bool      isRenderbuffer = false; // MSAA targets are multisample renderbuffers (desktop GL + WebGL2)
     };
 
     struct DescriptorGL

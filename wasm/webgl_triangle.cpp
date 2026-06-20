@@ -1052,6 +1052,94 @@ namespace
         vriDestroyDevice(dev);
         return true;
     }
+
+    // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
+    // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
+    // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
+    // multisample textures; the GL backend uses a multisample renderbuffer.)
+    bool RenderMsaaAndProbe(bool& edgeBlend)
+    {
+        edgeBlend = false;
+        VriDeviceCreationDesc dc{};
+        dc.graphicsAPI = VriGraphicsAPI_OpenGLES; dc.enableValidation = VRI_TRUE; dc.bestEffort = VRI_TRUE;
+        VriDevice* dev = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success) return false;
+        VriCoreInterface c{};
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success) return false;
+        VriQueue* queue = nullptr; c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
+
+        VriTextureDesc mt{}; mt.type = VriTextureType_2D; mt.format = VriFormat_RGBA8_UNORM;
+        mt.width = kW; mt.height = kH; mt.depth = 1; mt.mipNum = 1; mt.layerNum = 1; mt.sampleNum = 4;
+        mt.usage = VriTextureUsage_ColorAttachment; mt.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* msaa = nullptr;
+        if (c.CreateTexture(dev, &mt, &msaa) != VriResult_Success) { std::printf("VRI_WEBGL: msaa texture FAILED\n"); vriDestroyDevice(dev); return false; }
+        VriTextureViewDesc mvd{}; mvd.texture = msaa; mvd.viewType = VriTextureViewType_2D; mvd.format = VriFormat_Unknown; mvd.aspect = VriImageAspect_Color;
+        VriDescriptor* msaaView = nullptr; c.CreateTextureView(dev, &mvd, &msaaView);
+
+        VriTextureDesc rtd{}; rtd.type = VriTextureType_2D; rtd.format = VriFormat_RGBA8_UNORM;
+        rtd.width = kW; rtd.height = kH; rtd.depth = 1; rtd.mipNum = 1; rtd.layerNum = 1; rtd.sampleNum = 1;
+        rtd.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc; rtd.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* resolve = nullptr; c.CreateTexture(dev, &rtd, &resolve);
+        VriTextureViewDesc rvd{}; rvd.texture = resolve; rvd.viewType = VriTextureViewType_2D; rvd.format = VriFormat_Unknown; rvd.aspect = VriImageAspect_Color;
+        VriDescriptor* resolveView = nullptr; c.CreateTextureView(dev, &rvd, &resolveView);
+
+        VriBufferDesc rbd{}; rbd.size = static_cast<uint64_t>(kW) * kH * 4; rbd.usage = VriBufferUsage_TransferDst; rbd.memoryLocation = VriMemoryLocation_HostReadback;
+        VriBuffer* readback = nullptr; c.CreateBuffer(dev, &rbd, &readback);
+
+        VriPipelineLayoutDesc ld{}; VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(dev, &ld, &layout);
+        VriShaderDesc sh[2]{};
+        sh[0].stage = VriShaderStage_Vertex;   sh[0].bytecode = g_triangleSpv; sh[0].bytecodeSize = sizeof(g_triangleSpv); sh[0].entryPointName = "vertexMain";
+        sh[1].stage = VriShaderStage_Fragment; sh[1].bytecode = g_triangleSpv; sh[1].bytecodeSize = sizeof(g_triangleSpv); sh[1].entryPointName = "fragmentMain";
+        VriColorAttachmentDesc ca{}; ca.format = VriFormat_RGBA8_UNORM; ca.colorWriteMask = VriColorWrite_RGBA;
+        VriGraphicsPipelineDesc pd{};
+        pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2;
+        pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
+        pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f;
+        pd.multisample.sampleNum = 4; pd.outputMerger.colors = &ca; pd.outputMerger.colorNum = 1;
+        VriPipeline* pipeline = nullptr;
+        if (c.CreateGraphicsPipeline(dev, &pd, &pipeline) != VriResult_Success) { std::printf("VRI_WEBGL: msaa pipeline FAILED\n"); vriDestroyDevice(dev); return false; }
+
+        VriCommandAllocator* alloc = nullptr; c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
+        VriCommandBuffer* cmd = nullptr; c.CreateCommandBuffer(alloc, &cmd);
+        VriFence* fence = nullptr; c.CreateFence(dev, 0, &fence);
+
+        c.BeginCommandBuffer(cmd);
+        VriAttachmentDesc rt{}; rt.view = msaaView; rt.loadOp = VriAttachmentLoadOp_Clear; rt.storeOp = VriAttachmentStoreOp_Store; rt.clearValue.color.f32[3] = 1.0f; rt.resolveView = resolveView;
+        VriAttachmentsDesc att{}; att.colors = &rt; att.colorNum = 1; att.renderArea.width = kW; att.renderArea.height = kH; att.layerNum = 1;
+        c.CmdBeginRendering(cmd, &att);
+        VriViewport vp{0, 0, static_cast<float>(kW), static_cast<float>(kH), 0, 1}; c.CmdSetViewports(cmd, &vp, 1);
+        VriRect sc{0, 0, kW, kH}; c.CmdSetScissors(cmd, &sc, 1);
+        c.CmdSetPipeline(cmd, pipeline);
+        VriDrawDesc draw{}; draw.vertexNum = 3; draw.instanceNum = 1; c.CmdDraw(cmd, &draw);
+        c.CmdEndRendering(cmd);
+        VriBufferTextureCopyDesc tc{}; tc.texture.aspect = VriImageAspect_Color; tc.texture.layerNum = 1;
+        c.CmdReadbackTextureToBuffer(cmd, readback, resolve, &tc);
+        c.EndCommandBuffer(cmd);
+
+        VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = 1;
+        VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
+        c.QueueSubmit(queue, &sub); c.Wait(fence, 1);
+
+        const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rbd.size));
+        bool ok = px != nullptr, anyRed = false;
+        if (ok)
+        {
+            for (uint32_t p = 0; p < kW * kH; ++p)
+            {
+                const uint8_t r = px[p*4+0], g = px[p*4+1], b = px[p*4+2];
+                if (r == 255 && g == 0 && b == 0) anyRed = true;
+                if (r > 0 && r < 255 && g == 0 && b == 0) edgeBlend = true;
+            }
+            edgeBlend = edgeBlend && anyRed;
+            c.UnmapBuffer(readback);
+        }
+
+        c.DeviceWaitIdle(dev);
+        c.DestroyFence(fence); c.DestroyCommandAllocator(alloc); c.DestroyPipeline(pipeline); c.DestroyPipelineLayout(layout);
+        c.DestroyBuffer(readback); c.DestroyDescriptor(msaaView); c.DestroyDescriptor(resolveView); c.DestroyTexture(msaa); c.DestroyTexture(resolve);
+        vriDestroyDevice(dev);
+        return ok;
+    }
 } // namespace
 
 int main()
@@ -1101,9 +1189,13 @@ int main()
     const bool ranComputeNo = RenderComputeUnsupportedProbe(computeNoOk);
     const bool computeNoPass = ranComputeNo && computeNoOk;
 
-    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass && scissorPass && computeNoPass;
-    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: ran=%d ok=%d)\n",
-                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk, ranScissor, scissorOk, ranComputeNo, computeNoOk);
+    bool msaaEdge = false;
+    const bool ranMsaa = RenderMsaaAndProbe(msaaEdge);
+    const bool msaaPass = ranMsaa && msaaEdge;
+
+    const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass && instPass && scissorPass && computeNoPass && msaaPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: ran=%d ok=%d | msaa: ran=%d edge=%d)\n",
+                pass ? "PASS" : "FAIL", ranTri, topRed, botRed, ranUbo, centerGreen, ranTex, centerBlue, ranVbuf, centerYellow, ranDepth, depthGreen, ranBlend, blendPurple, ranCull, cullGreen, ranMrt, mrtOk, ranInst, instOk, ranScissor, scissorOk, ranComputeNo, computeNoOk, ranMsaa, msaaEdge);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.

@@ -370,25 +370,38 @@ namespace vri::gl
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
             const GLFormat gf = ToGLFormat(desc->format);
-            GLuint id = 0;
-            glGenTextures(1, &id);
             const GLsizei mips = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
             const GLsizei w = static_cast<GLsizei>(desc->width);
             const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
             const bool ms = desc->sampleNum > 1;
+
+            GLuint id = 0;
             GLenum target = GL_TEXTURE_2D;
-#if !defined(__EMSCRIPTEN__)
-            if (ms) // multisample textures are desktop-GL only (WebGL2 has none - use renderbuffers, later)
+            bool isRenderbuffer = false;
+            if (ms)
             {
+#if defined(__EMSCRIPTEN__)
+                // WebGL2 has no multisample textures - use a multisample renderbuffer
+                // (render-only; resolved to a single-sample texture).
+                glGenRenderbuffers(1, &id);
+                glBindRenderbuffer(GL_RENDERBUFFER, id);
+                glRenderbufferStorageMultisample(GL_RENDERBUFFER, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h);
+                glBindRenderbuffer(GL_RENDERBUFFER, 0);
+                target = GL_RENDERBUFFER;
+                isRenderbuffer = true;
+#else
+                // Desktop GL: a multisample texture (samplable via sampler2DMS/texelFetch -
+                // more capable than a renderbuffer), attached + resolved like any target.
                 target = GL_TEXTURE_2D_MULTISAMPLE;
+                glGenTextures(1, &id);
                 glBindTexture(target, id);
                 glTexStorage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
                 glBindTexture(target, 0);
+#endif
             }
             else
-#endif
             {
-                if (ms) { glDeleteTextures(1, &id); return VriResult_Unsupported; } // WebGL2: no multisample textures
+                glGenTextures(1, &id);
                 glBindTexture(GL_TEXTURE_2D, id);
                 glTexStorage2D(GL_TEXTURE_2D, mips, gf.internalFormat, w, h);
                 glBindTexture(GL_TEXTURE_2D, 0);
@@ -398,6 +411,7 @@ namespace vri::gl
             t->device = Dev(device);
             t->id = id;
             t->target = target;
+            t->isRenderbuffer = isRenderbuffer;
             t->glFormat = gf.format;
             t->glType = gf.type;
             t->width = desc->width;
@@ -413,7 +427,8 @@ namespace vri::gl
         {
             if (!texture) return;
             TextureGL* t = Tex(texture);
-            glDeleteTextures(1, &t->id);
+            if (t->isRenderbuffer) glDeleteRenderbuffers(1, &t->id);
+            else glDeleteTextures(1, &t->id);
             delete t;
         }
 
@@ -778,7 +793,10 @@ namespace vri::gl
             for (uint32_t i = 0; i < a->colorNum; ++i)
             {
                 const DescriptorGL* v = Desc(a->colors[i].view);
-                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
+                if (v->texture->isRenderbuffer) // MSAA renderbuffer attachment
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_RENDERBUFFER, v->texture->id);
+                else
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
                 drawBufs[i] = GL_COLOR_ATTACHMENT0 + i;
                 if (a->colors[i].resolveView) // resolve this MSAA attachment at EndRendering
                 {
@@ -939,10 +957,10 @@ namespace vri::gl
                         if (it != s->bound.end() && it->second && it->second->texture)
                         {
                             const DescriptorGL* tv = it->second;
+                            if (tv->texture->isRenderbuffer) continue; // renderbuffers aren't sampled
                             glBindTexture(tv->texture->target, tv->texture->id);
                             // Honor the view's base mip so a mip-range view samples that level.
-                            if (tv->texture->target != GL_TEXTURE_2D_MULTISAMPLE)
-                                glTexParameteri(tv->texture->target, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
+                            glTexParameteri(tv->texture->target, GL_TEXTURE_BASE_LEVEL, static_cast<GLint>(tv->mip));
                         }
                     }
                     if (cs.smpSet == setIndex)
