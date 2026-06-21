@@ -360,8 +360,19 @@ namespace vri::d3d12
             for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
                 q->queue->Signal(Fen(submit->signalFences[i].fence)->fence.Get(), submit->signalFences[i].value);
         }
-        void VRI_CALL QueueWaitIdle(VriQueue*) {}
-        void VRI_CALL DeviceWaitIdle(VriDevice*) {}
+        void WaitQueueIdle(QueueD3D12* q)
+        {
+            if (!q->idleFence) return;
+            const uint64_t v = ++q->idleValue;
+            q->queue->Signal(q->idleFence.Get(), v);
+            if (q->idleFence->GetCompletedValue() < v)
+            {
+                q->idleFence->SetEventOnCompletion(v, q->idleEvent);
+                WaitForSingleObject(q->idleEvent, INFINITE);
+            }
+        }
+        void VRI_CALL QueueWaitIdle(VriQueue* queue) { WaitQueueIdle(Q(queue)); }
+        void VRI_CALL DeviceWaitIdle(VriDevice* device) { WaitQueueIdle(Dev(device)->GetQueue(VriQueueType_Graphics)); }
 
         VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
         {

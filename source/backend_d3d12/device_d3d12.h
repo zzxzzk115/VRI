@@ -22,6 +22,7 @@ namespace vri::d3d12
         VriResult Init(const VriDeviceCreationDesc& desc);
 
         ID3D12Device*        Device() const { return m_device.Get(); }
+        IDXGIFactory4*       Factory() const { return m_factory.Get(); }
         const VriDeviceDesc& Desc() const { return m_desc; }
         QueueD3D12*          GetQueue(VriQueueType /*type*/) { return &m_queue; }
         void                 ReportError(const char* message) const;

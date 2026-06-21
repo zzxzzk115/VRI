@@ -24,6 +24,9 @@ namespace vri::d3d12
     {
         DeviceD3D12*               device = nullptr;
         ComPtr<ID3D12CommandQueue> queue;
+        ComPtr<ID3D12Fence>        idleFence; // for QueueWaitIdle / DeviceWaitIdle
+        void*                      idleEvent = nullptr;
+        uint64_t                   idleValue = 0;
     };
 
     struct BufferD3D12

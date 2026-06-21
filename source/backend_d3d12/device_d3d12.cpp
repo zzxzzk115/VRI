@@ -1,5 +1,6 @@
 #include "device_d3d12.h"
 #include "core_d3d12.h"
+#include "swapchain_d3d12.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -7,7 +8,10 @@
 
 namespace vri::d3d12
 {
-    DeviceD3D12::~DeviceD3D12() = default;
+    DeviceD3D12::~DeviceD3D12()
+    {
+        if (m_queue.idleEvent) CloseHandle(m_queue.idleEvent);
+    }
 
     void DeviceD3D12::ReportError(const char* message) const
     {
@@ -71,6 +75,8 @@ namespace vri::d3d12
             return VriResult_Failure;
         }
         m_queue.device = this;
+        m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_queue.idleFence)); // for *WaitIdle
+        m_queue.idleEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
         if (VriResult r = CreateDescriptorHeaps(); r != VriResult_Success) return r;
 
@@ -164,6 +170,7 @@ namespace vri::d3d12
     void DeviceD3D12::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceD3D12(), sizeof(VriCoreInterface));
+        m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceD3D12(), sizeof(VriSwapChainInterface)); // DXGI flip-model present
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

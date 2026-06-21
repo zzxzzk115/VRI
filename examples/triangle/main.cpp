@@ -14,9 +14,10 @@
 #include <cstdlib>
 #include <cstring>
 
-// Slang-authored triangle, compiled offline to both targets (see `xmake shaders`).
-#include "tests/shaders/triangle_spv.h"  // g_triangleSpv  (Vulkan)
-#include "tests/shaders/triangle_wgsl.h" // g_triangleWgsl (WebGPU)
+// Slang-authored triangle, compiled offline to per-target blobs (see `xmake shaders`).
+#include "tests/shaders/triangle_spv.h"  // g_triangleSpv      (Vulkan + OpenGL via SPIRV-Cross)
+#include "tests/shaders/triangle_wgsl.h" // g_triangleWgsl     (WebGPU)
+#include "tests/shaders/triangle_dxbc.h" // g_triangleDxbcVS/PS (Direct3D 12, per stage)
 
 namespace
 {
@@ -37,8 +38,10 @@ int main(int, char**)
     VriGraphicsAPI api = VriGraphicsAPI_Vulkan;
     if (apiEnv && std::strcmp(apiEnv, "webgpu") == 0) api = VriGraphicsAPI_WebGPU;
     else if (apiEnv && (std::strcmp(apiEnv, "opengl") == 0 || std::strcmp(apiEnv, "gl") == 0)) api = VriGraphicsAPI_OpenGL;
+    else if (apiEnv && (std::strcmp(apiEnv, "d3d12") == 0 || std::strcmp(apiEnv, "dx12") == 0)) api = VriGraphicsAPI_D3D12;
     const bool useWgsl = (api == VriGraphicsAPI_WebGPU); // GL consumes SPIR-V (transpiled), like Vulkan
-    const char* apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : (api == VriGraphicsAPI_OpenGL ? "OpenGL" : "Vulkan");
+    const bool useDxbc = (api == VriGraphicsAPI_D3D12);  // D3D12 consumes per-stage DXBC blobs
+    const char* apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : (api == VriGraphicsAPI_OpenGL ? "OpenGL" : (api == VriGraphicsAPI_D3D12 ? "D3D12" : "Vulkan"));
 
     if (!SDL_Init(SDL_INIT_VIDEO))
         Fail("SDL_Init failed");
@@ -84,13 +87,20 @@ int main(int, char**)
 
     VriShaderDesc shaders[2]{};
     shaders[0].stage = VriShaderStage_Vertex;
-    shaders[0].bytecode = useWgsl ? static_cast<const void*>(g_triangleWgsl) : static_cast<const void*>(g_triangleSpv);
-    shaders[0].bytecodeSize = useWgsl ? sizeof(g_triangleWgsl) : sizeof(g_triangleSpv);
-    shaders[0].entryPointName = "vertexMain";
     shaders[1].stage = VriShaderStage_Fragment;
-    shaders[1].bytecode = shaders[0].bytecode;
-    shaders[1].bytecodeSize = shaders[0].bytecodeSize;
+    shaders[0].entryPointName = "vertexMain";
     shaders[1].entryPointName = "fragmentMain";
+    if (useDxbc) // D3D12: separate per-stage DXBC blobs (a graphics PSO takes one VS + one PS)
+    {
+        shaders[0].bytecode = g_triangleDxbcVS; shaders[0].bytecodeSize = sizeof(g_triangleDxbcVS);
+        shaders[1].bytecode = g_triangleDxbcPS; shaders[1].bytecodeSize = sizeof(g_triangleDxbcPS);
+    }
+    else // SPIR-V (Vulkan/OpenGL) or WGSL (WebGPU): one multi-entry module for both stages
+    {
+        shaders[0].bytecode = useWgsl ? static_cast<const void*>(g_triangleWgsl) : static_cast<const void*>(g_triangleSpv);
+        shaders[0].bytecodeSize = useWgsl ? sizeof(g_triangleWgsl) : sizeof(g_triangleSpv);
+        shaders[1].bytecode = shaders[0].bytecode; shaders[1].bytecodeSize = shaders[0].bytecodeSize;
+    }
 
     VriColorAttachmentDesc colorAttach{};
     colorAttach.format = kSwapFormat;
