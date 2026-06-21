@@ -25,6 +25,7 @@ namespace vri::d3d12
         IDXGIFactory4*       Factory() const { return m_factory.Get(); }
         const VriDeviceDesc& Desc() const { return m_desc; }
         QueueD3D12*          GetQueue(VriQueueType /*type*/) { return &m_queue; }
+        uint64_t             EnabledFeatures() const { return m_enabledFeatures; }
         void                 ReportError(const char* message) const;
 
         // Bump-allocate one CPU render-target-view / depth-stencil-view descriptor.
@@ -32,6 +33,7 @@ namespace vri::d3d12
         D3D12_CPU_DESCRIPTOR_HANDLE AllocDsv();
 
     private:
+        VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
         void      FillDeviceDesc(IDXGIAdapter1* adapter);
         void      FillRegistry();
         VriResult CreateDescriptorHeaps();
@@ -47,6 +49,7 @@ namespace vri::d3d12
         static constexpr uint32_t    kRtvHeapSize = 256;
         static constexpr uint32_t    kDsvHeapSize = 64;
         QueueD3D12            m_queue = {};
+        uint64_t              m_enabledFeatures = 0; // granted VriFeatureBits
         VriDeviceDesc         m_desc = {};
         VriCallbackInterface  m_callback = {};
     };

@@ -1,6 +1,7 @@
 #include "device_d3d12.h"
 #include "core_d3d12.h"
 #include "swapchain_d3d12.h"
+#include "vrs_d3d12.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -79,6 +80,7 @@ namespace vri::d3d12
         m_queue.idleEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
         if (VriResult r = CreateDescriptorHeaps(); r != VriResult_Success) return r;
+        if (VriResult r = NegotiateFeatures(desc); r != VriResult_Success) return r;
 
         FillDeviceDesc(chosen.Get());
         FillRegistry();
@@ -127,6 +129,57 @@ namespace vri::d3d12
         return h;
     }
 
+    // D3D12 has no per-feature device-creation flag (features are pure capabilities),
+    // so "enabling" == checking support and granting. Degradation is explicit:
+    // unsupported + !bestEffort fails creation; otherwise the feature is simply not
+    // granted and its interface is not registered.
+    VriResult DeviceD3D12::NegotiateFeatures(const VriDeviceCreationDesc& desc)
+    {
+        const uint64_t requested = desc.enabledFeatures;
+        uint64_t granted = 0;
+        auto fail = [&](const char* what) -> bool {
+            if (desc.bestEffort == VRI_FALSE) { ReportError(what); return true; }
+            return false;
+        };
+
+        if (requested & VriFeature_VariableShadingRate)
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS6 o6 = {};
+            const bool ok = SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &o6, sizeof(o6))) &&
+                            o6.VariableShadingRateTier >= D3D12_VARIABLE_SHADING_RATE_TIER_1;
+            if (ok) granted |= VriFeature_VariableShadingRate;
+            else if (fail("variable rate shading not supported")) return VriResult_Unsupported;
+        }
+
+        if (requested & VriFeature_MeshShader)
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS7 o7 = {};
+            const bool ok = SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &o7, sizeof(o7))) &&
+                            o7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1;
+            if (ok) granted |= VriFeature_MeshShader;
+            else if (fail("mesh shaders not supported")) return VriResult_Unsupported;
+        }
+
+        if (requested & VriFeature_RayTracing)
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS5 o5 = {};
+            const bool ok = SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &o5, sizeof(o5))) &&
+                            o5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0;
+            if (ok) granted |= VriFeature_RayTracing;
+            else if (fail("ray tracing not supported")) return VriResult_Unsupported;
+        }
+
+        if ((requested & VriFeature_OpacityMicromap) && fail("opacity micromap not supported on D3D12"))
+            return VriResult_Unsupported;
+        if ((requested & VriFeature_Bindless) && fail("bindless not implemented on D3D12"))
+            return VriResult_Unsupported;
+        if ((requested & VriFeature_LowLatency) && fail("low-latency not implemented on D3D12"))
+            return VriResult_Unsupported;
+
+        m_enabledFeatures = granted;
+        return VriResult_Success;
+    }
+
     void DeviceD3D12::FillDeviceDesc(IDXGIAdapter1* adapter)
     {
         m_desc = {};
@@ -165,12 +218,26 @@ namespace vri::d3d12
         m_desc.hasTessellation = VRI_TRUE;
         m_desc.hasGeometryShader = VRI_TRUE;
         m_desc.hasComputeShader = VRI_TRUE;
+
+        m_desc.enabledFeatures = m_enabledFeatures;
+        m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasMeshShader = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasRayTracing = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
+        if (m_enabledFeatures & VriFeature_RayTracing)
+        {
+            // DXR shader-table layout constants (mirror the Vulkan RT props fields).
+            m_desc.rtShaderGroupHandleSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;        // 32
+            m_desc.rtShaderGroupBaseAlignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT; // 64
+            m_desc.rtShaderGroupHandleAlignment = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT; // 32
+        }
     }
 
     void DeviceD3D12::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceD3D12(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceD3D12(), sizeof(VriSwapChainInterface)); // DXGI flip-model present
+        if (m_enabledFeatures & VriFeature_VariableShadingRate)
+            m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)
