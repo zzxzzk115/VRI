@@ -14,6 +14,7 @@
 #include "../examples/cube/mat4.h"
 
 #include "shaders/cube_inst_spv.h"  // g_cubeInstSpv
+#include "shaders/cube_inst_wgsl.h" // g_cubeInstWgsl
 #include "shaders/cube_inst_dxbc.h" // g_cubeInstDxbcVS / PS
 
 namespace
@@ -51,6 +52,7 @@ namespace
         sh[0].stage = VriShaderStage_Vertex;   sh[0].entryPointName = "vertexMain";
         sh[1].stage = VriShaderStage_Fragment; sh[1].entryPointName = "fragmentMain";
         if (api == VriGraphicsAPI_D3D12) { sh[0].bytecode = g_cubeInstDxbcVS; sh[0].bytecodeSize = sizeof(g_cubeInstDxbcVS); sh[1].bytecode = g_cubeInstDxbcPS; sh[1].bytecodeSize = sizeof(g_cubeInstDxbcPS); }
+        else if (api == VriGraphicsAPI_WebGPU) { sh[0].bytecode = g_cubeInstWgsl; sh[0].bytecodeSize = sizeof(g_cubeInstWgsl); sh[1].bytecode = g_cubeInstWgsl; sh[1].bytecodeSize = sizeof(g_cubeInstWgsl); }
         else { sh[0].bytecode = g_cubeInstSpv; sh[0].bytecodeSize = sizeof(g_cubeInstSpv); sh[1].bytecode = g_cubeInstSpv; sh[1].bytecodeSize = sizeof(g_cubeInstSpv); }
 
         VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM; td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
@@ -176,3 +178,4 @@ namespace
 TEST_CASE("Vulkan: per-instance vertex stream (instanced matrices)") { RunInstancing(VriGraphicsAPI_Vulkan); }
 TEST_CASE("D3D12: per-instance vertex stream (instanced matrices)")  { RunInstancing(VriGraphicsAPI_D3D12); }
 TEST_CASE("OpenGL: per-instance vertex stream (instanced matrices)") { RunInstancing(VriGraphicsAPI_OpenGL); }
+TEST_CASE("WebGPU: per-instance vertex stream (instanced matrices)") { RunInstancing(VriGraphicsAPI_WebGPU); }

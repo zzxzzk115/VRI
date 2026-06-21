@@ -14,6 +14,7 @@
 #include "../examples/cube/mat4.h"
 
 #include "shaders/cube_spv.h"  // g_cubeSpv             (Vulkan + OpenGL)
+#include "shaders/cube_wgsl.h" // g_cubeWgsl            (WebGPU)
 #include "shaders/cube_dxbc.h" // g_cubeDxbcVS / PS     (D3D12)
 
 namespace
@@ -49,6 +50,7 @@ namespace
         sh[0].stage = VriShaderStage_Vertex;   sh[0].entryPointName = "vertexMain";
         sh[1].stage = VriShaderStage_Fragment; sh[1].entryPointName = "fragmentMain";
         if (api == VriGraphicsAPI_D3D12) { sh[0].bytecode = g_cubeDxbcVS; sh[0].bytecodeSize = sizeof(g_cubeDxbcVS); sh[1].bytecode = g_cubeDxbcPS; sh[1].bytecodeSize = sizeof(g_cubeDxbcPS); }
+        else if (api == VriGraphicsAPI_WebGPU) { sh[0].bytecode = g_cubeWgsl; sh[0].bytecodeSize = sizeof(g_cubeWgsl); sh[1].bytecode = g_cubeWgsl; sh[1].bytecodeSize = sizeof(g_cubeWgsl); }
         else { sh[0].bytecode = g_cubeSpv; sh[0].bytecodeSize = sizeof(g_cubeSpv); sh[1].bytecode = g_cubeSpv; sh[1].bytecodeSize = sizeof(g_cubeSpv); }
 
         // render target + readback
@@ -180,3 +182,4 @@ namespace
 TEST_CASE("Vulkan: textured cube (MVP + sampler)") { RunCube(VriGraphicsAPI_Vulkan); }
 TEST_CASE("D3D12: textured cube (MVP + sampler)")  { RunCube(VriGraphicsAPI_D3D12); }
 TEST_CASE("OpenGL: textured cube (MVP + sampler)") { RunCube(VriGraphicsAPI_OpenGL); }
+TEST_CASE("WebGPU: textured cube (MVP + sampler)") { RunCube(VriGraphicsAPI_WebGPU); }

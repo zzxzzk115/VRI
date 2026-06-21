@@ -2,14 +2,19 @@
 // matrix (4 columns) from stream 1, and a shared view-projection in a constant buffer.
 // The model columns are multiplied directly (M*v = c0*x + c1*y + c2*z + c3*w) so no
 // matrix is reconstructed in the shader - column-major data flows straight through.
+// All inputs use sequential TEXCOORD semantics so the assigned vertex locations are 0..5
+// in declaration order on EVERY target. Slang's WGSL emitter assigns @location by semantic
+// (POSITION=0, TEXCOORDn=n) and ignores [[vk::location]] - mixing POSITION with TEXCOORD0
+// then bumps uv to the end (location 5), mismatching the pipeline's attribute order. Using
+// TEXCOORD0..5 (no POSITION) avoids the collision and keeps SPIR-V/DXBC/WGSL consistent.
 struct VSInput
 {
-    float3 position : POSITION;
-    float2 uv : TEXCOORD0;
-    float4 c0 : TEXCOORD1; // model column 0
-    float4 c1 : TEXCOORD2; // model column 1
-    float4 c2 : TEXCOORD3; // model column 2
-    float4 c3 : TEXCOORD4; // model column 3
+    float3 position : TEXCOORD0;
+    float2 uv : TEXCOORD1;
+    float4 c0 : TEXCOORD2; // model column 0
+    float4 c1 : TEXCOORD3; // model column 1
+    float4 c2 : TEXCOORD4; // model column 2
+    float4 c3 : TEXCOORD5; // model column 3
 };
 struct VSOutput
 {

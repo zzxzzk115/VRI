@@ -48,7 +48,7 @@ namespace vri::wgpu
             WGPUSurfaceConfiguration cfg = {};
             cfg.device = sc->device->Device();
             cfg.format = sc->format;
-            cfg.usage = WGPUTextureUsage_RenderAttachment;
+            cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc; // CopySrc: screenshot readback
             cfg.width = sc->width;
             cfg.height = sc->height;
             cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
@@ -92,6 +92,7 @@ namespace vri::wgpu
             sc->current.depth = 1;
             sc->current.mipNum = 1;
             sc->current.layerNum = 1;
+            sc->current.texelSize = 4; // swapchain formats are 8-bit RGBA/BGRA (needed for readback bytesPerRow)
             sc->current.owned = false; // swapchain-managed
             *out = ToHandle(sc);
             return VriResult_Success;

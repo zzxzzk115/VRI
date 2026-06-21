@@ -25,11 +25,11 @@ struct VSOutput_0
 struct vertexInput_0
 {
     @location(0) position_1 : vec3<f32>,
-    @location(5) uv_1 : vec2<f32>,
-    @location(1) c0_0 : vec4<f32>,
-    @location(2) c1_0 : vec4<f32>,
-    @location(3) c2_0 : vec4<f32>,
-    @location(4) c3_0 : vec4<f32>,
+    @location(1) uv_1 : vec2<f32>,
+    @location(2) c0_0 : vec4<f32>,
+    @location(3) c1_0 : vec4<f32>,
+    @location(4) c2_0 : vec4<f32>,
+    @location(5) c3_0 : vec4<f32>,
 };
 
 @vertex
