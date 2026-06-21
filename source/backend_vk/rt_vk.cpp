@@ -11,6 +11,7 @@
 #include "device_vk.h"
 #include "objects_vk.h"
 
+#include <deque>
 #include <vector>
 
 namespace vri::vk
@@ -65,6 +66,7 @@ namespace vri::vk
             std::vector<VkAccelerationStructureGeometryKHR>        geoms;
             std::vector<uint32_t>                                  primCounts;
             std::vector<VkAccelerationStructureBuildRangeInfoKHR>  ranges;
+            std::deque<VkAccelerationStructureTrianglesOpacityMicromapEXT> ommChains; // stable addresses for pNext
         };
 
         void BuildGeoms(DeviceVK* d, const VriAccelerationStructureDesc* desc, bool withAddr, GeomBuild& gb)
@@ -94,6 +96,19 @@ namespace vri::vk
                         if (t.transformBuffer) vt.transformData.deviceAddress = BufAddr(d, BUF(t.transformBuffer)->buffer) + t.transformOffset;
                     }
                     prims = t.indexBuffer ? t.indexCount / 3 : t.vertexCount / 3;
+
+                    if (t.micromap) // attach an opacity micromap to this geometry
+                    {
+                        MicromapVK* mm = reinterpret_cast<MicromapVK*>(t.micromap);
+                        gb.ommChains.emplace_back();
+                        VkAccelerationStructureTrianglesOpacityMicromapEXT& omm = gb.ommChains.back();
+                        omm = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_TRIANGLES_OPACITY_MICROMAP_EXT};
+                        omm.indexType = t.ommIndexType == VriIndexType_UInt16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+                        omm.micromap = mm->micromap;
+                        if (withAddr && t.ommIndexBuffer)
+                            omm.indexBuffer.deviceAddress = BufAddr(d, BUF(t.ommIndexBuffer)->buffer) + t.ommIndexOffset;
+                        vt.pNext = &omm;
+                    }
                 }
                 else // instances (TLAS)
                 {
@@ -244,6 +259,9 @@ namespace vri::vk
             ci.pGroups = groups.data();
             ci.maxPipelineRayRecursionDepth = desc->maxRecursionDepth ? desc->maxRecursionDepth : 1;
             ci.layout = desc->pipelineLayout ? reinterpret_cast<PipelineLayoutVK*>(desc->pipelineLayout)->layout : VK_NULL_HANDLE;
+            // Required for tracing against acceleration structures that carry opacity micromaps.
+            if (d->EnabledFeatures() & VriFeature_OpacityMicromap)
+                ci.flags |= VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT;
 
             VkPipeline pipeline = VK_NULL_HANDLE;
             const VkResult vr = d->Ext().CreateRayTracingPipelines(dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline);

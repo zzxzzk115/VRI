@@ -195,7 +195,15 @@ namespace vri::vk
             {
                 VmaAllocationCreateInfo aci = {};
                 FillVmaCreateInfo(desc->memoryLocation, aci);
-                if (vmaCreateBuffer(d->Allocator(), &bci, &aci, &buffer, &alloc, nullptr) != VK_SUCCESS)
+                // AS/micromap build inputs and the SBT have a 256-byte device-address
+                // alignment requirement; force the allocation so the address satisfies it.
+                const bool needsAlign = desc->usage & (VriBufferUsage_AccelerationBuildInput |
+                                                       VriBufferUsage_MicromapBuildInput |
+                                                       VriBufferUsage_ShaderBindingTable);
+                const VkResult vr = needsAlign
+                    ? vmaCreateBufferWithAlignment(d->Allocator(), &bci, &aci, 256, &buffer, &alloc, nullptr)
+                    : vmaCreateBuffer(d->Allocator(), &bci, &aci, &buffer, &alloc, nullptr);
+                if (vr != VK_SUCCESS)
                     return VriResult_OutOfMemory;
             }
 

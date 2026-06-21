@@ -26,6 +26,7 @@
 VRI_EXTERN_C_BEGIN
 
 typedef struct VriAccelerationStructure VriAccelerationStructure;
+typedef struct VriMicromap VriMicromap; /* opacity micromap (see ext/vri_ext_omm.h) */
 
 #define VRI_SHADER_UNUSED 0xFFFFFFFFu
 
@@ -77,6 +78,11 @@ typedef struct VriAsTrianglesDesc
     VriIndexType indexType;
     VriBuffer*   transformBuffer; /* optional 3x4 row-major float transform */
     uint64_t     transformOffset;
+    /* optional opacity micromap attachment (requires VriFeature_OpacityMicromap) */
+    VriMicromap* micromap;         /* NULL => no OMM */
+    VriBuffer*   ommIndexBuffer;   /* per-triangle index into the micromap */
+    uint64_t     ommIndexOffset;
+    VriIndexType ommIndexType;
 } VriAsTrianglesDesc;
 
 typedef struct VriAsInstancesDesc

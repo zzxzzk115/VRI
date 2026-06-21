@@ -5,6 +5,7 @@
 #include "vrs_vk.h"
 #include "meshshader_vk.h"
 #include "rt_vk.h"
+#include "omm_vk.h"
 
 #include <cstdio>
 #include <cstring>
@@ -248,6 +249,7 @@ namespace vri::vk
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         VkPhysicalDeviceMeshShaderFeaturesEXT meshSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+        VkPhysicalDeviceOpacityMicromapFeaturesEXT ommSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
         VkPhysicalDeviceVulkan12Features v12Sup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
@@ -257,6 +259,7 @@ namespace vri::vk
             if (hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME))   { *q = &rtSup; q = &rtSup.pNext; }
             if (hasExt(VK_EXT_MESH_SHADER_EXTENSION_NAME))            { *q = &meshSup; q = &meshSup.pNext; }
             if (hasExt(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME))  { *q = &vrsSup; q = &vrsSup.pNext; }
+            if (hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME))       { *q = &ommSup; q = &ommSup.pNext; }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
             baseSup = sup.features;
@@ -295,6 +298,7 @@ namespace vri::vk
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         VkPhysicalDeviceMeshShaderFeaturesEXT meshEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+        VkPhysicalDeviceOpacityMicromapFeaturesEXT ommEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
 
         void** chainTail = &f13.pNext; // append optional feature structs here
         const uint64_t requested = desc.enabledFeatures;
@@ -376,8 +380,21 @@ namespace vri::vk
                 return VriResult_Unsupported;
         }
 
-        if ((requested & VriFeature_OpacityMicromap) && unsupported("opacity micromap not implemented"))
-            return VriResult_Unsupported;
+        if (requested & VriFeature_OpacityMicromap)
+        {
+            // OMM extends acceleration-structure geometry, so it needs ray tracing too.
+            const bool ok = (granted & VriFeature_RayTracing) &&
+                            hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME) && ommSup.micromap;
+            if (ok)
+            {
+                extensions.push_back(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
+                ommEn.micromap = VK_TRUE;
+                *chainTail = &ommEn; chainTail = &ommEn.pNext;
+                granted |= VriFeature_OpacityMicromap;
+            }
+            else if (unsupported("opacity micromap not supported (needs ray tracing + VK_EXT_opacity_micromap)"))
+                return VriResult_Unsupported;
+        }
 
         if ((requested & VriFeature_LowLatency) && unsupported("low-latency not implemented"))
             return VriResult_Unsupported;
@@ -520,6 +537,14 @@ namespace vri::vk
             m_ext.GetRayTracingShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(L("vkGetRayTracingShaderGroupHandlesKHR"));
             m_ext.CmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(L("vkCmdTraceRaysKHR"));
         }
+        if (m_enabledFeatures & VriFeature_OpacityMicromap)
+        {
+            auto L = [&](const char* n) { return vkGetDeviceProcAddr(m_device, n); };
+            m_ext.CreateMicromap = reinterpret_cast<PFN_vkCreateMicromapEXT>(L("vkCreateMicromapEXT"));
+            m_ext.DestroyMicromap = reinterpret_cast<PFN_vkDestroyMicromapEXT>(L("vkDestroyMicromapEXT"));
+            m_ext.GetMicromapBuildSizes = reinterpret_cast<PFN_vkGetMicromapBuildSizesEXT>(L("vkGetMicromapBuildSizesEXT"));
+            m_ext.CmdBuildMicromaps = reinterpret_cast<PFN_vkCmdBuildMicromapsEXT>(L("vkCmdBuildMicromapsEXT"));
+        }
     }
 
     void DeviceVK::FillRegistry()
@@ -535,6 +560,8 @@ namespace vri::vk
             m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceVK(), sizeof(VriMeshShaderInterface));
         if (m_enabledFeatures & VriFeature_RayTracing)
             m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceVK(), sizeof(VriRayTracingInterface));
+        if (m_enabledFeatures & VriFeature_OpacityMicromap)
+            m_registry.Register(VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceVK(), sizeof(VriOpacityMicromapInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

@@ -59,6 +59,21 @@ namespace vri::vk
     };
     inline VriAccelerationStructure* ToHandle(AccelerationStructureVK* a) { return reinterpret_cast<VriAccelerationStructure*>(a); }
 
+    struct MicromapVK
+    {
+        DeviceVK*       device;
+        VkMicromapEXT   micromap;
+        VkBuffer        buffer;       // backing store (MICROMAP_STORAGE)
+        VmaAllocation   bufferAlloc;
+        VkBuffer        scratch;      // build scratch
+        VmaAllocation   scratchAlloc;
+        VkDeviceAddress scratchAddress;
+        VkOpacityMicromapFormatEXT format;
+        uint32_t        subdivisionLevel;
+        uint32_t        triangleCount;
+    };
+    inline VriMicromap* ToHandle(MicromapVK* m) { return reinterpret_cast<VriMicromap*>(m); }
+
     struct TextureVK
     {
         DeviceVK*     device;

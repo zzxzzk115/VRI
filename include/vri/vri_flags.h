@@ -29,6 +29,7 @@ typedef enum VriBufferUsageBits
     VriBufferUsage_AccelerationBuildInput = 1u << 8,
     VriBufferUsage_AccelerationStorage    = 1u << 9,
     VriBufferUsage_ShaderBindingTable     = 1u << 10,
+    VriBufferUsage_MicromapBuildInput     = 1u << 11,
     VriBufferUsage_MaxEnum           = 0x7fffffff
 } VriBufferUsageBits;
 

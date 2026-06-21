@@ -46,6 +46,11 @@ namespace vri::vk
             PFN_vkCreateRayTracingPipelinesKHR          CreateRayTracingPipelines = nullptr;
             PFN_vkGetRayTracingShaderGroupHandlesKHR    GetRayTracingShaderGroupHandles = nullptr;
             PFN_vkCmdTraceRaysKHR                       CmdTraceRays = nullptr;
+            // opacity micromap (VK_EXT_opacity_micromap)
+            PFN_vkCreateMicromapEXT        CreateMicromap = nullptr;
+            PFN_vkDestroyMicromapEXT       DestroyMicromap = nullptr;
+            PFN_vkGetMicromapBuildSizesEXT GetMicromapBuildSizes = nullptr;
+            PFN_vkCmdBuildMicromapsEXT     CmdBuildMicromaps = nullptr;
         };
         const ExtFunctions& Ext() const { return m_ext; }
         uint64_t EnabledFeatures() const { return m_enabledFeatures; }

@@ -54,6 +54,7 @@ namespace vri::core
             VriShadingRateInterface vrs;   // the backend's real VRS table (if supported)
             VriMeshShaderInterface  mesh;  // the backend's real mesh-shader table (if supported)
             VriRayTracingInterface  rt;    // the backend's real ray-tracing table (if supported)
+            VriOpacityMicromapInterface omm; // the backend's real OMM table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>   queues;
             std::vector<CmdBufVal*>  cmds;
@@ -345,6 +346,15 @@ namespace vri::core
             if (!RecordingOk(c, "CmdTraceRays")) return;
             c->dev->rt.CmdTraceRays(c->real, desc);
         }
+        // opacity micromap: unwrap device on create, command buffer on build.
+        VriResult VRI_CALL OmmCreateMicromap(VriDevice* device, const VriMicromapDesc* desc, VriMicromap** out)
+        { return DV(device)->omm.CreateMicromap(DV(device)->real, desc, out); }
+        void VRI_CALL OmmCmdBuildMicromap(VriCommandBuffer* cmd, const VriBuildMicromapDesc* desc)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdBuildMicromap")) return;
+            c->dev->omm.CmdBuildMicromap(c->real, desc);
+        }
 
         void BuildTable(DeviceVal* d)
         {
@@ -463,6 +473,17 @@ namespace vri::core
             w.CmdBuildAccelerationStructure = RtCmdBuildAccelerationStructure;
             w.CmdTraceRays = RtCmdTraceRays;
             *static_cast<VriRayTracingInterface*>(out) = w;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_OMM))
+        {
+            if (size != sizeof(VriOpacityMicromapInterface)) return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(VRI_INTERFACE_OMM, sizeof(d->omm), &d->omm);
+            if (r != VriResult_Success) return r;
+            VriOpacityMicromapInterface w = d->omm; // DestroyMicromap passes through
+            w.CreateMicromap = OmmCreateMicromap;
+            w.CmdBuildMicromap = OmmCmdBuildMicromap;
+            *static_cast<VriOpacityMicromapInterface*>(out) = w;
             return VriResult_Success;
         }
         return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);
