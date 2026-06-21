@@ -320,7 +320,10 @@ namespace vri::vk
                 f12.descriptorIndexing = VK_TRUE;
                 f12.runtimeDescriptorArray = VK_TRUE;
                 f12.descriptorBindingPartiallyBound = VK_TRUE;
+                // Variable-count (runtime-sized) bindless arrays + update-after-bind.
+                f12.descriptorBindingVariableDescriptorCount = v12Sup.descriptorBindingVariableDescriptorCount;
                 f12.descriptorBindingSampledImageUpdateAfterBind = v12Sup.descriptorBindingSampledImageUpdateAfterBind;
+                f12.descriptorBindingUpdateUnusedWhilePending = v12Sup.descriptorBindingUpdateUnusedWhilePending;
                 f12.shaderSampledImageArrayNonUniformIndexing = v12Sup.shaderSampledImageArrayNonUniformIndexing;
                 granted |= VriFeature_Bindless;
             }

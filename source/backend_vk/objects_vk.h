@@ -122,6 +122,10 @@ namespace vri::vk
         std::vector<VkDescriptorSetLayout> setLayouts;
         // setRanges[set][range] -> binding/type/count
         std::vector<std::vector<RangeInfoVK>> setRanges;
+        // Per-set variable (bindless) descriptor count: 0 if the set has no
+        // VARIABLE_DESCRIPTOR_COUNT binding, else that binding's max count (used to
+        // chain VkDescriptorSetVariableDescriptorCountAllocateInfo at allocation).
+        std::vector<uint32_t> setVariableCount;
     };
 
     struct DescriptorPoolVK

@@ -501,8 +501,12 @@ namespace vri::vk
                 const VriDescriptorSetDesc& set = desc->descriptorSets[s];
                 std::vector<VkDescriptorSetLayoutBinding> bindings;
                 std::vector<RangeInfoVK> rangeInfos;
+                std::vector<VkDescriptorBindingFlags> bindingFlags; // descriptor indexing (bindless)
                 bindings.reserve(set.rangeNum);
                 rangeInfos.reserve(set.rangeNum);
+                bindingFlags.reserve(set.rangeNum);
+                uint32_t variableCount = 0;   // max count of a VARIABLE_DESCRIPTOR_COUNT binding (0 = none)
+                bool usesUpdateAfterBind = false;
                 for (uint32_t r = 0; r < set.rangeNum; ++r)
                 {
                     const VriDescriptorRangeDesc& range = set.ranges[r];
@@ -513,12 +517,32 @@ namespace vri::vk
                     b.stageFlags = ToVkShaderStageFlags(range.shaderStages);
                     bindings.push_back(b);
                     rangeInfos.push_back({b.binding, b.descriptorType, b.descriptorCount});
+
+                    VkDescriptorBindingFlags bf = 0;
+                    if (range.flags & VriDescriptorRange_PartiallyBound) bf |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+                    if (range.flags & VriDescriptorRange_VariableSized)
+                    {
+                        bf |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+                        variableCount = range.descriptorNum; // VK requires this be the last binding
+                    }
+                    if (bf) { bf |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT; usesUpdateAfterBind = true; }
+                    bindingFlags.push_back(bf);
                 }
                 layout->setRanges.push_back(std::move(rangeInfos));
+                layout->setVariableCount.push_back(variableCount);
+
+                VkDescriptorSetLayoutBindingFlagsCreateInfo bfci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+                bfci.bindingCount = static_cast<uint32_t>(bindingFlags.size());
+                bfci.pBindingFlags = bindingFlags.data();
 
                 VkDescriptorSetLayoutCreateInfo lci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
                 lci.bindingCount = static_cast<uint32_t>(bindings.size());
                 lci.pBindings = bindings.data();
+                if (usesUpdateAfterBind)
+                {
+                    lci.pNext = &bfci; // update-after-bind bindless set
+                    lci.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+                }
 
                 VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
                 if (vkCreateDescriptorSetLayout(d->Device(), &lci, nullptr, &setLayout) != VK_SUCCESS)
@@ -817,6 +841,10 @@ namespace vri::vk
             ci.maxSets = desc->descriptorSetMaxNum;
             ci.poolSizeCount = static_cast<uint32_t>(sizes.size());
             ci.pPoolSizes = sizes.data();
+            // Bindless sets are update-after-bind; the pool must allow it. Only when the
+            // device granted the feature (the flag is illegal otherwise).
+            if (d->EnabledFeatures() & VriFeature_Bindless)
+                ci.flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 
             VkDescriptorPool pool = VK_NULL_HANDLE;
             if (vkCreateDescriptorPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
@@ -853,6 +881,18 @@ namespace vri::vk
             ai.descriptorSetCount = setNum;
             ai.pSetLayouts = layouts.data();
 
+            // Bindless set: tell VK the actual size of the VARIABLE_DESCRIPTOR_COUNT
+            // binding (we allocate the layout's max for each set).
+            const uint32_t varCount = setIndex < l->setVariableCount.size() ? l->setVariableCount[setIndex] : 0;
+            std::vector<uint32_t> counts(setNum, varCount);
+            VkDescriptorSetVariableDescriptorCountAllocateInfo vci = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO};
+            if (varCount > 0)
+            {
+                vci.descriptorSetCount = setNum;
+                vci.pDescriptorCounts = counts.data();
+                ai.pNext = &vci;
+            }
+
             std::vector<VkDescriptorSet> sets(setNum);
             if (vkAllocateDescriptorSets(p->device->Device(), &ai, sets.data()) != VK_SUCCESS)
                 return VriResult_Failure;
@@ -868,8 +908,10 @@ namespace vri::vk
             const std::vector<RangeInfoVK>& ranges = s->layout->setRanges[s->setIndex];
 
             std::vector<VkWriteDescriptorSet> writes;
-            std::deque<VkDescriptorImageInfo> imageInfos;   // stable addresses across push_back
-            std::deque<VkDescriptorBufferInfo> bufferInfos;
+            // One CONTIGUOUS array per write (VK reads descriptorCount elements from
+            // pImageInfo/pBufferInfo); the deque keeps each vector's address stable.
+            std::deque<std::vector<VkDescriptorImageInfo>>  imageInfoLists;
+            std::deque<std::vector<VkDescriptorBufferInfo>> bufferInfoLists;
             std::deque<std::vector<VkAccelerationStructureKHR>> accelLists; // stable across push_back
             std::deque<VkWriteDescriptorSetAccelerationStructureKHR> accelWrites;
             writes.reserve(rangeNum);
@@ -904,35 +946,37 @@ namespace vri::vk
                 }
                 else if (isImage)
                 {
-                    const VkDescriptorImageInfo* first = nullptr;
+                    imageInfoLists.emplace_back();
+                    std::vector<VkDescriptorImageInfo>& ii = imageInfoLists.back();
+                    ii.reserve(u.descriptorNum);
                     for (uint32_t k = 0; k < u.descriptorNum; ++k)
                     {
                         const DescriptorVK* d = Desc(u.descriptors[k]);
-                        VkDescriptorImageInfo ii = {};
-                        ii.sampler = d->sampler;
-                        ii.imageView = d->imageView;
-                        ii.imageLayout = info.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                                             ? VK_IMAGE_LAYOUT_GENERAL
-                                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                        imageInfos.push_back(ii);
-                        if (k == 0) first = &imageInfos.back();
+                        VkDescriptorImageInfo e = {};
+                        e.sampler = d->sampler;
+                        e.imageView = d->imageView;
+                        e.imageLayout = info.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                            ? VK_IMAGE_LAYOUT_GENERAL
+                                            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                        ii.push_back(e);
                     }
-                    w.pImageInfo = first;
+                    w.pImageInfo = ii.data();
                 }
                 else
                 {
-                    const VkDescriptorBufferInfo* first = nullptr;
+                    bufferInfoLists.emplace_back();
+                    std::vector<VkDescriptorBufferInfo>& bi = bufferInfoLists.back();
+                    bi.reserve(u.descriptorNum);
                     for (uint32_t k = 0; k < u.descriptorNum; ++k)
                     {
                         const DescriptorVK* d = Desc(u.descriptors[k]);
-                        VkDescriptorBufferInfo bi = {};
-                        bi.buffer = d->buffer ? d->buffer->buffer : VK_NULL_HANDLE;
-                        bi.offset = d->bufferOffset;
-                        bi.range = d->bufferRange ? d->bufferRange : VK_WHOLE_SIZE;
-                        bufferInfos.push_back(bi);
-                        if (k == 0) first = &bufferInfos.back();
+                        VkDescriptorBufferInfo e = {};
+                        e.buffer = d->buffer ? d->buffer->buffer : VK_NULL_HANDLE;
+                        e.offset = d->bufferOffset;
+                        e.range = d->bufferRange ? d->bufferRange : VK_WHOLE_SIZE;
+                        bi.push_back(e);
                     }
-                    w.pBufferInfo = first;
+                    w.pBufferInfo = bi.data();
                 }
                 writes.push_back(w);
             }
