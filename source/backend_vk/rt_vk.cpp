@@ -301,13 +301,15 @@ namespace vri::vk
             const VkAccelerationStructureBuildRangeInfoKHR* pRanges = gb.ranges.data();
             d->Ext().CmdBuildAccelerationStructures(c->cmd, 1, &bi, &pRanges);
 
-            // Make the built AS visible to a dependent build (BLAS->TLAS) or trace.
+            // Make the built AS visible to a dependent build (BLAS->TLAS) or to a trace.
+            // dst = ALL_COMMANDS because the AS may be read by an RT-pipeline trace OR by
+            // ray query in a compute/graphics shader (any stage).
             VkMemoryBarrier mb = {VK_STRUCTURE_TYPE_MEMORY_BARRIER};
             mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
             mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
             vkCmdPipelineBarrier(c->cmd,
                                  VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                  0, 1, &mb, 0, nullptr, 0, nullptr);
         }
 

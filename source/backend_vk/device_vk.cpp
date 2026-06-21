@@ -247,6 +247,7 @@ namespace vri::vk
         // ---- query supported optional features ----
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+        VkPhysicalDeviceRayQueryFeaturesKHR rqSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
         VkPhysicalDeviceMeshShaderFeaturesEXT meshSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
         VkPhysicalDeviceOpacityMicromapFeaturesEXT ommSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
@@ -257,6 +258,7 @@ namespace vri::vk
             void** q = &sup.pNext;
             if (hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) { *q = &asSup; q = &asSup.pNext; }
             if (hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME))   { *q = &rtSup; q = &rtSup.pNext; }
+            if (hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME))              { *q = &rqSup; q = &rqSup.pNext; }
             if (hasExt(VK_EXT_MESH_SHADER_EXTENSION_NAME))            { *q = &meshSup; q = &meshSup.pNext; }
             if (hasExt(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME))  { *q = &vrsSup; q = &vrsSup.pNext; }
             if (hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME))       { *q = &ommSup; q = &ommSup.pNext; }
@@ -299,6 +301,7 @@ namespace vri::vk
         VkPhysicalDeviceMeshShaderFeaturesEXT meshEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
         VkPhysicalDeviceOpacityMicromapFeaturesEXT ommEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
+        VkPhysicalDeviceRayQueryFeaturesKHR rqEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
 
         void** chainTail = &f13.pNext; // append optional feature structs here
         const uint64_t requested = desc.enabledFeatures;
@@ -331,24 +334,47 @@ namespace vri::vk
                 return VriResult_Unsupported;
         }
 
+        // Acceleration structures back BOTH ray-tracing pipelines and ray query, so the
+        // AS extension/feature is enabled once and shared. enableAS() is idempotent.
+        bool asEnabled = false;
+        auto enableAS = [&]() -> bool {
+            if (asEnabled) return true;
+            if (!hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
+                !hasExt(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) || !asSup.accelerationStructure)
+                return false;
+            extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+            extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+            asEn.accelerationStructure = VK_TRUE;
+            *chainTail = &asEn; chainTail = &asEn.pNext;
+            asEnabled = true;
+            return true;
+        };
+
         if (requested & VriFeature_RayTracing)
         {
-            const bool ok = hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
-                            hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
-                            hasExt(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
-                            asSup.accelerationStructure && rtSup.rayTracingPipeline;
+            const bool ok = enableAS() && hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) && rtSup.rayTracingPipeline;
             if (ok)
             {
-                extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
                 extensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-                extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-                asEn.accelerationStructure = VK_TRUE;
                 rtEn.rayTracingPipeline = VK_TRUE;
-                *chainTail = &asEn; chainTail = &asEn.pNext;
                 *chainTail = &rtEn; chainTail = &rtEn.pNext;
                 granted |= VriFeature_RayTracing;
             }
             else if (unsupported("ray tracing not supported"))
+                return VriResult_Unsupported;
+        }
+
+        if (requested & VriFeature_RayQuery)
+        {
+            const bool ok = enableAS() && hasExt(VK_KHR_RAY_QUERY_EXTENSION_NAME) && rqSup.rayQuery;
+            if (ok)
+            {
+                extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+                rqEn.rayQuery = VK_TRUE;
+                *chainTail = &rqEn; chainTail = &rqEn.pNext;
+                granted |= VriFeature_RayQuery;
+            }
+            else if (unsupported("ray query not supported"))
                 return VriResult_Unsupported;
         }
 
@@ -502,6 +528,7 @@ namespace vri::vk
         m_desc.hasBindless = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasRayQuery = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
 
         if (m_enabledFeatures & VriFeature_RayTracing)
         {
@@ -561,7 +588,9 @@ namespace vri::vk
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceVK(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)
             m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceVK(), sizeof(VriMeshShaderInterface));
-        if (m_enabledFeatures & VriFeature_RayTracing)
+        // The ray-tracing interface also provides acceleration-structure creation, which
+        // ray query needs (inline tracing has no RT pipeline of its own).
+        if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
             m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceVK(), sizeof(VriRayTracingInterface));
         if (m_enabledFeatures & VriFeature_OpacityMicromap)
             m_registry.Register(VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceVK(), sizeof(VriOpacityMicromapInterface));

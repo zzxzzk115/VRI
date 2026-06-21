@@ -72,7 +72,8 @@ typedef enum VriFeatureBits
     VriFeature_LowLatency   = 1ull << 2,
     VriFeature_Bindless     = 1ull << 3,
     VriFeature_VariableShadingRate = 1ull << 4,
-    VriFeature_OpacityMicromap     = 1ull << 5
+    VriFeature_OpacityMicromap     = 1ull << 5,
+    VriFeature_RayQuery            = 1ull << 6  /* inline ray tracing (no RT pipeline/SBT) */
 } VriFeatureBits;
 
 VRI_EXTERN_C_END

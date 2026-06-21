@@ -172,6 +172,16 @@ namespace vri::d3d12
             else if (fail("ray tracing not supported")) return VriResult_Unsupported;
         }
 
+        if (requested & VriFeature_RayQuery)
+        {
+            // Ray query = DXR 1.1 inline ray tracing (RaytracingTier 1.1+), no state object.
+            D3D12_FEATURE_DATA_D3D12_OPTIONS5 o5 = {};
+            const bool ok = SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &o5, sizeof(o5))) &&
+                            o5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_1;
+            if (ok) granted |= VriFeature_RayQuery;
+            else if (fail("ray query not supported (needs Raytracing Tier 1.1)")) return VriResult_Unsupported;
+        }
+
         if (requested & VriFeature_OpacityMicromap)
         {
             // OMM extends ray-tracing geometry and is gated by Raytracing Tier 1.2 (DXR 1.2).
@@ -236,7 +246,8 @@ namespace vri::d3d12
         m_desc.hasMeshShader = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayTracing = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
-        if (m_enabledFeatures & VriFeature_RayTracing)
+        m_desc.hasRayQuery = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).
             m_desc.rtShaderGroupHandleSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;        // 32
@@ -268,7 +279,8 @@ namespace vri::d3d12
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)
             m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceD3D12(), sizeof(VriMeshShaderInterface));
-        if (m_enabledFeatures & VriFeature_RayTracing)
+        // RT interface also creates acceleration structures, which ray query needs.
+        if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
             m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceD3D12(), sizeof(VriRayTracingInterface));
         if (m_enabledFeatures & VriFeature_OpacityMicromap)
             m_registry.Register(VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceD3D12(), sizeof(VriOpacityMicromapInterface));
