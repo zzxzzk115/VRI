@@ -64,6 +64,8 @@ namespace vri::d3d12
         ComPtr<ID3D12CommandAllocator> allocator;
     };
 
+    struct PipelineD3D12;
+
     struct CommandBufferD3D12
     {
         DeviceD3D12*                       device = nullptr;
@@ -71,6 +73,7 @@ namespace vri::d3d12
         CommandAllocatorD3D12*             allocator = nullptr;
         D3D12_CPU_DESCRIPTOR_HANDLE        rtvs[8] = {}; // bound color RTVs for the active pass
         uint32_t                           rtvCount = 0;
+        const PipelineD3D12*               boundPipeline = nullptr; // for vertex-buffer strides at draw
     };
 
     struct FenceD3D12
@@ -79,6 +82,27 @@ namespace vri::d3d12
         ComPtr<ID3D12Fence> fence;
         void*               event = nullptr; // HANDLE for blocking waits
     };
+
+    struct PipelineLayoutD3D12
+    {
+        DeviceD3D12*                  device = nullptr;
+        ComPtr<ID3D12RootSignature>   rootSig;
+    };
+
+    struct PipelineGraphicsVB { uint32_t stride; uint32_t slot; }; // per-stream stride for IASetVertexBuffers
+
+    struct PipelineD3D12
+    {
+        DeviceD3D12*                    device = nullptr;
+        ComPtr<ID3D12PipelineState>     pso;
+        ID3D12RootSignature*            rootSig = nullptr; // borrowed from the layout
+        D3D12_PRIMITIVE_TOPOLOGY        topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        std::vector<PipelineGraphicsVB> vbStrides; // for the draw-time vertex-buffer binding
+        bool                            isCompute = false;
+    };
+
+    inline VriPipelineLayout* ToHandle(PipelineLayoutD3D12* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
+    inline VriPipeline*       ToHandle(PipelineD3D12* p)       { return reinterpret_cast<VriPipeline*>(p); }
 
     inline VriQueue*            ToHandle(QueueD3D12* q)            { return reinterpret_cast<VriQueue*>(q); }
     inline VriBuffer*           ToHandle(BufferD3D12* b)           { return reinterpret_cast<VriBuffer*>(b); }

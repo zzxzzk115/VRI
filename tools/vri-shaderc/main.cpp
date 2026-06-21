@@ -5,10 +5,14 @@
 //   * --target spirv (default): a uint32 SPIR-V array (for Vulkan).
 //   * --target wgsl: a WGSL string (for WebGPU). Slang emits WGSL directly, so
 //     no SPIR-V->WGSL transpiler (naga/tint) is needed.
+//   * --target dxbc|dxil: per-entry-point byte arrays for Direct3D 12. DXBC/DXIL
+//     graphics shaders are single-entry (unlike a multi-entry SPIR-V module), so the
+//     header gets one array per entry point, suffixed by stage: g_<var>VS, g_<var>PS,
+//     g_<var>CS, ... (the D3D12 PSO takes one VS blob + one PS blob).
 //
 // Usage:
 //   vri-shaderc <input.slang> -o <output.h> --var <g_name>
-//               [--target spirv|wgsl] [--profile spirv_1_5]
+//               [--target spirv|wgsl|dxbc|dxil] [--profile <p>]
 //
 // This is the Phase-3 replacement for the temporary `xmake shaders` task that
 // shelled out to the system slangc binary.
@@ -69,6 +73,35 @@ namespace
         return true;
     }
 
+    const char* StageSuffix(SlangStage stage)
+    {
+        switch (stage)
+        {
+            case SLANG_STAGE_VERTEX:   return "VS";
+            case SLANG_STAGE_FRAGMENT: return "PS";
+            case SLANG_STAGE_COMPUTE:  return "CS";
+            case SLANG_STAGE_GEOMETRY: return "GS";
+            case SLANG_STAGE_HULL:     return "HS";
+            case SLANG_STAGE_DOMAIN:   return "DS";
+            default:                   return "XX";
+        }
+    }
+
+    // Append one entry-point byte blob as `inline const unsigned char <var>[] = {...};`.
+    void AppendByteArray(std::ofstream& f, const std::string& varName, const unsigned char* bytes, size_t count)
+    {
+        f << "inline const unsigned char " << varName << "[] = {\n";
+        char buf[8];
+        for (size_t i = 0; i < count; ++i)
+        {
+            std::snprintf(buf, sizeof(buf), "0x%02x,", bytes[i]);
+            f << buf;
+            if ((i % 16) == 15)
+                f << '\n';
+        }
+        f << "\n};\n";
+    }
+
     // Split a path into directory + module stem (filename without ".slang").
     void SplitPath(const std::string& input, std::string& dir, std::string& stem)
     {
@@ -82,7 +115,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-    std::string input, output, varName, profileName = "spirv_1_5", targetName = "spirv";
+    std::string input, output, varName, profileName, targetName = "spirv";
     for (int i = 1; i < argc; ++i)
     {
         std::string a = argv[i];
@@ -100,16 +133,21 @@ int main(int argc, char** argv)
 
     if (input.empty() || output.empty() || varName.empty())
     {
-        std::fprintf(stderr, "usage: vri-shaderc <input.slang> -o <output.h> --var <g_name> [--target spirv|wgsl] [--profile spirv_1_5]\n");
+        std::fprintf(stderr, "usage: vri-shaderc <input.slang> -o <output.h> --var <g_name> [--target spirv|wgsl|dxbc|dxil] [--profile <p>]\n");
         return 2;
     }
 
     const bool wgsl = (targetName == "wgsl");
-    if (!wgsl && targetName != "spirv")
+    const bool dxbc = (targetName == "dxbc");
+    const bool dxil = (targetName == "dxil");
+    const bool d3d = dxbc || dxil; // per-entry-point byte blobs
+    if (!wgsl && !d3d && targetName != "spirv")
     {
-        std::fprintf(stderr, "vri-shaderc: unknown --target '%s' (expected spirv or wgsl)\n", targetName.c_str());
+        std::fprintf(stderr, "vri-shaderc: unknown --target '%s' (expected spirv|wgsl|dxbc|dxil)\n", targetName.c_str());
         return 2;
     }
+    if (profileName.empty()) // sensible default profile per target
+        profileName = dxbc ? "sm_5_1" : (dxil ? "sm_6_0" : "spirv_1_5");
 
     std::string dir, stem;
     SplitPath(input, dir, stem);
@@ -122,7 +160,7 @@ int main(int argc, char** argv)
     }
 
     slang::TargetDesc target = {};
-    target.format = wgsl ? SLANG_WGSL : SLANG_SPIRV;
+    target.format = wgsl ? SLANG_WGSL : (dxbc ? SLANG_DXBC : (dxil ? SLANG_DXIL : SLANG_SPIRV));
     if (!wgsl)
         target.profile = global->findProfile(profileName.c_str());
 
@@ -146,7 +184,7 @@ int main(int argc, char** argv)
     sessionDesc.searchPaths = searchPaths;
     sessionDesc.searchPathCount = 1;
     sessionDesc.compilerOptionEntries = options;
-    sessionDesc.compilerOptionEntryCount = wgsl ? 1 : 2; // EmitSpirvDirectly is SPIR-V only
+    sessionDesc.compilerOptionEntryCount = d3d ? 0 : (wgsl ? 1 : 2); // SPIR-V-only options
 
     ComPtr<slang::ISession> session;
     if (SLANG_FAILED(global->createSession(sessionDesc, session.writeRef())))
@@ -200,6 +238,35 @@ int main(int argc, char** argv)
         PrintDiagnostics(d);
         if (SLANG_FAILED(r))
             return 1;
+    }
+
+    // D3D (DXBC/DXIL): one byte blob per entry point, suffixed by stage. The header
+    // holds e.g. g_<var>VS + g_<var>PS, since a graphics PSO takes a VS blob + PS blob.
+    if (d3d)
+    {
+        slang::ProgramLayout* layout = linked->getLayout(0, nullptr);
+        if (!layout) { std::fprintf(stderr, "vri-shaderc: no program layout\n"); return 1; }
+        std::ofstream f(output, std::ios::binary);
+        if (!f) { std::fprintf(stderr, "vri-shaderc: failed to write '%s'\n", output.c_str()); return 1; }
+        f << "#pragma once\n";
+        f << "// Generated by vri-shaderc (Slang -> " << (dxil ? "DXIL" : "DXBC") << "). Do not edit by hand.\n";
+        const unsigned epc = static_cast<unsigned>(layout->getEntryPointCount());
+        size_t totalBytes = 0;
+        for (unsigned i = 0; i < epc; ++i)
+        {
+            slang::EntryPointReflection* er = layout->getEntryPointByIndex(i);
+            const char* suffix = StageSuffix(er->getStage());
+            ComPtr<slang::IBlob> ep;
+            ComPtr<slang::IBlob> d;
+            SlangResult r = linked->getEntryPointCode(static_cast<SlangInt>(i), 0, ep.writeRef(), d.writeRef());
+            PrintDiagnostics(d);
+            if (SLANG_FAILED(r)) return 1;
+            AppendByteArray(f, varName + suffix, static_cast<const unsigned char*>(ep->getBufferPointer()), ep->getBufferSize());
+            totalBytes += ep->getBufferSize();
+        }
+        std::printf("vri-shaderc: %s -> %s (%s, %s, %u entry points, %zu bytes)\n",
+                    input.c_str(), output.c_str(), varName.c_str(), targetName.c_str(), epc, totalBytes);
+        return 0;
     }
 
     ComPtr<slang::IBlob> code;

@@ -54,6 +54,19 @@ task("shaders")
             else
                 cprint("${yellow}[shaders]${clear} %s -> %s (no WGSL: unsupported stage)", path.filename(slang), path.filename(spvHeader))
             end
+
+            -- DXBC (Direct3D 12) is Windows-host only (Slang shells to fxc) and best-effort.
+            -- Emits per-stage byte arrays g_<name>DxbcVS/PS/... (see vri-shaderc --target dxbc).
+            if is_host("windows") then
+                local dxbcHeader = path.join(dir, base .. "_dxbc.h")
+                local dxbcVar = "g_" .. stem(base) .. "Dxbc"
+                local dok = try { function() os.runv(exe, {slang, "-o", dxbcHeader, "--var", dxbcVar, "--target", "dxbc"}) return true end }
+                if dok then
+                    cprint("${green}[shaders]${clear}   + %s", path.filename(dxbcHeader))
+                else
+                    cprint("${yellow}[shaders]${clear}   (no DXBC for %s: unsupported stage)", path.filename(slang))
+                end
+            end
         end
     end)
 task_end()

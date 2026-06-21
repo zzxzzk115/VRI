@@ -10,7 +10,10 @@
 #include "device_d3d12.h"
 #include "objects_d3d12.h"
 
+#include <d3dcompiler.h> // D3DReflect (VS input-signature reflection for the input layout)
+
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace vri::d3d12
@@ -27,6 +30,8 @@ namespace vri::d3d12
         CommandAllocatorD3D12* Alloc(VriCommandAllocator* a) { return reinterpret_cast<CommandAllocatorD3D12*>(a); }
         CommandBufferD3D12* CB(VriCommandBuffer* c) { return reinterpret_cast<CommandBufferD3D12*>(c); }
         FenceD3D12*         Fen(VriFence* f) { return reinterpret_cast<FenceD3D12*>(f); }
+        PipelineLayoutD3D12* PL(VriPipelineLayout* p) { return reinterpret_cast<PipelineLayoutD3D12*>(p); }
+        PipelineD3D12*      Pipe(VriPipeline* p) { return reinterpret_cast<PipelineD3D12*>(p); }
 
         D3D12_RESOURCE_STATES ToState(VriLayout layout)
         {
@@ -288,24 +293,175 @@ namespace vri::d3d12
         void      VRI_CALL FreeMemory(VriMemory*) {}
         VriResult VRI_CALL BindBufferMemory(VriDevice*, VriBuffer*, VriMemory*, uint64_t) { return VriResult_Unsupported; }
         VriResult VRI_CALL BindTextureMemory(VriDevice*, VriTexture*, VriMemory*, uint64_t) { return VriResult_Unsupported; }
-        VriResult VRI_CALL CreatePipelineLayout(VriDevice*, const VriPipelineLayoutDesc*, VriPipelineLayout**) { return VriResult_Unsupported; }
-        void      VRI_CALL DestroyPipelineLayout(VriPipelineLayout*) {}
-        VriResult VRI_CALL CreateGraphicsPipeline(VriDevice*, const VriGraphicsPipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
+        VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc*, VriPipelineLayout** out)
+        {
+            DeviceD3D12* d = Dev(device);
+            // Phase 2: an empty root signature (no descriptor tables yet) that still
+            // allows an input-assembler input layout. Descriptor-set support extends this.
+            D3D12_ROOT_SIGNATURE_DESC rs = {};
+            rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+            ComPtr<ID3DBlob> blob, err;
+            if (FAILED(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err)))
+            { d->ReportError("D3D12SerializeRootSignature failed"); return VriResult_Failure; }
+            PipelineLayoutD3D12* l = new PipelineLayoutD3D12{};
+            l->device = d;
+            if (FAILED(d->Device()->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&l->rootSig))))
+            { delete l; d->ReportError("CreateRootSignature failed"); return VriResult_Failure; }
+            *out = ToHandle(l);
+            return VriResult_Success;
+        }
+        void VRI_CALL DestroyPipelineLayout(VriPipelineLayout* layout) { if (layout) delete PL(layout); }
+
+        VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
+        {
+            DeviceD3D12* d = Dev(device);
+            PipelineLayoutD3D12* layout = PL(desc->pipelineLayout);
+
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC pd = {};
+            pd.pRootSignature = layout->rootSig.Get();
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+            {
+                const VriShaderDesc& s = desc->shaders[i];
+                const D3D12_SHADER_BYTECODE bc = {s.bytecode, s.bytecodeSize};
+                if (s.stage == VriShaderStage_Vertex) pd.VS = bc;
+                else if (s.stage == VriShaderStage_Fragment) pd.PS = bc;
+                else if (s.stage == VriShaderStage_Geometry) pd.GS = bc;
+                else if (s.stage == VriShaderStage_TessControl) pd.HS = bc;
+                else if (s.stage == VriShaderStage_TessEval) pd.DS = bc;
+            }
+
+            // Input layout (per-attribute). VRI attributes are location-indexed, but D3D
+            // matches vertex inputs by semantic name+index. Reflect the VS input signature
+            // (register N == VRI attribute/location N) so the layout uses the real
+            // semantics (POSITION, COLOR0, ...) Slang emitted - no hardcoded convention.
+            struct SemInfo { std::string name; UINT index = 0; };
+            std::vector<SemInfo> byRegister; // owns the semantic strings the layout points at
+            if (pd.VS.pShaderBytecode && desc->vertexInput.attributeNum)
+            {
+                ComPtr<ID3D12ShaderReflection> refl;
+                if (SUCCEEDED(D3DReflect(pd.VS.pShaderBytecode, pd.VS.BytecodeLength, IID_PPV_ARGS(&refl))))
+                {
+                    D3D12_SHADER_DESC sd = {};
+                    refl->GetDesc(&sd);
+                    byRegister.resize(sd.InputParameters);
+                    for (UINT i = 0; i < sd.InputParameters; ++i)
+                    {
+                        D3D12_SIGNATURE_PARAMETER_DESC p = {};
+                        refl->GetInputParameterDesc(i, &p);
+                        if (p.Register < byRegister.size()) byRegister[p.Register] = {p.SemanticName ? p.SemanticName : "TEXCOORD", p.SemanticIndex};
+                    }
+                }
+            }
+            std::vector<D3D12_INPUT_ELEMENT_DESC> elems;
+            std::vector<PipelineGraphicsVB> vbStrides;
+            for (uint32_t i = 0; i < desc->vertexInput.attributeNum; ++i)
+            {
+                const VriVertexAttributeDesc& a = desc->vertexInput.attributes[i];
+                uint32_t slot = a.streamIndex, stride = 0;
+                if (a.streamIndex < desc->vertexInput.streamNum)
+                { slot = desc->vertexInput.streams[a.streamIndex].bindingSlot; stride = static_cast<uint32_t>(desc->vertexInput.streams[a.streamIndex].stride); }
+                D3D12_INPUT_ELEMENT_DESC e = {};
+                if (i < byRegister.size() && !byRegister[i].name.empty()) { e.SemanticName = byRegister[i].name.c_str(); e.SemanticIndex = byRegister[i].index; }
+                else { e.SemanticName = "TEXCOORD"; e.SemanticIndex = i; }
+                e.Format = ToDxgiVertexFormat(a.format);
+                e.InputSlot = slot; e.AlignedByteOffset = a.offset;
+                e.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+                elems.push_back(e);
+                bool have = false; for (auto& vb : vbStrides) if (vb.slot == slot) { have = true; break; }
+                if (!have) vbStrides.push_back({stride, slot});
+            }
+            if (!elems.empty()) { pd.InputLayout.pInputElementDescs = elems.data(); pd.InputLayout.NumElements = static_cast<UINT>(elems.size()); }
+
+            pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+            pd.RasterizerState.CullMode = ToD3DCull(desc->rasterization.cullMode);
+            pd.RasterizerState.FrontCounterClockwise = desc->rasterization.frontFace == VriFrontFace_CounterClockwise ? TRUE : FALSE;
+            pd.RasterizerState.DepthClipEnable = TRUE;
+
+            const VriColorAttachmentDesc* c0 = desc->outputMerger.colorNum ? &desc->outputMerger.colors[0] : nullptr;
+            pd.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE; pd.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO; pd.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            pd.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE; pd.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO; pd.BlendState.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+            if (c0 && c0->blend.enable)
+            {
+                pd.BlendState.RenderTarget[0].BlendEnable = TRUE;
+                pd.BlendState.RenderTarget[0].SrcBlend = ToD3DBlend(c0->blend.srcColor); pd.BlendState.RenderTarget[0].DestBlend = ToD3DBlend(c0->blend.dstColor); pd.BlendState.RenderTarget[0].BlendOp = ToD3DBlendOp(c0->blend.colorOp);
+                pd.BlendState.RenderTarget[0].SrcBlendAlpha = ToD3DBlend(c0->blend.srcAlpha); pd.BlendState.RenderTarget[0].DestBlendAlpha = ToD3DBlend(c0->blend.dstAlpha); pd.BlendState.RenderTarget[0].BlendOpAlpha = ToD3DBlendOp(c0->blend.alphaOp);
+            }
+            const VriColorWriteFlags wm = c0 ? c0->colorWriteMask : VriColorWrite_RGBA;
+            pd.BlendState.RenderTarget[0].RenderTargetWriteMask = static_cast<UINT8>((wm == 0 ? VriColorWrite_RGBA : wm) & 0xF);
+
+            pd.DepthStencilState.DepthEnable = desc->depthStencil.depthTest ? TRUE : FALSE;
+            pd.DepthStencilState.DepthWriteMask = desc->depthStencil.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+            pd.DepthStencilState.DepthFunc = ToD3DCompare(desc->depthStencil.depthCompareOp);
+
+            pd.SampleMask = UINT_MAX;
+            pd.PrimitiveTopologyType = ToD3DTopologyType(desc->inputAssembly.topology);
+            pd.NumRenderTargets = desc->outputMerger.colorNum <= 8 ? desc->outputMerger.colorNum : 8;
+            for (uint32_t i = 0; i < pd.NumRenderTargets; ++i) pd.RTVFormats[i] = ToDxgiFormat(desc->outputMerger.colors[i].format).format;
+            pd.DSVFormat = desc->outputMerger.depthStencilFormat != VriFormat_Unknown ? ToDxgiFormat(desc->outputMerger.depthStencilFormat).format : DXGI_FORMAT_UNKNOWN;
+            pd.SampleDesc.Count = desc->multisample.sampleNum ? desc->multisample.sampleNum : 1;
+
+            PipelineD3D12* p = new PipelineD3D12{};
+            p->device = d; p->rootSig = layout->rootSig.Get(); p->vbStrides = std::move(vbStrides);
+            p->topology = ToD3DTopology(desc->inputAssembly.topology, desc->tessellation.patchControlPoints);
+            if (FAILED(d->Device()->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&p->pso))))
+            { delete p; d->ReportError("CreateGraphicsPipelineState failed"); return VriResult_Failure; }
+            *out = ToHandle(p);
+            return VriResult_Success;
+        }
         VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
-        void      VRI_CALL DestroyPipeline(VriPipeline*) {}
+        void VRI_CALL DestroyPipeline(VriPipeline* pipeline) { if (pipeline) delete Pipe(pipeline); }
         VriResult VRI_CALL CreateDescriptorPool(VriDevice*, const VriDescriptorPoolDesc*, VriDescriptorPool**) { return VriResult_Unsupported; }
         void      VRI_CALL ResetDescriptorPool(VriDescriptorPool*) {}
         void      VRI_CALL DestroyDescriptorPool(VriDescriptorPool*) {}
         VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*, const VriPipelineLayout*, uint32_t, VriDescriptorSet**, uint32_t) { return VriResult_Unsupported; }
         void      VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*, uint32_t, uint32_t, const VriDescriptorRangeUpdateDesc*) {}
-        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer*, VriPipelineLayout*) {}
-        void VRI_CALL CmdSetPipeline(VriCommandBuffer*, VriPipeline*) {}
+        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->list->SetGraphicsRootSignature(PL(layout)->rootSig.Get()); }
+        void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            PipelineD3D12* p = Pipe(pipeline);
+            c->boundPipeline = p;
+            c->list->SetGraphicsRootSignature(p->rootSig); // also set here so a no-descriptor pipeline works without CmdSetPipelineLayout
+            c->list->SetPipelineState(p->pso.Get());
+            c->list->IASetPrimitiveTopology(p->topology);
+        }
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer*, uint32_t, const VriDescriptorSet*) {}
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
-        void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer*, uint32_t, const VriVertexBufferBinding*, uint32_t) {}
-        void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer*, VriBuffer*, uint64_t, VriIndexType) {}
-        void VRI_CALL CmdDraw(VriCommandBuffer*, const VriDrawDesc*) {}
-        void VRI_CALL CmdDrawIndexed(VriCommandBuffer*, const VriDrawIndexedDesc*) {}
+        void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            if (!num) return;
+            std::vector<D3D12_VERTEX_BUFFER_VIEW> views(num);
+            for (uint32_t i = 0; i < num; ++i)
+            {
+                BufferD3D12* b = Buf(bindings[i].buffer);
+                uint32_t stride = 0;
+                if (c->boundPipeline)
+                    for (const PipelineGraphicsVB& vb : c->boundPipeline->vbStrides)
+                        if (vb.slot == baseSlot + i) { stride = vb.stride; break; }
+                views[i].BufferLocation = b->resource->GetGPUVirtualAddress() + bindings[i].offset;
+                views[i].SizeInBytes = static_cast<UINT>(b->size - bindings[i].offset);
+                views[i].StrideInBytes = stride;
+            }
+            c->list->IASetVertexBuffers(baseSlot, num, views.data());
+        }
+        void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriIndexType type)
+        {
+            BufferD3D12* b = Buf(buffer);
+            D3D12_INDEX_BUFFER_VIEW v = {};
+            v.BufferLocation = b->resource->GetGPUVirtualAddress() + offset;
+            v.SizeInBytes = static_cast<UINT>(b->size - offset);
+            v.Format = type == VriIndexType_UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+            CB(cmd)->list->IASetIndexBuffer(&v);
+        }
+        void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
+        {
+            CB(cmd)->list->DrawInstanced(d->vertexNum, d->instanceNum ? d->instanceNum : 1, d->baseVertex, d->baseInstance);
+        }
+        void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
+        {
+            CB(cmd)->list->DrawIndexedInstanced(d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
+        }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
