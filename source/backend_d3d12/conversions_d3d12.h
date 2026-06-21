@@ -125,6 +125,13 @@ namespace vri::d3d12
         d.MipLODBias = s.mipLodBias; d.MaxAnisotropy = 1;
         d.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
         d.MinLOD = s.minLod; d.MaxLOD = s.maxLod > 0.0f ? s.maxLod : D3D12_FLOAT32_MAX;
+        // D3D12 border color is always an arbitrary float4 (native custom support).
+        if (s.useCustomBorderColor)
+            for (int i = 0; i < 4; ++i) d.BorderColor[i] = s.customBorderColor[i];
+        else if (s.borderColor == VriBorderColor_FloatOpaqueWhite || s.borderColor == VriBorderColor_IntOpaqueWhite)
+        { d.BorderColor[0] = d.BorderColor[1] = d.BorderColor[2] = d.BorderColor[3] = 1.0f; }
+        else if (s.borderColor == VriBorderColor_FloatOpaqueBlack || s.borderColor == VriBorderColor_IntOpaqueBlack)
+        { d.BorderColor[3] = 1.0f; } // opaque black (rgb 0, a 1)
         return d;
     }
 

@@ -252,6 +252,7 @@ namespace vri::vk
         VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
         VkPhysicalDeviceOpacityMicromapFeaturesEXT ommSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
         VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR barySup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR};
+        VkPhysicalDeviceCustomBorderColorFeaturesEXT cbcSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
         VkPhysicalDeviceVulkan12Features v12Sup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
@@ -264,6 +265,7 @@ namespace vri::vk
             if (hasExt(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME))  { *q = &vrsSup; q = &vrsSup.pNext; }
             if (hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME))       { *q = &ommSup; q = &ommSup.pNext; }
             if (hasExt(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME)) { *q = &barySup; q = &barySup.pNext; }
+            if (hasExt(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME))    { *q = &cbcSup; q = &cbcSup.pNext; }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
             baseSup = sup.features;
@@ -312,6 +314,16 @@ namespace vri::vk
             baryEn.fragmentShaderBarycentric = VK_TRUE;
             baryEn.pNext = features2.pNext; features2.pNext = &baryEn; // chain into device create
             m_hasBarycentric = true;
+        }
+        // Custom (arbitrary) sampler border color.
+        VkPhysicalDeviceCustomBorderColorFeaturesEXT cbcEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
+        if (hasExt(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME) && cbcSup.customBorderColors)
+        {
+            extensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
+            cbcEn.customBorderColors = VK_TRUE;
+            cbcEn.customBorderColorWithoutFormat = cbcSup.customBorderColorWithoutFormat;
+            cbcEn.pNext = features2.pNext; features2.pNext = &cbcEn;
+            m_hasCustomBorderColor = true;
         }
 
         // ---- optional features: query -> enable -> report (bestEffort aware) ----
@@ -550,6 +562,7 @@ namespace vri::vk
         m_desc.hasRayQuery = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasConservativeRaster = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasCustomBorderColor = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;
 
         if (m_enabledFeatures & VriFeature_RayTracing)
         {

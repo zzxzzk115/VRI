@@ -57,6 +57,11 @@ typedef struct VriSamplerDesc
     float          minLod;
     float          maxLod;
     VriBorderColor borderColor;
+    /* Custom (arbitrary) border color for ClampToBorder addressing. When
+       useCustomBorderColor is set, customBorderColor (RGBA) overrides borderColor.
+       Requires VriDeviceDesc::hasCustomBorderColor. */
+    VriBool        useCustomBorderColor;
+    float          customBorderColor[4];
 } VriSamplerDesc;
 
 /* ---- resource views (a VriDescriptor is created from one of these) ---- */

@@ -79,6 +79,7 @@ namespace vri::vk
         // Always-on-if-available pipeline-state extensions (capabilities, not opt-in features).
         bool     m_hasConservativeRaster = false;
         bool     m_hasBarycentric = false;
+        bool     m_hasCustomBorderColor = false;
         ExtFunctions m_ext = {};
 
         VriDeviceDesc        m_desc = {};

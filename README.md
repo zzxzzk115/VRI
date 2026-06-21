@@ -43,6 +43,8 @@ Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures 
 
 **Fragment-shader barycentrics** (`VriDeviceDesc::hasFragmentShaderBarycentric`) are likewise portable: Vulkan `VK_KHR_fragment_shader_barycentric` (enabled when available) and D3D12 SM6.1 `SV_Barycentrics`. The cross-backend test outputs the rasterizer barycentrics as color and checks the center pixel is `{0.5, 0.25, 0.25}` (they sum to 1).
 
+**Custom sampler border color** (`VriSamplerDesc::useCustomBorderColor` + `customBorderColor`, `VriDeviceDesc::hasCustomBorderColor`): an arbitrary RGBA border for `ClampToBorder` addressing — Vulkan `VK_EXT_custom_border_color`, D3D12 native (`D3D12_SAMPLER_DESC::BorderColor`). The cross-backend test samples a blue texture far outside `[0,1]` with a custom green border and reads back green.
+
 ## Platforms
 
 Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU), all built + tested in CI. macOS is **built + run in CI** (compile-verified; GPU backends pending real-device validation — CI has no MoltenVK ICD, and desktop GL caps at 4.1). Android / iOS are planned per backend.

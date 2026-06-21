@@ -466,6 +466,27 @@ namespace vri::vk
             ci.minLod = desc->minLod;
             ci.maxLod = desc->maxLod;
 
+            VkSamplerCustomBorderColorCreateInfoEXT custom = {VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
+            if (desc->useCustomBorderColor)
+            {
+                ci.borderColor = VK_BORDER_COLOR_FLOAT_CUSTOM_EXT;
+                custom.format = VK_FORMAT_UNDEFINED;
+                for (int i = 0; i < 4; ++i) custom.customBorderColor.float32[i] = desc->customBorderColor[i];
+                ci.pNext = &custom;
+            }
+            else
+            {
+                switch (desc->borderColor)
+                {
+                    case VriBorderColor_FloatOpaqueBlack:      ci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK; break;
+                    case VriBorderColor_FloatOpaqueWhite:      ci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE; break;
+                    case VriBorderColor_IntTransparentBlack:   ci.borderColor = VK_BORDER_COLOR_INT_TRANSPARENT_BLACK; break;
+                    case VriBorderColor_IntOpaqueBlack:        ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK; break;
+                    case VriBorderColor_IntOpaqueWhite:        ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_WHITE; break;
+                    default:                                   ci.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK; break;
+                }
+            }
+
             VkSampler sampler = VK_NULL_HANDLE;
             if (vkCreateSampler(d->Device(), &ci, nullptr, &sampler) != VK_SUCCESS)
                 return VriResult_Failure;

@@ -247,6 +247,7 @@ namespace vri::d3d12
         D3D12_FEATURE_DATA_D3D12_OPTIONS3 o3 = {};
         if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &o3, sizeof(o3))))
             m_desc.hasFragmentShaderBarycentric = o3.BarycentricsSupported ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasCustomBorderColor = VRI_TRUE; // D3D12 sampler border color is always a float4
 
         m_desc.enabledFeatures = m_enabledFeatures;
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
