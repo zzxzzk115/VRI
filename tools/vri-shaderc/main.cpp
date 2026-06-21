@@ -77,13 +77,21 @@ namespace
     {
         switch (stage)
         {
-            case SLANG_STAGE_VERTEX:   return "VS";
-            case SLANG_STAGE_FRAGMENT: return "PS";
-            case SLANG_STAGE_COMPUTE:  return "CS";
-            case SLANG_STAGE_GEOMETRY: return "GS";
-            case SLANG_STAGE_HULL:     return "HS";
-            case SLANG_STAGE_DOMAIN:   return "DS";
-            default:                   return "XX";
+            case SLANG_STAGE_VERTEX:       return "VS";
+            case SLANG_STAGE_FRAGMENT:     return "PS";
+            case SLANG_STAGE_COMPUTE:      return "CS";
+            case SLANG_STAGE_GEOMETRY:     return "GS";
+            case SLANG_STAGE_HULL:         return "HS";
+            case SLANG_STAGE_DOMAIN:       return "DS";
+            case SLANG_STAGE_MESH:         return "MS";
+            case SLANG_STAGE_AMPLIFICATION:return "AS";
+            case SLANG_STAGE_RAY_GENERATION: return "RGEN";
+            case SLANG_STAGE_MISS:         return "MISS";
+            case SLANG_STAGE_CLOSEST_HIT:  return "CHIT";
+            case SLANG_STAGE_ANY_HIT:      return "AHIT";
+            case SLANG_STAGE_INTERSECTION: return "ISECT";
+            case SLANG_STAGE_CALLABLE:     return "CALL";
+            default:                       return "XX";
         }
     }
 

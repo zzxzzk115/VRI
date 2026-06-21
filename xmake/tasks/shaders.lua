@@ -66,6 +66,22 @@ task("shaders")
                 else
                     cprint("${yellow}[shaders]${clear}   (no DXBC for %s: unsupported stage)", path.filename(slang))
                 end
+
+                -- DXIL (SM6.x) for shaders D3D12 needs as DXIL: mesh shaders (sm_6_5)
+                -- and DXR ray tracing (lib_6_3, one library w/ all RT entry points).
+                -- DXBC (FXC, sm_5_1) cannot express these stages, hence DXIL.
+                local dxilProfiles = { triangle_mesh = "sm_6_5", rt_triangle = "lib_6_3" }
+                local prof = dxilProfiles[base]
+                if prof then
+                    local dxilHeader = path.join(dir, base .. "_dxil.h")
+                    local dxilVar = "g_" .. stem(base) .. "Dxil"
+                    local xok = try { function() os.runv(exe, {slang, "-o", dxilHeader, "--var", dxilVar, "--target", "dxil", "--profile", prof}) return true end }
+                    if xok then
+                        cprint("${green}[shaders]${clear}   + %s (%s)", path.filename(dxilHeader), prof)
+                    else
+                        cprint("${yellow}[shaders]${clear}   (no DXIL for %s)", path.filename(slang))
+                    end
+                end
             end
         end
     end)
