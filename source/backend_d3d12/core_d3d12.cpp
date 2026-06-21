@@ -130,6 +130,7 @@ namespace vri::d3d12
             t->device = d; t->format = fi.format; t->texelSize = fi.texelSize;
             t->width = desc->width; t->height = desc->height ? desc->height : 1; t->depth = 1;
             t->mipNum = rd.MipLevels; t->layerNum = rd.DepthOrArraySize; t->state = D3D12_RESOURCE_STATE_COMMON;
+            t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
             *out = ToHandle(t);
             return VriResult_Success;
         }
@@ -141,14 +142,19 @@ namespace vri::d3d12
             DeviceD3D12* d = Dev(device);
             DescriptorD3D12* v = new DescriptorD3D12{};
             v->device = d; v->texture = reinterpret_cast<const TextureD3D12*>(desc->texture); v->mip = desc->baseMip;
-            // Phase 1 needs the render-target view; sampling (SRV) lands with descriptor sets.
+            // The view records the texture; it serves as an RTV (color attachment) and/or an
+            // SRV source (sampling - the SRV is created into a descriptor set's heap slot at
+            // UpdateDescriptorRanges). Pre-create the RTV only for RT-capable textures.
             v->kind = DescriptorD3D12::Kind::TextureRtv;
-            v->cpu = d->AllocRtv();
-            D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
-            rtv.Format = v->texture->format;
-            rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-            rtv.Texture2D.MipSlice = desc->baseMip;
-            d->Device()->CreateRenderTargetView(v->texture->resource.Get(), &rtv, v->cpu);
+            if (v->texture->isRenderTarget)
+            {
+                v->cpu = d->AllocRtv();
+                D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
+                rtv.Format = v->texture->format;
+                rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+                rtv.Texture2D.MipSlice = desc->baseMip;
+                d->Device()->CreateRenderTargetView(v->texture->resource.Get(), &rtv, v->cpu);
+            }
             *out = ToHandle(v);
             return VriResult_Success;
         }
@@ -164,7 +170,15 @@ namespace vri::d3d12
             *out = ToHandle(v);
             return VriResult_Success;
         }
-        VriResult VRI_CALL CreateSampler(VriDevice*, const VriSamplerDesc*, VriDescriptor**) { return VriResult_Unsupported; }
+        VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, VriDescriptor** out)
+        {
+            DescriptorD3D12* v = new DescriptorD3D12{};
+            v->kind = DescriptorD3D12::Kind::Sampler;
+            v->device = Dev(device);
+            v->sampler = *desc; // realized into a sampler heap slot at UpdateDescriptorRanges
+            *out = ToHandle(v);
+            return VriResult_Success;
+        }
         void VRI_CALL DestroyDescriptor(VriDescriptor* descriptor) { if (descriptor) delete Desc(descriptor); }
 
         // ---- command allocation / recording ----------------------------
@@ -312,26 +326,76 @@ namespace vri::d3d12
             DeviceD3D12* d = Dev(device);
             PipelineLayoutD3D12* l = new PipelineLayoutD3D12{};
             l->device = d;
-            // Phase 3a: each constant buffer becomes a ROOT CBV (bound by GPU address - no
-            // descriptor heap). register = VRI binding, space = VRI set. Textures/samplers/
-            // storage need descriptor tables (Phase 3b); ignored here so the IA flag + any
-            // CBVs still produce a valid root signature.
+            // Constant buffers -> root CBV (by GPU address). Textures (SRV) and samplers ->
+            // one descriptor table per set per heap-type. D3D12 registers are per-type, so we
+            // flatten per-type from 0 within the set (matching Slang's HLSL assignment): the
+            // first texture -> t0, first sampler -> s0, etc.
             std::vector<D3D12_ROOT_PARAMETER> params;
+            std::vector<std::vector<D3D12_DESCRIPTOR_RANGE>> rangeStore; // keep ranges alive for serialize
+            rangeStore.reserve(desc->descriptorSetNum * 2);
             for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
             {
                 const VriDescriptorSetDesc& sd = desc->descriptorSets[s];
+                LayoutSetD3D12 setInfo{}; setInfo.set = sd.registerSpace;
+                uint32_t srvIdx = 0, samplerIdx = 0;
+                std::vector<size_t> srvBindings, samplerBindings; // indices into l->bindings to patch rootParam
                 for (uint32_t r = 0; r < sd.rangeNum; ++r)
                 {
                     const VriDescriptorRangeDesc& rd = sd.ranges[r];
-                    if (rd.descriptorType != VriDescriptorType_ConstantBuffer) continue;
+                    const uint32_t n = rd.descriptorNum ? rd.descriptorNum : 1u;
+                    if (rd.descriptorType == VriDescriptorType_ConstantBuffer)
+                    {
+                        D3D12_ROOT_PARAMETER p = {};
+                        p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+                        p.Descriptor.ShaderRegister = rd.baseRegister; p.Descriptor.RegisterSpace = sd.registerSpace;
+                        p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+                        l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, static_cast<uint32_t>(params.size()), 0});
+                        params.push_back(p);
+                    }
+                    else if (rd.descriptorType == VriDescriptorType_Sampler)
+                    {
+                        l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, 0, samplerIdx});
+                        samplerBindings.push_back(l->bindings.size() - 1);
+                        samplerIdx += n;
+                    }
+                    else // Texture / StorageTexture / StructuredBuffer / StorageBuffer -> SRV/UAV table
+                    {
+                        l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, 0, srvIdx});
+                        srvBindings.push_back(l->bindings.size() - 1);
+                        srvIdx += n;
+                    }
+                }
+                if (srvIdx > 0)
+                {
+                    std::vector<D3D12_DESCRIPTOR_RANGE> ranges(1);
+                    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; ranges[0].NumDescriptors = srvIdx;
+                    ranges[0].BaseShaderRegister = 0; ranges[0].RegisterSpace = sd.registerSpace;
+                    ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                    rangeStore.push_back(std::move(ranges));
                     D3D12_ROOT_PARAMETER p = {};
-                    p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-                    p.Descriptor.ShaderRegister = rd.baseRegister;
-                    p.Descriptor.RegisterSpace = sd.registerSpace;
+                    p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                    p.DescriptorTable.NumDescriptorRanges = 1; p.DescriptorTable.pDescriptorRanges = rangeStore.back().data();
                     p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-                    l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, static_cast<uint32_t>(params.size())});
+                    setInfo.srvTableParam = static_cast<int>(params.size()); setInfo.srvCount = srvIdx;
+                    for (size_t bi : srvBindings) l->bindings[bi].rootParam = static_cast<uint32_t>(params.size());
                     params.push_back(p);
                 }
+                if (samplerIdx > 0)
+                {
+                    std::vector<D3D12_DESCRIPTOR_RANGE> ranges(1);
+                    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER; ranges[0].NumDescriptors = samplerIdx;
+                    ranges[0].BaseShaderRegister = 0; ranges[0].RegisterSpace = sd.registerSpace;
+                    ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                    rangeStore.push_back(std::move(ranges));
+                    D3D12_ROOT_PARAMETER p = {};
+                    p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                    p.DescriptorTable.NumDescriptorRanges = 1; p.DescriptorTable.pDescriptorRanges = rangeStore.back().data();
+                    p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+                    setInfo.samplerTableParam = static_cast<int>(params.size()); setInfo.samplerCount = samplerIdx;
+                    for (size_t bi : samplerBindings) l->bindings[bi].rootParam = static_cast<uint32_t>(params.size());
+                    params.push_back(p);
+                }
+                l->sets.push_back(setInfo);
             }
             D3D12_ROOT_SIGNATURE_DESC rs = {};
             rs.NumParameters = static_cast<UINT>(params.size());
@@ -445,21 +509,47 @@ namespace vri::d3d12
         }
         VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
         void VRI_CALL DestroyPipeline(VriPipeline* pipeline) { if (pipeline) delete Pipe(pipeline); }
-        VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPoolDesc*, VriDescriptorPool** out)
+        VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPoolDesc* desc, VriDescriptorPool** out)
         {
-            *out = ToHandle(new DescriptorPoolD3D12{Dev(device)}); // CPU-side bookkeeping (root CBVs need no heap)
+            DeviceD3D12* d = Dev(device);
+            DescriptorPoolD3D12* p = new DescriptorPoolD3D12{}; p->device = d;
+            // Shader-visible heaps for SRV/CBV/UAV + samplers (descriptor tables bind from
+            // these). Sized from the pool request with sane minimums; root CBVs use neither.
+            const uint32_t srvCap = (desc->textureMaxNum + desc->structuredBufferMaxNum + desc->storageBufferMaxNum + desc->storageTextureMaxNum + 16);
+            const uint32_t samplerCap = (desc->samplerMaxNum + 16);
+            D3D12_DESCRIPTOR_HEAP_DESC hd = {};
+            hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; hd.NumDescriptors = srvCap; hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            if (FAILED(d->Device()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&p->srvHeap)))) { delete p; d->ReportError("CreateDescriptorHeap (SRV) failed"); return VriResult_Failure; }
+            hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER; hd.NumDescriptors = samplerCap;
+            if (FAILED(d->Device()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&p->samplerHeap)))) { delete p; d->ReportError("CreateDescriptorHeap (sampler) failed"); return VriResult_Failure; }
+            p->srvSize = d->Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            p->samplerSize = d->Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+            *out = ToHandle(p);
             return VriResult_Success;
         }
-        void VRI_CALL ResetDescriptorPool(VriDescriptorPool*) {}
+        void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool) { DescriptorPoolD3D12* p = DPool(pool); p->srvNext = 0; p->samplerNext = 0; }
         void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool) { if (pool) delete DPool(pool); }
         VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool* pool, const VriPipelineLayout* layout, uint32_t setIndex, VriDescriptorSet** outSets, uint32_t setNum)
         {
             DescriptorPoolD3D12* p = DPool(pool);
             const PipelineLayoutD3D12* l = PL(layout);
+            const LayoutSetD3D12* si = l->FindSet(setIndex);
             for (uint32_t i = 0; i < setNum; ++i)
             {
                 DescriptorSetD3D12* s = new DescriptorSetD3D12{};
-                s->device = p->device; s->layout = l; s->setIndex = setIndex;
+                s->device = p->device; s->pool = p; s->layout = l; s->setIndex = setIndex;
+                if (si && si->srvCount > 0) // sub-allocate this set's SRV block
+                {
+                    s->srvCpu = p->srvHeap->GetCPUDescriptorHandleForHeapStart(); s->srvCpu.ptr += static_cast<SIZE_T>(p->srvNext) * p->srvSize;
+                    s->srvGpu = p->srvHeap->GetGPUDescriptorHandleForHeapStart(); s->srvGpu.ptr += static_cast<UINT64>(p->srvNext) * p->srvSize;
+                    p->srvNext += si->srvCount;
+                }
+                if (si && si->samplerCount > 0)
+                {
+                    s->samplerCpu = p->samplerHeap->GetCPUDescriptorHandleForHeapStart(); s->samplerCpu.ptr += static_cast<SIZE_T>(p->samplerNext) * p->samplerSize;
+                    s->samplerGpu = p->samplerHeap->GetGPUDescriptorHandleForHeapStart(); s->samplerGpu.ptr += static_cast<UINT64>(p->samplerNext) * p->samplerSize;
+                    p->samplerNext += si->samplerCount;
+                }
                 outSets[i] = ToHandle(s);
             }
             return VriResult_Success;
@@ -467,6 +557,7 @@ namespace vri::d3d12
         void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet* set, uint32_t baseRange, uint32_t rangeNum, const VriDescriptorRangeUpdateDesc* updates)
         {
             DescriptorSetD3D12* s = DSet(set);
+            DeviceD3D12* d = s->device;
             std::vector<const LayoutBindingD3D12*> setBindings; // this set's bindings in declaration order
             for (const LayoutBindingD3D12& b : s->layout->bindings)
                 if (b.set == s->setIndex) setBindings.push_back(&b);
@@ -474,7 +565,26 @@ namespace vri::d3d12
             {
                 const uint32_t idx = baseRange + r;
                 if (idx >= setBindings.size() || updates[r].descriptorNum == 0) continue;
-                s->bound[setBindings[idx]->binding] = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]);
+                const LayoutBindingD3D12* lb = setBindings[idx];
+                const DescriptorD3D12* v = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]);
+                s->bound[lb->binding] = v; // constant buffers bind as root CBVs at draw
+                if (lb->type == VriDescriptorType_ConstantBuffer || !v) continue;
+                if (lb->type == VriDescriptorType_Sampler) // realize into the set's sampler heap slot
+                {
+                    D3D12_SAMPLER_DESC sd = ToD3DSampler(v->sampler);
+                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->samplerCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->samplerSize;
+                    d->Device()->CreateSampler(&sd, h);
+                }
+                else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
+                {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+                    srv.Format = v->texture->format;
+                    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    srv.Texture2D.MipLevels = v->texture->mipNum;
+                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->srvSize;
+                    d->Device()->CreateShaderResourceView(v->texture->resource.Get(), &srv, h);
+                }
             }
         }
         void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->list->SetGraphicsRootSignature(PL(layout)->rootSig.Get()); }
@@ -492,15 +602,24 @@ namespace vri::d3d12
             CommandBufferD3D12* c = CB(cmd);
             const DescriptorSetD3D12* s = reinterpret_cast<const DescriptorSetD3D12*>(set);
             if (!s || !s->layout) return;
-            // Bind each recorded constant buffer as a root CBV at its mapped root slot.
+            const LayoutSetD3D12* si = s->layout->FindSet(setIndex);
+            // Bind the pool's shader-visible heaps (needed for the SRV/sampler tables).
+            if (s->pool && (si && (si->srvCount || si->samplerCount)))
+            {
+                ID3D12DescriptorHeap* heaps[2] = {s->pool->srvHeap.Get(), s->pool->samplerHeap.Get()};
+                c->list->SetDescriptorHeaps(2, heaps);
+            }
+            // Root CBVs (by GPU address).
             for (const LayoutBindingD3D12& b : s->layout->bindings)
             {
                 if (b.set != setIndex || b.type != VriDescriptorType_ConstantBuffer) continue;
                 auto it = s->bound.find(b.binding);
                 if (it == s->bound.end() || !it->second || !it->second->buffer) continue;
-                const DescriptorD3D12* v = it->second;
-                c->list->SetGraphicsRootConstantBufferView(b.rootParam, v->buffer->resource->GetGPUVirtualAddress() + v->bufferOffset);
+                c->list->SetGraphicsRootConstantBufferView(b.rootParam, it->second->buffer->resource->GetGPUVirtualAddress() + it->second->bufferOffset);
             }
+            // SRV / sampler descriptor tables (one each per set).
+            if (si && si->srvTableParam >= 0) c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->srvTableParam), s->srvGpu);
+            if (si && si->samplerTableParam >= 0) c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->samplerTableParam), s->samplerGpu);
         }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)

@@ -105,6 +105,29 @@ namespace vri::d3d12
         }
     }
 
+    inline D3D12_TEXTURE_ADDRESS_MODE ToD3DAddress(VriAddressMode m)
+    {
+        switch (m)
+        {
+            case VriAddressMode_MirroredRepeat: return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+            case VriAddressMode_ClampToEdge:    return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            case VriAddressMode_ClampToBorder:  return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+            default:                            return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        }
+    }
+
+    inline D3D12_SAMPLER_DESC ToD3DSampler(const VriSamplerDesc& s)
+    {
+        D3D12_SAMPLER_DESC d = {};
+        const bool linear = s.magFilter == VriFilter_Linear || s.minFilter == VriFilter_Linear;
+        d.Filter = linear ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_MIN_MAG_MIP_POINT;
+        d.AddressU = ToD3DAddress(s.addressModeU); d.AddressV = ToD3DAddress(s.addressModeV); d.AddressW = ToD3DAddress(s.addressModeW);
+        d.MipLODBias = s.mipLodBias; d.MaxAnisotropy = 1;
+        d.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        d.MinLOD = s.minLod; d.MaxLOD = s.maxLod > 0.0f ? s.maxLod : D3D12_FLOAT32_MAX;
+        return d;
+    }
+
     inline D3D12_BLEND_OP ToD3DBlendOp(VriBlendOp op)
     {
         switch (op)
