@@ -11,6 +11,7 @@
 
 #include "shaders/compute_fill_spv.h"  // g_computeFillSpv  (Vulkan + OpenGL via SPIRV-Cross)
 #include "shaders/compute_fill_wgsl.h" // g_computeFillWgsl (WebGPU)
+#include "shaders/compute_fill_dxbc.h" // g_computeFillDxbcCS (Direct3D 12)
 
 namespace
 {
@@ -134,4 +135,7 @@ TEST_CASE("compute parity: a compute shader fills a storage buffer (out[i] = i +
 
     const bool gl = RunCompute(VriGraphicsAPI_OpenGL, g_computeFillSpv, sizeof(g_computeFillSpv), ran, hasCompute);
     if (ran) { CHECK(gl); MESSAGE("OpenGL compute=", hasCompute); } else { MESSAGE("OpenGL unavailable - skipped"); }
+
+    const bool d3d12 = RunCompute(VriGraphicsAPI_D3D12, g_computeFillDxbcCS, sizeof(g_computeFillDxbcCS), ran, hasCompute);
+    if (ran) { CHECK(d3d12); MESSAGE("D3D12 compute=", hasCompute); } else { MESSAGE("D3D12 unavailable - skipped"); }
 }

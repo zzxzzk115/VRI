@@ -65,6 +65,27 @@ namespace vri::d3d12
             t->state = after;
         }
 
+        void TransitionBuffer(CommandBufferD3D12* c, BufferD3D12* b, D3D12_RESOURCE_STATES after)
+        {
+            if (b->heapType != D3D12_HEAP_TYPE_DEFAULT || b->state == after) return; // UPLOAD/READBACK heaps are fixed-state
+            D3D12_RESOURCE_BARRIER rb = {};
+            rb.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            rb.Transition.pResource = b->resource.Get();
+            rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            rb.Transition.StateBefore = b->state;
+            rb.Transition.StateAfter = after;
+            c->list->ResourceBarrier(1, &rb);
+            b->state = after;
+        }
+
+        D3D12_RESOURCE_STATES BufferStateForAccess(VriAccessFlags a)
+        {
+            if (a & VriAccess_CopySourceRead) return D3D12_RESOURCE_STATE_COPY_SOURCE;
+            if (a & VriAccess_CopyDestinationWrite) return D3D12_RESOURCE_STATE_COPY_DEST;
+            if (a & (VriAccess_ShaderResourceStorageWrite | VriAccess_ShaderResourceStorageRead)) return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            return D3D12_RESOURCE_STATE_COMMON;
+        }
+
         // ---- queries ---------------------------------------------------
         const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
         VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat)
@@ -87,12 +108,19 @@ namespace vri::d3d12
             if (desc->memoryLocation == VriMemoryLocation_HostUpload) { heap = D3D12_HEAP_TYPE_UPLOAD; state = D3D12_RESOURCE_STATE_GENERIC_READ; }
             else if (desc->memoryLocation == VriMemoryLocation_HostReadback) { heap = D3D12_HEAP_TYPE_READBACK; state = D3D12_RESOURCE_STATE_COPY_DEST; }
 
+            // Storage buffers are UAVs: need the UAV resource flag and start in the
+            // UNORDERED_ACCESS state (buffers don't auto-promote to UAV like they do to
+            // copy/SRV). A barrier transitions them to COPY_SOURCE for readback.
+            const bool uav = (heap == D3D12_HEAP_TYPE_DEFAULT) && (desc->usage & VriBufferUsage_StorageBuffer);
+            if (uav) state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
             D3D12_HEAP_PROPERTIES hp = {}; hp.Type = heap;
             D3D12_RESOURCE_DESC rd = {};
             rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
             rd.Width = desc->size ? desc->size : 1; rd.Height = 1; rd.DepthOrArraySize = 1; rd.MipLevels = 1;
             rd.Format = DXGI_FORMAT_UNKNOWN; rd.SampleDesc.Count = 1;
             rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            if (uav) rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
             BufferD3D12* b = new BufferD3D12{};
             if (FAILED(d->Device()->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, state, nullptr, IID_PPV_ARGS(&b->resource))))
@@ -224,8 +252,11 @@ namespace vri::d3d12
                 const VriTextureBarrierDesc& tb = g->textures[i];
                 if (tb.texture) Transition(c, reinterpret_cast<TextureD3D12*>(tb.texture), ToState(tb.after.layout));
             }
-            // Buffer barriers: D3D12 upload/readback heaps stay in a fixed state; default-heap
-            // buffer transitions land with the copy/vertex paths in Phase 2.
+            for (uint32_t i = 0; i < g->bufferNum; ++i)
+            {
+                const VriBufferBarrierDesc& bb = g->buffers[i];
+                if (bb.buffer) TransitionBuffer(c, reinterpret_cast<BufferD3D12*>(bb.buffer), BufferStateForAccess(bb.after.access));
+            }
         }
 
         // ---- render pass ----------------------------------------------
@@ -343,10 +374,11 @@ namespace vri::d3d12
                 {
                     const VriDescriptorRangeDesc& rd = sd.ranges[r];
                     const uint32_t n = rd.descriptorNum ? rd.descriptorNum : 1u;
-                    if (rd.descriptorType == VriDescriptorType_ConstantBuffer)
+                    if (rd.descriptorType == VriDescriptorType_ConstantBuffer || rd.descriptorType == VriDescriptorType_StorageBuffer)
                     {
+                        // Constant buffer -> root CBV; storage (RW) buffer -> root UAV.
                         D3D12_ROOT_PARAMETER p = {};
-                        p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+                        p.ParameterType = rd.descriptorType == VriDescriptorType_ConstantBuffer ? D3D12_ROOT_PARAMETER_TYPE_CBV : D3D12_ROOT_PARAMETER_TYPE_UAV;
                         p.Descriptor.ShaderRegister = rd.baseRegister; p.Descriptor.RegisterSpace = sd.registerSpace;
                         p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
                         l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, static_cast<uint32_t>(params.size()), 0});
@@ -507,7 +539,20 @@ namespace vri::d3d12
             *out = ToHandle(p);
             return VriResult_Success;
         }
-        VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
+        VriResult VRI_CALL CreateComputePipeline(VriDevice* device, const VriComputePipelineDesc* desc, VriPipeline** out)
+        {
+            DeviceD3D12* d = Dev(device);
+            PipelineLayoutD3D12* layout = PL(desc->pipelineLayout);
+            D3D12_COMPUTE_PIPELINE_STATE_DESC pd = {};
+            pd.pRootSignature = layout->rootSig.Get();
+            pd.CS = {desc->shader.bytecode, desc->shader.bytecodeSize};
+            PipelineD3D12* p = new PipelineD3D12{};
+            p->device = d; p->rootSig = layout->rootSig.Get(); p->isCompute = true;
+            if (FAILED(d->Device()->CreateComputePipelineState(&pd, IID_PPV_ARGS(&p->pso))))
+            { delete p; d->ReportError("CreateComputePipelineState failed"); return VriResult_Failure; }
+            *out = ToHandle(p);
+            return VriResult_Success;
+        }
         void VRI_CALL DestroyPipeline(VriPipeline* pipeline) { if (pipeline) delete Pipe(pipeline); }
         VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPoolDesc* desc, VriDescriptorPool** out)
         {
@@ -587,15 +632,22 @@ namespace vri::d3d12
                 }
             }
         }
-        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->list->SetGraphicsRootSignature(PL(layout)->rootSig.Get()); }
+        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            ID3D12RootSignature* rs = PL(layout)->rootSig.Get();
+            if (c->boundPipeline && c->boundPipeline->isCompute) c->list->SetComputeRootSignature(rs);
+            else c->list->SetGraphicsRootSignature(rs);
+        }
         void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
         {
             CommandBufferD3D12* c = CB(cmd);
             PipelineD3D12* p = Pipe(pipeline);
             c->boundPipeline = p;
-            c->list->SetGraphicsRootSignature(p->rootSig); // also set here so a no-descriptor pipeline works without CmdSetPipelineLayout
             c->list->SetPipelineState(p->pso.Get());
-            c->list->IASetPrimitiveTopology(p->topology);
+            // Set the root signature here too so a no-descriptor pipeline works without CmdSetPipelineLayout.
+            if (p->isCompute) { c->list->SetComputeRootSignature(p->rootSig); }
+            else { c->list->SetGraphicsRootSignature(p->rootSig); c->list->IASetPrimitiveTopology(p->topology); }
         }
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
         {
@@ -603,23 +655,42 @@ namespace vri::d3d12
             const DescriptorSetD3D12* s = reinterpret_cast<const DescriptorSetD3D12*>(set);
             if (!s || !s->layout) return;
             const LayoutSetD3D12* si = s->layout->FindSet(setIndex);
+            const bool compute = c->boundPipeline && c->boundPipeline->isCompute;
             // Bind the pool's shader-visible heaps (needed for the SRV/sampler tables).
             if (s->pool && (si && (si->srvCount || si->samplerCount)))
             {
                 ID3D12DescriptorHeap* heaps[2] = {s->pool->srvHeap.Get(), s->pool->samplerHeap.Get()};
                 c->list->SetDescriptorHeaps(2, heaps);
             }
-            // Root CBVs (by GPU address).
+            // Root CBV / UAV (by GPU address); graphics vs compute root binding point.
             for (const LayoutBindingD3D12& b : s->layout->bindings)
             {
-                if (b.set != setIndex || b.type != VriDescriptorType_ConstantBuffer) continue;
+                if (b.set != setIndex) continue;
                 auto it = s->bound.find(b.binding);
                 if (it == s->bound.end() || !it->second || !it->second->buffer) continue;
-                c->list->SetGraphicsRootConstantBufferView(b.rootParam, it->second->buffer->resource->GetGPUVirtualAddress() + it->second->bufferOffset);
+                const D3D12_GPU_VIRTUAL_ADDRESS va = it->second->buffer->resource->GetGPUVirtualAddress() + it->second->bufferOffset;
+                if (b.type == VriDescriptorType_ConstantBuffer)
+                {
+                    if (compute) c->list->SetComputeRootConstantBufferView(b.rootParam, va);
+                    else c->list->SetGraphicsRootConstantBufferView(b.rootParam, va);
+                }
+                else if (b.type == VriDescriptorType_StorageBuffer)
+                {
+                    if (compute) c->list->SetComputeRootUnorderedAccessView(b.rootParam, va);
+                    else c->list->SetGraphicsRootUnorderedAccessView(b.rootParam, va);
+                }
             }
             // SRV / sampler descriptor tables (one each per set).
-            if (si && si->srvTableParam >= 0) c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->srvTableParam), s->srvGpu);
-            if (si && si->samplerTableParam >= 0) c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->samplerTableParam), s->samplerGpu);
+            if (si && si->srvTableParam >= 0)
+            {
+                if (compute) c->list->SetComputeRootDescriptorTable(static_cast<UINT>(si->srvTableParam), s->srvGpu);
+                else c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->srvTableParam), s->srvGpu);
+            }
+            if (si && si->samplerTableParam >= 0)
+            {
+                if (compute) c->list->SetComputeRootDescriptorTable(static_cast<UINT>(si->samplerTableParam), s->samplerGpu);
+                else c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->samplerTableParam), s->samplerGpu);
+            }
         }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
@@ -658,7 +729,7 @@ namespace vri::d3d12
             CB(cmd)->list->DrawIndexedInstanced(d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
         }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
-        void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}
+        void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d) { CB(cmd)->list->Dispatch(d->x, d->y, d->z); }
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
