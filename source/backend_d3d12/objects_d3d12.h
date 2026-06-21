@@ -9,6 +9,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include <vri/vri.h>
@@ -47,16 +48,31 @@ namespace vri::d3d12
     };
 
     // A view/sampler. RTV/DSV live in CPU-only heaps; SRV/CBV/UAV in a shader-visible
-    // heap (later). Phase 1 only needs the render-target view (RTV).
+    // heap (later). Phase 1 needs RTV; phase 3a adds the constant-buffer view (bound as a
+    // root CBV by GPU address, so no descriptor heap slot).
     struct DescriptorD3D12
     {
         enum class Kind { TextureRtv, TextureSrv, BufferView, Sampler } kind = Kind::TextureRtv;
         DeviceD3D12*                device = nullptr;
         const TextureD3D12*         texture = nullptr;
         const BufferD3D12*          buffer = nullptr;
+        uint64_t                    bufferOffset = 0;
+        uint64_t                    bufferSize = 0;
         D3D12_CPU_DESCRIPTOR_HANDLE cpu = {}; // for RTV/DSV
         uint32_t                    mip = 0;
     };
+
+    // Flattened pipeline-layout binding: a VRI (set, binding) of a given type mapped to
+    // its D3D12 root-parameter slot. Phase 3a maps constant buffers to root CBVs.
+    struct LayoutBindingD3D12
+    {
+        uint32_t          set = 0;
+        uint32_t          binding = 0;
+        VriDescriptorType type = VriDescriptorType_ConstantBuffer;
+        uint32_t          rootParam = 0;
+    };
+
+    struct DescriptorPoolD3D12 { DeviceD3D12* device = nullptr; };
 
     struct CommandAllocatorD3D12
     {
@@ -85,8 +101,26 @@ namespace vri::d3d12
 
     struct PipelineLayoutD3D12
     {
-        DeviceD3D12*                  device = nullptr;
-        ComPtr<ID3D12RootSignature>   rootSig;
+        DeviceD3D12*                    device = nullptr;
+        ComPtr<ID3D12RootSignature>     rootSig;
+        std::vector<LayoutBindingD3D12> bindings;
+
+        const LayoutBindingD3D12* Find(uint32_t set, uint32_t binding) const
+        {
+            for (const LayoutBindingD3D12& b : bindings)
+                if (b.set == set && b.binding == binding) return &b;
+            return nullptr;
+        }
+    };
+
+    // CPU-side descriptor set: records which view sits at each binding (like the GL
+    // backend). At CmdSetDescriptorSet the recorded views are bound as root arguments.
+    struct DescriptorSetD3D12
+    {
+        DeviceD3D12*                                          device = nullptr;
+        const PipelineLayoutD3D12*                            layout = nullptr;
+        uint32_t                                              setIndex = 0;
+        std::unordered_map<uint32_t, const DescriptorD3D12*>  bound; // binding -> view
     };
 
     struct PipelineGraphicsVB { uint32_t stride; uint32_t slot; }; // per-stream stride for IASetVertexBuffers
@@ -103,6 +137,8 @@ namespace vri::d3d12
 
     inline VriPipelineLayout* ToHandle(PipelineLayoutD3D12* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
     inline VriPipeline*       ToHandle(PipelineD3D12* p)       { return reinterpret_cast<VriPipeline*>(p); }
+    inline VriDescriptorPool* ToHandle(DescriptorPoolD3D12* p) { return reinterpret_cast<VriDescriptorPool*>(p); }
+    inline VriDescriptorSet*  ToHandle(DescriptorSetD3D12* s)  { return reinterpret_cast<VriDescriptorSet*>(s); }
 
     inline VriQueue*            ToHandle(QueueD3D12* q)            { return reinterpret_cast<VriQueue*>(q); }
     inline VriBuffer*           ToHandle(BufferD3D12* b)           { return reinterpret_cast<VriBuffer*>(b); }

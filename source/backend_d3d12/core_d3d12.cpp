@@ -31,7 +31,10 @@ namespace vri::d3d12
         CommandBufferD3D12* CB(VriCommandBuffer* c) { return reinterpret_cast<CommandBufferD3D12*>(c); }
         FenceD3D12*         Fen(VriFence* f) { return reinterpret_cast<FenceD3D12*>(f); }
         PipelineLayoutD3D12* PL(VriPipelineLayout* p) { return reinterpret_cast<PipelineLayoutD3D12*>(p); }
+        const PipelineLayoutD3D12* PL(const VriPipelineLayout* p) { return reinterpret_cast<const PipelineLayoutD3D12*>(p); }
         PipelineD3D12*      Pipe(VriPipeline* p) { return reinterpret_cast<PipelineD3D12*>(p); }
+        DescriptorPoolD3D12* DPool(VriDescriptorPool* p) { return reinterpret_cast<DescriptorPoolD3D12*>(p); }
+        DescriptorSetD3D12* DSet(VriDescriptorSet* s) { return reinterpret_cast<DescriptorSetD3D12*>(s); }
 
         D3D12_RESOURCE_STATES ToState(VriLayout layout)
         {
@@ -149,7 +152,18 @@ namespace vri::d3d12
             *out = ToHandle(v);
             return VriResult_Success;
         }
-        VriResult VRI_CALL CreateBufferView(VriDevice*, const VriBufferViewDesc*, VriDescriptor**) { return VriResult_Unsupported; }
+        VriResult VRI_CALL CreateBufferView(VriDevice* device, const VriBufferViewDesc* desc, VriDescriptor** out)
+        {
+            // Records the buffer range; bound as a root CBV (by GPU address) at draw time.
+            DescriptorD3D12* v = new DescriptorD3D12{};
+            v->kind = DescriptorD3D12::Kind::BufferView;
+            v->device = Dev(device);
+            v->buffer = reinterpret_cast<const BufferD3D12*>(desc->buffer);
+            v->bufferOffset = desc->offset;
+            v->bufferSize = desc->size;
+            *out = ToHandle(v);
+            return VriResult_Success;
+        }
         VriResult VRI_CALL CreateSampler(VriDevice*, const VriSamplerDesc*, VriDescriptor**) { return VriResult_Unsupported; }
         void VRI_CALL DestroyDescriptor(VriDescriptor* descriptor) { if (descriptor) delete Desc(descriptor); }
 
@@ -293,18 +307,39 @@ namespace vri::d3d12
         void      VRI_CALL FreeMemory(VriMemory*) {}
         VriResult VRI_CALL BindBufferMemory(VriDevice*, VriBuffer*, VriMemory*, uint64_t) { return VriResult_Unsupported; }
         VriResult VRI_CALL BindTextureMemory(VriDevice*, VriTexture*, VriMemory*, uint64_t) { return VriResult_Unsupported; }
-        VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc*, VriPipelineLayout** out)
+        VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc* desc, VriPipelineLayout** out)
         {
             DeviceD3D12* d = Dev(device);
-            // Phase 2: an empty root signature (no descriptor tables yet) that still
-            // allows an input-assembler input layout. Descriptor-set support extends this.
+            PipelineLayoutD3D12* l = new PipelineLayoutD3D12{};
+            l->device = d;
+            // Phase 3a: each constant buffer becomes a ROOT CBV (bound by GPU address - no
+            // descriptor heap). register = VRI binding, space = VRI set. Textures/samplers/
+            // storage need descriptor tables (Phase 3b); ignored here so the IA flag + any
+            // CBVs still produce a valid root signature.
+            std::vector<D3D12_ROOT_PARAMETER> params;
+            for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
+            {
+                const VriDescriptorSetDesc& sd = desc->descriptorSets[s];
+                for (uint32_t r = 0; r < sd.rangeNum; ++r)
+                {
+                    const VriDescriptorRangeDesc& rd = sd.ranges[r];
+                    if (rd.descriptorType != VriDescriptorType_ConstantBuffer) continue;
+                    D3D12_ROOT_PARAMETER p = {};
+                    p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+                    p.Descriptor.ShaderRegister = rd.baseRegister;
+                    p.Descriptor.RegisterSpace = sd.registerSpace;
+                    p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+                    l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, static_cast<uint32_t>(params.size())});
+                    params.push_back(p);
+                }
+            }
             D3D12_ROOT_SIGNATURE_DESC rs = {};
+            rs.NumParameters = static_cast<UINT>(params.size());
+            rs.pParameters = params.empty() ? nullptr : params.data();
             rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
             ComPtr<ID3DBlob> blob, err;
             if (FAILED(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err)))
-            { d->ReportError("D3D12SerializeRootSignature failed"); return VriResult_Failure; }
-            PipelineLayoutD3D12* l = new PipelineLayoutD3D12{};
-            l->device = d;
+            { delete l; d->ReportError("D3D12SerializeRootSignature failed"); return VriResult_Failure; }
             if (FAILED(d->Device()->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&l->rootSig))))
             { delete l; d->ReportError("CreateRootSignature failed"); return VriResult_Failure; }
             *out = ToHandle(l);
@@ -410,11 +445,38 @@ namespace vri::d3d12
         }
         VriResult VRI_CALL CreateComputePipeline(VriDevice*, const VriComputePipelineDesc*, VriPipeline**) { return VriResult_Unsupported; }
         void VRI_CALL DestroyPipeline(VriPipeline* pipeline) { if (pipeline) delete Pipe(pipeline); }
-        VriResult VRI_CALL CreateDescriptorPool(VriDevice*, const VriDescriptorPoolDesc*, VriDescriptorPool**) { return VriResult_Unsupported; }
-        void      VRI_CALL ResetDescriptorPool(VriDescriptorPool*) {}
-        void      VRI_CALL DestroyDescriptorPool(VriDescriptorPool*) {}
-        VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*, const VriPipelineLayout*, uint32_t, VriDescriptorSet**, uint32_t) { return VriResult_Unsupported; }
-        void      VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*, uint32_t, uint32_t, const VriDescriptorRangeUpdateDesc*) {}
+        VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPoolDesc*, VriDescriptorPool** out)
+        {
+            *out = ToHandle(new DescriptorPoolD3D12{Dev(device)}); // CPU-side bookkeeping (root CBVs need no heap)
+            return VriResult_Success;
+        }
+        void VRI_CALL ResetDescriptorPool(VriDescriptorPool*) {}
+        void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool) { if (pool) delete DPool(pool); }
+        VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool* pool, const VriPipelineLayout* layout, uint32_t setIndex, VriDescriptorSet** outSets, uint32_t setNum)
+        {
+            DescriptorPoolD3D12* p = DPool(pool);
+            const PipelineLayoutD3D12* l = PL(layout);
+            for (uint32_t i = 0; i < setNum; ++i)
+            {
+                DescriptorSetD3D12* s = new DescriptorSetD3D12{};
+                s->device = p->device; s->layout = l; s->setIndex = setIndex;
+                outSets[i] = ToHandle(s);
+            }
+            return VriResult_Success;
+        }
+        void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet* set, uint32_t baseRange, uint32_t rangeNum, const VriDescriptorRangeUpdateDesc* updates)
+        {
+            DescriptorSetD3D12* s = DSet(set);
+            std::vector<const LayoutBindingD3D12*> setBindings; // this set's bindings in declaration order
+            for (const LayoutBindingD3D12& b : s->layout->bindings)
+                if (b.set == s->setIndex) setBindings.push_back(&b);
+            for (uint32_t r = 0; r < rangeNum; ++r)
+            {
+                const uint32_t idx = baseRange + r;
+                if (idx >= setBindings.size() || updates[r].descriptorNum == 0) continue;
+                s->bound[setBindings[idx]->binding] = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]);
+            }
+        }
         void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->list->SetGraphicsRootSignature(PL(layout)->rootSig.Get()); }
         void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
         {
@@ -425,7 +487,21 @@ namespace vri::d3d12
             c->list->SetPipelineState(p->pso.Get());
             c->list->IASetPrimitiveTopology(p->topology);
         }
-        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer*, uint32_t, const VriDescriptorSet*) {}
+        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            const DescriptorSetD3D12* s = reinterpret_cast<const DescriptorSetD3D12*>(set);
+            if (!s || !s->layout) return;
+            // Bind each recorded constant buffer as a root CBV at its mapped root slot.
+            for (const LayoutBindingD3D12& b : s->layout->bindings)
+            {
+                if (b.set != setIndex || b.type != VriDescriptorType_ConstantBuffer) continue;
+                auto it = s->bound.find(b.binding);
+                if (it == s->bound.end() || !it->second || !it->second->buffer) continue;
+                const DescriptorD3D12* v = it->second;
+                c->list->SetGraphicsRootConstantBufferView(b.rootParam, v->buffer->resource->GetGPUVirtualAddress() + v->bufferOffset);
+            }
+        }
         void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
         {
@@ -465,7 +541,14 @@ namespace vri::d3d12
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc*) {}
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
-        void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer*, VriBuffer*, const VriBufferCopyDesc*) {}
+        void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
+        {
+            // Buffers implicitly promote from COMMON to COPY_DEST/COPY_SOURCE on a direct
+            // queue and decay back, so no explicit transition barriers are needed here.
+            BufferD3D12* s = Buf(src);
+            BufferD3D12* d = Buf(dst);
+            CB(cmd)->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
+        }
         void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture*, VriTexture*, const VriTextureCopyDesc*) {}
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*, VriTexture*, VriBuffer*, const VriBufferTextureCopyDesc*) {}
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
