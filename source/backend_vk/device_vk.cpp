@@ -3,6 +3,7 @@
 #include "swapchain_vk.h"
 #include "interop_vk.h"
 #include "vrs_vk.h"
+#include "meshshader_vk.h"
 
 #include <cstdio>
 #include <cstring>
@@ -488,6 +489,13 @@ namespace vri::vk
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_ext.CmdSetFragmentShadingRate = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
                 vkGetDeviceProcAddr(m_device, "vkCmdSetFragmentShadingRateKHR"));
+        if (m_enabledFeatures & VriFeature_MeshShader)
+        {
+            m_ext.CmdDrawMeshTasks = reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(
+                vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksEXT"));
+            m_ext.CmdDrawMeshTasksIndirect = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(
+                vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksIndirectEXT"));
+        }
     }
 
     void DeviceVK::FillRegistry()
@@ -499,6 +507,8 @@ namespace vri::vk
         // so vriGetInterface returns Unsupported on adapters/runs that lack it.
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceVK(), sizeof(VriShadingRateInterface));
+        if (m_enabledFeatures & VriFeature_MeshShader)
+            m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceVK(), sizeof(VriMeshShaderInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

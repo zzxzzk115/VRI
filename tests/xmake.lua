@@ -36,6 +36,7 @@ target("vri-tests")
         add_files("test_core_phase2_vk.cpp")
         add_files("test_features_vk.cpp")
         add_files("test_vrs_vk.cpp")          -- variable rate shading (VK_KHR_fragment_shading_rate)
+        add_files("test_meshshader_vk.cpp")   -- mesh shaders (VK_EXT_mesh_shader)
     end
     if has_config("vri_backend_wgpu") then
         add_files("test_device_wgpu.cpp")

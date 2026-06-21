@@ -34,7 +34,9 @@ namespace vri::vk
         // whatever feature set was granted). Zero-initialized; null == unavailable.
         struct ExtFunctions
         {
-            PFN_vkCmdSetFragmentShadingRateKHR CmdSetFragmentShadingRate = nullptr;
+            PFN_vkCmdSetFragmentShadingRateKHR  CmdSetFragmentShadingRate = nullptr;
+            PFN_vkCmdDrawMeshTasksEXT           CmdDrawMeshTasks = nullptr;
+            PFN_vkCmdDrawMeshTasksIndirectEXT   CmdDrawMeshTasksIndirect = nullptr;
         };
         const ExtFunctions& Ext() const { return m_ext; }
         uint64_t EnabledFeatures() const { return m_enabledFeatures; }

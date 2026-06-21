@@ -584,9 +584,12 @@ namespace vri::vk
             std::vector<VkShaderModule> modules;
             stages.reserve(desc->shaderNum);
             modules.reserve(desc->shaderNum);
+            bool hasMeshStage = false;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
+                if (s.stage == VriShaderStage_Mesh || s.stage == VriShaderStage_Task)
+                    hasMeshStage = true;
                 VkShaderModule m = MakeShaderModule(dev, s);
                 modules.push_back(m);
                 VkPipelineShaderStageCreateInfo si = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
@@ -594,6 +597,18 @@ namespace vri::vk
                 si.module = m;
                 si.pName = s.entryPointName ? s.entryPointName : "main";
                 stages.push_back(si);
+            }
+            // A failed shader module (e.g. invalid SPIR-V rejected by spirv-val) must
+            // fail the pipeline explicitly, not yield a broken pipeline that faults later.
+            for (VkShaderModule m : modules)
+            {
+                if (m == VK_NULL_HANDLE)
+                {
+                    for (VkShaderModule mm : modules)
+                        if (mm) vkDestroyShaderModule(dev, mm, nullptr);
+                    d->ReportError("CreateGraphicsPipeline: shader module creation failed");
+                    return VriResult_Failure;
+                }
             }
 
             // vertex input
@@ -718,8 +733,10 @@ namespace vri::vk
             ci.pNext = &rendering;
             ci.stageCount = static_cast<uint32_t>(stages.size());
             ci.pStages = stages.data();
-            ci.pVertexInputState = &vi;
-            ci.pInputAssemblyState = &ia;
+            // Mesh pipelines have no vertex-input/IA stage; the spec says they're
+            // ignored but drivers may still dereference them, so pass null.
+            ci.pVertexInputState = hasMeshStage ? nullptr : &vi;
+            ci.pInputAssemblyState = hasMeshStage ? nullptr : &ia;
             ci.pTessellationState = &tess;
             ci.pViewportState = &vp;
             ci.pRasterizationState = &raster;

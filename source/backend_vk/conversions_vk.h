@@ -204,6 +204,8 @@ namespace vri::vk
             case VriShaderStage_Geometry:     return VK_SHADER_STAGE_GEOMETRY_BIT;
             case VriShaderStage_Fragment:     return VK_SHADER_STAGE_FRAGMENT_BIT;
             case VriShaderStage_Compute:      return VK_SHADER_STAGE_COMPUTE_BIT;
+            case VriShaderStage_Mesh:         return VK_SHADER_STAGE_MESH_BIT_EXT;
+            case VriShaderStage_Task:         return VK_SHADER_STAGE_TASK_BIT_EXT;
             default:                          return VK_SHADER_STAGE_ALL;
         }
     }
@@ -274,6 +276,8 @@ namespace vri::vk
         if (s & VriShaderStage_Geometry)    r |= VK_SHADER_STAGE_GEOMETRY_BIT;
         if (s & VriShaderStage_Fragment)    r |= VK_SHADER_STAGE_FRAGMENT_BIT;
         if (s & VriShaderStage_Compute)     r |= VK_SHADER_STAGE_COMPUTE_BIT;
+        if (s & VriShaderStage_Mesh)        r |= VK_SHADER_STAGE_MESH_BIT_EXT;
+        if (s & VriShaderStage_Task)        r |= VK_SHADER_STAGE_TASK_BIT_EXT;
         if (r == 0) r = VK_SHADER_STAGE_ALL;
         return r;
     }

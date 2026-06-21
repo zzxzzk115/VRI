@@ -51,6 +51,8 @@ namespace vri::core
             VriCoreInterface     table;    // the validating table handed to the app
             VriSwapChainInterface swap;    // the backend's real swapchain table (if supported)
             bool                 hasSwap = false;
+            VriShadingRateInterface vrs;   // the backend's real VRS table (if supported)
+            VriMeshShaderInterface  mesh;  // the backend's real mesh-shader table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>   queues;
             std::vector<CmdBufVal*>  cmds;
@@ -299,6 +301,29 @@ namespace vri::core
         }
         VriResult VRI_CALL Resize(VriSwapChain* sc, uint32_t w, uint32_t h) { return SV(sc)->dev->swap.Resize(SV(sc)->real, w, h); }
 
+        // ---- extension interfaces taking a wrapped command buffer ----------
+        // These forward to the backend's real table after unwrapping cmd->real.
+        // (Buffers/textures/pipelines are not wrapped by validation, so they pass
+        // through untouched.)
+        void VRI_CALL CmdSetShadingRate(VriCommandBuffer* cmd, const VriShadingRateDesc* desc)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdSetShadingRate")) return;
+            c->dev->vrs.CmdSetShadingRate(c->real, desc);
+        }
+        void VRI_CALL CmdDrawMeshTasks(VriCommandBuffer* cmd, uint32_t x, uint32_t y, uint32_t z)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdDrawMeshTasks")) return;
+            c->dev->mesh.CmdDrawMeshTasks(c->real, x, y, z);
+        }
+        void VRI_CALL CmdDrawMeshTasksIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdDrawMeshTasksIndirect")) return;
+            c->dev->mesh.CmdDrawMeshTasksIndirect(c->real, buffer, offset, drawNum, stride);
+        }
+
         void BuildTable(DeviceVal* d)
         {
             VriCoreInterface t = d->core; // start from the real table (resource plane passes through)
@@ -381,6 +406,24 @@ namespace vri::core
                 CreateSwapChain, DestroySwapChain, GetSwapChainTextures, AcquireNextTexture, Present, Resize,
             };
             *static_cast<VriSwapChainInterface*>(out) = wrapped;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_VRS))
+        {
+            if (size != sizeof(VriShadingRateInterface)) return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(VRI_INTERFACE_VRS, sizeof(d->vrs), &d->vrs);
+            if (r != VriResult_Success) return r;
+            static const VriShadingRateInterface wrapped = { CmdSetShadingRate };
+            *static_cast<VriShadingRateInterface*>(out) = wrapped;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_MESHSHADER))
+        {
+            if (size != sizeof(VriMeshShaderInterface)) return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(VRI_INTERFACE_MESHSHADER, sizeof(d->mesh), &d->mesh);
+            if (r != VriResult_Success) return r;
+            static const VriMeshShaderInterface wrapped = { CmdDrawMeshTasks, CmdDrawMeshTasksIndirect };
+            *static_cast<VriMeshShaderInterface*>(out) = wrapped;
             return VriResult_Success;
         }
         return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);
