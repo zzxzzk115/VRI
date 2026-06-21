@@ -60,6 +60,8 @@ typedef struct VriDeviceDesc
     VriBool        hasRayTracing;
     VriBool        hasMeshShader;
     VriBool        hasBindless;
+    VriBool        hasVariableShadingRate;
+    VriBool        hasOpacityMicromap;
 } VriDeviceDesc;
 
 VRI_EXTERN_C_END

@@ -30,6 +30,15 @@ namespace vri::vk
         QueueVK* GetQueue(VriQueueType type) { return &m_queues[type]; }
         const VkAllocationCallbacks* VkAllocCallbacks() const { return nullptr; }
 
+        // Loaded extension entry points (populated by LoadExtensionFunctions for
+        // whatever feature set was granted). Zero-initialized; null == unavailable.
+        struct ExtFunctions
+        {
+            PFN_vkCmdSetFragmentShadingRateKHR CmdSetFragmentShadingRate = nullptr;
+        };
+        const ExtFunctions& Ext() const { return m_ext; }
+        uint64_t EnabledFeatures() const { return m_enabledFeatures; }
+
         void ReportError(const char* message) const;
 
     private:
@@ -37,6 +46,7 @@ namespace vri::vk
         VriResult PickPhysicalDevice(uint32_t adapterIndex);
         VriResult CreateLogicalDevice(const VriDeviceCreationDesc& desc);
         VriResult CreateAllocator();
+        void      LoadExtensionFunctions();
         void      FillDeviceDesc();
         void      FillRegistry();
 
@@ -50,6 +60,7 @@ namespace vri::vk
         uint32_t m_queueFamilies[VriQueueType_Count] = {};
         bool     m_validation = false;
         uint64_t m_enabledFeatures = 0; // granted VriFeatureBits
+        ExtFunctions m_ext = {};
 
         VriDeviceDesc        m_desc = {};
         VriCallbackInterface m_callback = {};

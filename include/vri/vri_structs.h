@@ -70,7 +70,9 @@ typedef enum VriFeatureBits
     VriFeature_RayTracing   = 1ull << 0,
     VriFeature_MeshShader   = 1ull << 1,
     VriFeature_LowLatency   = 1ull << 2,
-    VriFeature_Bindless     = 1ull << 3
+    VriFeature_Bindless     = 1ull << 3,
+    VriFeature_VariableShadingRate = 1ull << 4,
+    VriFeature_OpacityMicromap     = 1ull << 5
 } VriFeatureBits;
 
 VRI_EXTERN_C_END

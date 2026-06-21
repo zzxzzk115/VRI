@@ -29,5 +29,6 @@
 #include "ext/vri_ext_interop.h"
 #include "ext/vri_ext_raytracing.h"
 #include "ext/vri_ext_meshshader.h"
+#include "ext/vri_ext_vrs.h"
 
 #endif /* VRI_H */

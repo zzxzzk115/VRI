@@ -2,6 +2,7 @@
 #include "core_vk.h"
 #include "swapchain_vk.h"
 #include "interop_vk.h"
+#include "vrs_vk.h"
 
 #include <cstdio>
 #include <cstring>
@@ -97,6 +98,7 @@ namespace vri::vk
         if (r != VriResult_Success)
             return r;
 
+        LoadExtensionFunctions();
         FillDeviceDesc();
         FillRegistry();
         return VriResult_Success;
@@ -243,6 +245,7 @@ namespace vri::vk
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         VkPhysicalDeviceMeshShaderFeaturesEXT meshSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+        VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
         VkPhysicalDeviceVulkan12Features v12Sup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
@@ -251,6 +254,7 @@ namespace vri::vk
             if (hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) { *q = &asSup; q = &asSup.pNext; }
             if (hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME))   { *q = &rtSup; q = &rtSup.pNext; }
             if (hasExt(VK_EXT_MESH_SHADER_EXTENSION_NAME))            { *q = &meshSup; q = &meshSup.pNext; }
+            if (hasExt(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME))  { *q = &vrsSup; q = &vrsSup.pNext; }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
             baseSup = sup.features;
@@ -288,6 +292,7 @@ namespace vri::vk
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
         VkPhysicalDeviceMeshShaderFeaturesEXT meshEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+        VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
 
         void** chainTail = &f13.pNext; // append optional feature structs here
         const uint64_t requested = desc.enabledFeatures;
@@ -352,6 +357,25 @@ namespace vri::vk
             else if (unsupported("mesh shader not supported"))
                 return VriResult_Unsupported;
         }
+
+        if (requested & VriFeature_VariableShadingRate)
+        {
+            const bool ok = hasExt(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) && vrsSup.pipelineFragmentShadingRate;
+            if (ok)
+            {
+                extensions.push_back(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+                vrsEn.pipelineFragmentShadingRate = VK_TRUE;
+                vrsEn.primitiveFragmentShadingRate = vrsSup.primitiveFragmentShadingRate;
+                vrsEn.attachmentFragmentShadingRate = vrsSup.attachmentFragmentShadingRate;
+                *chainTail = &vrsEn; chainTail = &vrsEn.pNext;
+                granted |= VriFeature_VariableShadingRate;
+            }
+            else if (unsupported("variable rate shading not supported"))
+                return VriResult_Unsupported;
+        }
+
+        if ((requested & VriFeature_OpacityMicromap) && unsupported("opacity micromap not implemented"))
+            return VriResult_Unsupported;
 
         if ((requested & VriFeature_LowLatency) && unsupported("low-latency not implemented"))
             return VriResult_Unsupported;
@@ -454,6 +478,16 @@ namespace vri::vk
         m_desc.hasRayTracing = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasMeshShader = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasBindless = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
+    }
+
+    // Resolve extension entry points for the feature set granted at creation.
+    void DeviceVK::LoadExtensionFunctions()
+    {
+        if (m_enabledFeatures & VriFeature_VariableShadingRate)
+            m_ext.CmdSetFragmentShadingRate = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
+                vkGetDeviceProcAddr(m_device, "vkCmdSetFragmentShadingRateKHR"));
     }
 
     void DeviceVK::FillRegistry()
@@ -461,6 +495,10 @@ namespace vri::vk
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceVK(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceVK(), sizeof(VriSwapChainInterface));
         m_registry.Register(VRI_INTERFACE_INTEROP, GetInteropInterfaceVK(), sizeof(VriInteropInterface));
+        // Optional interfaces: registered only when the backing feature was granted,
+        // so vriGetInterface returns Unsupported on adapters/runs that lack it.
+        if (m_enabledFeatures & VriFeature_VariableShadingRate)
+            m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceVK(), sizeof(VriShadingRateInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)
