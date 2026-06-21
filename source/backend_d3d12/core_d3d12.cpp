@@ -159,6 +159,7 @@ namespace vri::d3d12
             t->width = desc->width; t->height = desc->height ? desc->height : 1; t->depth = 1;
             t->mipNum = rd.MipLevels; t->layerNum = rd.DepthOrArraySize; t->state = D3D12_RESOURCE_STATE_COMMON;
             t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
+            t->isDepthStencil = (desc->usage & VriTextureUsage_DepthStencilAttachment) != 0;
             *out = ToHandle(t);
             return VriResult_Success;
         }
@@ -174,7 +175,16 @@ namespace vri::d3d12
             // SRV source (sampling - the SRV is created into a descriptor set's heap slot at
             // UpdateDescriptorRanges). Pre-create the RTV only for RT-capable textures.
             v->kind = DescriptorD3D12::Kind::TextureRtv;
-            if (v->texture->isRenderTarget)
+            if (v->texture->isDepthStencil) // depth-stencil view (used as the depth attachment)
+            {
+                v->cpu = d->AllocDsv();
+                D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
+                dsv.Format = v->texture->format;
+                dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+                dsv.Texture2D.MipSlice = desc->baseMip;
+                d->Device()->CreateDepthStencilView(v->texture->resource.Get(), &dsv, v->cpu);
+            }
+            else if (v->texture->isRenderTarget)
             {
                 v->cpu = d->AllocRtv();
                 D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
@@ -271,10 +281,20 @@ namespace vri::d3d12
                 Transition(c, t, D3D12_RESOURCE_STATE_RENDER_TARGET); // defensive (usually already RT)
                 c->rtvs[i] = v->cpu;
             }
-            c->list->OMSetRenderTargets(static_cast<UINT>(c->rtvCount), c->rtvCount ? c->rtvs : nullptr, FALSE, nullptr);
+            D3D12_CPU_DESCRIPTOR_HANDLE dsv = {};
+            const bool hasDepth = a->depth && a->depth->view;
+            if (hasDepth)
+            {
+                const DescriptorD3D12* dv = Desc(a->depth->view);
+                Transition(c, const_cast<TextureD3D12*>(dv->texture), D3D12_RESOURCE_STATE_DEPTH_WRITE);
+                dsv = dv->cpu;
+            }
+            c->list->OMSetRenderTargets(static_cast<UINT>(c->rtvCount), c->rtvCount ? c->rtvs : nullptr, FALSE, hasDepth ? &dsv : nullptr);
             for (uint32_t i = 0; i < c->rtvCount; ++i)
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
                     c->list->ClearRenderTargetView(c->rtvs[i], a->colors[i].clearValue.color.f32, 0, nullptr);
+            if (hasDepth && a->depth->loadOp == VriAttachmentLoadOp_Clear)
+                c->list->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, a->depth->clearValue.depthStencil.depth, static_cast<UINT8>(a->depth->clearValue.depthStencil.stencil), 0, nullptr);
         }
         void VRI_CALL CmdEndRendering(VriCommandBuffer*) {}
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)

@@ -45,6 +45,7 @@ namespace vri::d3d12
         uint32_t               mipNum = 1, layerNum = 1;
         uint32_t               texelSize = 0;
         bool                   isRenderTarget = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
+        bool                   isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
         D3D12_RESOURCE_STATES  state = D3D12_RESOURCE_STATE_COMMON;
     };
 

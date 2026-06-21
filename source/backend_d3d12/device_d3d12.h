@@ -26,8 +26,9 @@ namespace vri::d3d12
         QueueD3D12*          GetQueue(VriQueueType /*type*/) { return &m_queue; }
         void                 ReportError(const char* message) const;
 
-        // Bump-allocate one CPU render-target-view descriptor (non-shader-visible heap).
+        // Bump-allocate one CPU render-target-view / depth-stencil-view descriptor.
         D3D12_CPU_DESCRIPTOR_HANDLE AllocRtv();
+        D3D12_CPU_DESCRIPTOR_HANDLE AllocDsv();
 
     private:
         void      FillDeviceDesc(IDXGIAdapter1* adapter);
@@ -37,9 +38,13 @@ namespace vri::d3d12
         ComPtr<IDXGIFactory4>        m_factory;
         ComPtr<ID3D12Device>         m_device;
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;       // CPU-only RTV heap
+        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;       // CPU-only DSV heap
         uint32_t                     m_rtvSize = 0;    // descriptor increment
         uint32_t                     m_rtvNext = 0;    // bump cursor
+        uint32_t                     m_dsvSize = 0;
+        uint32_t                     m_dsvNext = 0;
         static constexpr uint32_t    kRtvHeapSize = 256;
+        static constexpr uint32_t    kDsvHeapSize = 64;
         QueueD3D12            m_queue = {};
         VriDeviceDesc         m_desc = {};
         VriCallbackInterface  m_callback = {};

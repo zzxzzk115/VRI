@@ -50,6 +50,7 @@ target("vri-tests")
         add_files("test_vertex_d3d12.cpp")
         add_files("test_ubo_d3d12.cpp")
         add_files("test_texture_d3d12.cpp")
+        add_files("test_depth_d3d12.cpp")
     end
 
     add_tests("default")

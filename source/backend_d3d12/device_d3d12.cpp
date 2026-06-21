@@ -91,6 +91,17 @@ namespace vri::d3d12
             return VriResult_Failure;
         }
         m_rtvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+        D3D12_DESCRIPTOR_HEAP_DESC dsv = {};
+        dsv.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        dsv.NumDescriptors = kDsvHeapSize;
+        dsv.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        if (FAILED(m_device->CreateDescriptorHeap(&dsv, IID_PPV_ARGS(&m_dsvHeap))))
+        {
+            ReportError("CreateDescriptorHeap (DSV) failed");
+            return VriResult_Failure;
+        }
+        m_dsvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
         return VriResult_Success;
     }
 
@@ -99,6 +110,14 @@ namespace vri::d3d12
         D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
         h.ptr += static_cast<SIZE_T>(m_rtvNext % kRtvHeapSize) * m_rtvSize; // ring (Phase 1: few RTVs)
         ++m_rtvNext;
+        return h;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocDsv()
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE h = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+        h.ptr += static_cast<SIZE_T>(m_dsvNext % kDsvHeapSize) * m_dsvSize;
+        ++m_dsvNext;
         return h;
     }
 
