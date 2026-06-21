@@ -73,3 +73,19 @@ inline Mat4 RotateX(float radians)
     r.m[5]=c; r.m[6]=s; r.m[9]=-s; r.m[10]=c;
     return r;
 }
+
+// Translation.
+inline Mat4 Translate(float x, float y, float z)
+{
+    Mat4 r{};
+    r.m[12]=x; r.m[13]=y; r.m[14]=z;
+    return r;
+}
+
+// Uniform scale.
+inline Mat4 Scale(float s)
+{
+    Mat4 r{};
+    r.m[0]=s; r.m[5]=s; r.m[10]=s;
+    return r;
+}

@@ -67,7 +67,8 @@ xmake run vri-tests
 
 # windowed examples (VRI_API=vulkan|webgpu|opengl|d3d12)
 xmake run example-triangle
-xmake run example-cube      # textured, depth-tested, animated-MVP rotating cube
+xmake run example-cube        # textured, depth-tested, animated-MVP rotating cube
+xmake run example-instancing  # a field of textured cubes via per-instance matrices
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
