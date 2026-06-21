@@ -10,6 +10,19 @@ struct Mat4
     float m[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}; // identity
 };
 
+// Transpose. Needed when uploading a matrix consumed by `mul(cbMatrix, vec)` in Slang:
+// that lowers to OpVectorTimesMatrix on a column-major-packed matrix, i.e. it computes
+// Mᵀ·v for the stored data — so uploading the transpose makes it compute M·v. (Verified
+// identical on Vulkan/D3D12/OpenGL via test_cube_xbackend.)
+inline Mat4 Transpose(const Mat4& a)
+{
+    Mat4 t{};
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c)
+            t.m[c * 4 + r] = a.m[r * 4 + c];
+    return t;
+}
+
 // C = A * B (both column-major)
 inline Mat4 Mul(const Mat4& a, const Mat4& b)
 {

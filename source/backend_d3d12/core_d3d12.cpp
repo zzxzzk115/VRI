@@ -642,14 +642,19 @@ namespace vri::d3d12
             {
                 const VriVertexAttributeDesc& a = desc->vertexInput.attributes[i];
                 uint32_t slot = a.streamIndex, stride = 0;
+                bool perInstance = false;
                 if (a.streamIndex < desc->vertexInput.streamNum)
-                { slot = desc->vertexInput.streams[a.streamIndex].bindingSlot; stride = static_cast<uint32_t>(desc->vertexInput.streams[a.streamIndex].stride); }
+                {
+                    slot = desc->vertexInput.streams[a.streamIndex].bindingSlot; stride = static_cast<uint32_t>(desc->vertexInput.streams[a.streamIndex].stride);
+                    perInstance = desc->vertexInput.streams[a.streamIndex].stepRate == VriVertexStepRate_PerInstance;
+                }
                 D3D12_INPUT_ELEMENT_DESC e = {};
                 if (i < byRegister.size() && !byRegister[i].name.empty()) { e.SemanticName = byRegister[i].name.c_str(); e.SemanticIndex = byRegister[i].index; }
                 else { e.SemanticName = "TEXCOORD"; e.SemanticIndex = i; }
                 e.Format = ToDxgiVertexFormat(a.format);
                 e.InputSlot = slot; e.AlignedByteOffset = a.offset;
-                e.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+                e.InputSlotClass = perInstance ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+                e.InstanceDataStepRate = perInstance ? 1u : 0u;
                 elems.push_back(e);
                 bool have = false; for (auto& vb : vbStrides) if (vb.slot == slot) { have = true; break; }
                 if (!have) vbStrides.push_back({stride, slot});
@@ -919,7 +924,24 @@ namespace vri::d3d12
             CB(cmd)->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
         }
         void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture*, VriTexture*, const VriTextureCopyDesc*) {}
-        void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*, VriTexture*, VriBuffer*, const VriBufferTextureCopyDesc*) {}
+        void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer* cmd, VriTexture* dst, VriBuffer* src, const VriBufferTextureCopyDesc* region)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            TextureD3D12* t = Tex(dst);
+            BufferD3D12* b = Buf(src);
+            const UINT sub = region ? region->texture.mip : 0;
+            D3D12_RESOURCE_DESC rd = t->resource->GetDesc();
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = {};
+            UINT rows = 0; UINT64 rowBytes = 0, total = 0;
+            // The footprint's RowPitch is aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256);
+            // the staging buffer must supply rows at that pitch (true for widths that are a
+            // multiple of 64 for RGBA8, matching the readback path's assumption).
+            c->device->Device()->GetCopyableFootprints(&rd, sub, 1, region ? region->bufferOffset : 0, &fp, &rows, &rowBytes, &total);
+            Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST);
+            D3D12_TEXTURE_COPY_LOCATION dstLoc = {}; dstLoc.pResource = t->resource.Get(); dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dstLoc.SubresourceIndex = sub;
+            D3D12_TEXTURE_COPY_LOCATION srcLoc = {}; srcLoc.pResource = b->resource.Get(); srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; srcLoc.PlacedFootprint = fp;
+            c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+        }
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
         void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
         void VRI_CALL SetDebugName(void*, const char*) {}

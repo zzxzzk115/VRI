@@ -17,6 +17,7 @@
 
 #include "mat4.h"
 #include "ktx.h"
+#include "capture.h"
 
 #include "tests/shaders/cube_spv.h"  // g_cubeSpv  (Vulkan + OpenGL)
 #include "tests/shaders/cube_wgsl.h" // g_cubeWgsl (WebGPU)
@@ -24,7 +25,7 @@
 
 namespace
 {
-    constexpr uint32_t kWidth = 800, kHeight = 600;
+    constexpr uint32_t kWidth = 640, kHeight = 480; // width*4 is 256-aligned (D3D12 readback pitch)
     constexpr VriFormat kSwapFormat = VriFormat_BGRA8_UNORM;
     constexpr VriFormat kDepthFormat = VriFormat_D32_SFLOAT;
 
@@ -220,7 +221,14 @@ int main(int, char**)
     }
 
     const char* maxFramesEnv = std::getenv("VRI_MAX_FRAMES");
-    const uint64_t maxFrames = maxFramesEnv ? std::strtoull(maxFramesEnv, nullptr, 10) : 0;
+    uint64_t maxFrames = maxFramesEnv ? std::strtoull(maxFramesEnv, nullptr, 10) : 0;
+
+    // optional screenshot: render maxFrames (default 40 for a 3/4 view) then dump the last
+    // presented frame to a BMP via swapchain readback. Used to verify the render is correct.
+    const char* capturePath = std::getenv("VRI_CAPTURE");
+    if (capturePath && maxFrames == 0) maxFrames = 40;
+    VriBuffer* captureBuf = nullptr;
+    if (capturePath) { VriBufferDesc cb{}; cb.size = uint64_t(kWidth) * kHeight * 4; cb.usage = VriBufferUsage_TransferDst; cb.memoryLocation = VriMemoryLocation_HostReadback; c.CreateBuffer(dev, &cb, &captureBuf); }
     uint64_t frameValue = 1; // 1 used by the upload submit
     bool depthInit = false;
     bool running = true;
@@ -237,7 +245,7 @@ int main(int, char**)
         Mat4 model = Mul(RotateY(angle), RotateX(angle * 0.5f));
         Mat4 view = LookAt(eye, ctr, up);
         Mat4 proj = Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 100.0f);
-        Mat4 mvp = Mul(proj, Mul(view, model));
+        Mat4 mvp = Transpose(Mul(proj, Mul(view, model))); // transpose for Slang's mul(mvp,pos)
         std::memcpy(c.MapBuffer(ustg, 0, sizeof(Mat4)), &mvp, sizeof(Mat4)); c.UnmapBuffer(ustg);
 
         uint32_t index = 0;
@@ -276,9 +284,24 @@ int main(int, char**)
         VriDrawIndexedDesc di{}; di.indexNum = 36; di.instanceNum = 1; c.CmdDrawIndexed(cmd, &di);
         c.CmdEndRendering(cmd);
 
-        VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_ColorAttachmentWrite; toPresent.before.layout = VriLayout_ColorAttachment; toPresent.before.stages = VriPipelineStage_ColorAttachmentOutput;
-        toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
-        VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
+        const bool capturing = captureBuf && maxFrames != 0 && frameValue >= maxFrames;
+        if (capturing)
+        {
+            // backbuffer -> readback (then -> present so the frame still shows)
+            VriTextureBarrierDesc toSrc{}; toSrc.texture = backbuffer; toSrc.before.access = VriAccess_ColorAttachmentWrite; toSrc.before.layout = VriLayout_ColorAttachment; toSrc.before.stages = VriPipelineStage_ColorAttachmentOutput;
+            toSrc.after.access = VriAccess_CopySourceRead; toSrc.after.layout = VriLayout_CopySource; toSrc.after.stages = VriPipelineStage_Transfer; toSrc.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc gs{}; gs.textures = &toSrc; gs.textureNum = 1; c.CmdBarrier(cmd, &gs);
+            VriBufferTextureCopyDesc rc{}; rc.texture.aspect = VriImageAspect_Color; rc.texture.layerNum = 1; c.CmdReadbackTextureToBuffer(cmd, captureBuf, backbuffer, &rc);
+            VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_CopySourceRead; toPresent.before.layout = VriLayout_CopySource; toPresent.before.stages = VriPipelineStage_Transfer;
+            toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
+        }
+        else
+        {
+            VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_ColorAttachmentWrite; toPresent.before.layout = VriLayout_ColorAttachment; toPresent.before.stages = VriPipelineStage_ColorAttachmentOutput;
+            toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
+        }
         c.EndCommandBuffer(cmd);
 
         VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = ++frameValue; sig.stages = VriPipelineStage_AllCommands;
@@ -288,6 +311,12 @@ int main(int, char**)
         swap.Present(swapchain, nullptr, 0);
         c.DestroyDescriptor(bbView);
 
+        if (capturing)
+        {
+            const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(captureBuf, 0, uint64_t(kWidth) * kHeight * 4));
+            if (WriteBmpBGRA(capturePath, px, kWidth, kHeight)) std::printf("[cube] %s: wrote %s\n", apiName, capturePath);
+            c.UnmapBuffer(captureBuf);
+        }
         if (maxFrames != 0 && frameValue - 1 >= maxFrames) running = false;
     }
 
@@ -298,6 +327,7 @@ int main(int, char**)
     c.DestroyDescriptor(uboView); c.DestroyBuffer(ustg); c.DestroyBuffer(ubo);
     c.DestroyBuffer(istg); c.DestroyBuffer(vstg); c.DestroyBuffer(ibuf); c.DestroyBuffer(vbuf);
     c.DestroyDescriptor(depthView); c.DestroyTexture(depth);
+    if (captureBuf) c.DestroyBuffer(captureBuf);
     swap.DestroySwapChain(swapchain);
     vriDestroyDevice(dev);
     SDL_DestroyWindow(window); SDL_Quit();

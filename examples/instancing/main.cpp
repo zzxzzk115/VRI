@@ -18,6 +18,7 @@
 
 #include "../cube/mat4.h"
 #include "../cube/ktx.h"
+#include "../cube/capture.h"
 
 #include "tests/shaders/cube_inst_spv.h"  // g_cube_instSpv
 #include "tests/shaders/cube_inst_wgsl.h" // g_cube_instWgsl
@@ -25,7 +26,7 @@
 
 namespace
 {
-    constexpr uint32_t kWidth = 800, kHeight = 600;
+    constexpr uint32_t kWidth = 640, kHeight = 480; // width*4 is 256-aligned (D3D12 readback pitch)
     constexpr VriFormat kSwapFormat = VriFormat_BGRA8_UNORM;
     constexpr VriFormat kDepthFormat = VriFormat_D32_SFLOAT;
     constexpr int kGrid = 4; // kGrid^3 cubes
@@ -233,7 +234,13 @@ int main(int, char**)
     }
 
     const char* maxFramesEnv = std::getenv("VRI_MAX_FRAMES");
-    const uint64_t maxFrames = maxFramesEnv ? std::strtoull(maxFramesEnv, nullptr, 10) : 0;
+    uint64_t maxFrames = maxFramesEnv ? std::strtoull(maxFramesEnv, nullptr, 10) : 0;
+
+    // optional screenshot of the last presented frame (swapchain readback) for verification
+    const char* capturePath = std::getenv("VRI_CAPTURE");
+    if (capturePath && maxFrames == 0) maxFrames = 60;
+    VriBuffer* captureBuf = nullptr;
+    if (capturePath) { VriBufferDesc cb{}; cb.size = uint64_t(kWidth) * kHeight * 4; cb.usage = VriBufferUsage_TransferDst; cb.memoryLocation = VriMemoryLocation_HostReadback; c.CreateBuffer(dev, &cb, &captureBuf); }
     uint64_t frameValue = 1;
     bool depthInit = false, running = true;
     float t = 0.0f;
@@ -247,7 +254,8 @@ int main(int, char**)
         t += 0.01f;
         const float r = kGrid * spacing + 6.0f;
         const float eye[3] = {std::cos(t) * r, 4.0f, std::sin(t) * r}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
-        Mat4 viewProj = Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 200.0f), LookAt(eye, ctr, up));
+        // transpose for Slang's mul(viewProj, world); the per-instance columns stay column-major
+        Mat4 viewProj = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 200.0f), LookAt(eye, ctr, up)));
         std::memcpy(c.MapBuffer(ustg, 0, sizeof(Mat4)), &viewProj, sizeof(Mat4)); c.UnmapBuffer(ustg);
 
         uint32_t index = 0;
@@ -287,9 +295,23 @@ int main(int, char**)
         VriDrawIndexedDesc di{}; di.indexNum = 36; di.instanceNum = instanceNum; c.CmdDrawIndexed(cmd, &di);
         c.CmdEndRendering(cmd);
 
-        VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_ColorAttachmentWrite; toPresent.before.layout = VriLayout_ColorAttachment; toPresent.before.stages = VriPipelineStage_ColorAttachmentOutput;
-        toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
-        VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
+        const bool capturing = captureBuf && maxFrames != 0 && frameValue >= maxFrames;
+        if (capturing)
+        {
+            VriTextureBarrierDesc toSrc{}; toSrc.texture = backbuffer; toSrc.before.access = VriAccess_ColorAttachmentWrite; toSrc.before.layout = VriLayout_ColorAttachment; toSrc.before.stages = VriPipelineStage_ColorAttachmentOutput;
+            toSrc.after.access = VriAccess_CopySourceRead; toSrc.after.layout = VriLayout_CopySource; toSrc.after.stages = VriPipelineStage_Transfer; toSrc.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc gs{}; gs.textures = &toSrc; gs.textureNum = 1; c.CmdBarrier(cmd, &gs);
+            VriBufferTextureCopyDesc rc{}; rc.texture.aspect = VriImageAspect_Color; rc.texture.layerNum = 1; c.CmdReadbackTextureToBuffer(cmd, captureBuf, backbuffer, &rc);
+            VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_CopySourceRead; toPresent.before.layout = VriLayout_CopySource; toPresent.before.stages = VriPipelineStage_Transfer;
+            toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
+        }
+        else
+        {
+            VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_ColorAttachmentWrite; toPresent.before.layout = VriLayout_ColorAttachment; toPresent.before.stages = VriPipelineStage_ColorAttachmentOutput;
+            toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
+        }
         c.EndCommandBuffer(cmd);
 
         VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = ++frameValue; sig.stages = VriPipelineStage_AllCommands;
@@ -299,6 +321,12 @@ int main(int, char**)
         swap.Present(swapchain, nullptr, 0);
         c.DestroyDescriptor(bbView);
 
+        if (capturing)
+        {
+            const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(captureBuf, 0, uint64_t(kWidth) * kHeight * 4));
+            if (WriteBmpBGRA(capturePath, px, kWidth, kHeight)) std::printf("[instancing] %s: wrote %s\n", apiName, capturePath);
+            c.UnmapBuffer(captureBuf);
+        }
         if (maxFrames != 0 && frameValue - 1 >= maxFrames) running = false;
     }
 
@@ -309,6 +337,7 @@ int main(int, char**)
     c.DestroyDescriptor(uboView); c.DestroyBuffer(ustg); c.DestroyBuffer(ubo);
     c.DestroyBuffer(inststg); c.DestroyBuffer(inst); c.DestroyBuffer(istg); c.DestroyBuffer(vstg); c.DestroyBuffer(ibuf); c.DestroyBuffer(vbuf);
     c.DestroyDescriptor(depthView); c.DestroyTexture(depth);
+    if (captureBuf) c.DestroyBuffer(captureBuf);
     swap.DestroySwapChain(swapchain);
     vriDestroyDevice(dev);
     SDL_DestroyWindow(window); SDL_Quit();

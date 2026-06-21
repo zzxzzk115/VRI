@@ -696,12 +696,14 @@ namespace vri::gl
                 const GLVertexFormat vf = ToGLVertexFormat(a.format);
                 GLsizei stride = 0;
                 uint32_t bindingSlot = a.streamIndex;
+                uint32_t divisor = 0;
                 if (a.streamIndex < desc->vertexInput.streamNum)
                 {
                     stride = static_cast<GLsizei>(desc->vertexInput.streams[a.streamIndex].stride);
                     bindingSlot = desc->vertexInput.streams[a.streamIndex].bindingSlot;
+                    divisor = desc->vertexInput.streams[a.streamIndex].stepRate == VriVertexStepRate_PerInstance ? 1u : 0u;
                 }
-                p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, a.offset, stride, bindingSlot});
+                p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, a.offset, stride, bindingSlot, divisor});
             }
             // Separate attribute format (GL 4.3+): bake the vertex format into a
             // per-pipeline VAO once. At draw we only point each stream binding at a
@@ -723,12 +725,14 @@ namespace vri::gl
                         glEnableVertexArrayAttrib(vao, a.location);
                         glVertexArrayAttribFormat(vao, a.location, a.size, a.type, a.normalized, a.offset);
                         glVertexArrayAttribBinding(vao, a.location, a.bindingSlot);
+                        glVertexArrayBindingDivisor(vao, a.bindingSlot, a.divisor);
                     }
                     else
                     {
                         glEnableVertexAttribArray(a.location);
                         glVertexAttribFormat(a.location, a.size, a.type, a.normalized, a.offset);
                         glVertexAttribBinding(a.location, a.bindingSlot);
+                        glVertexBindingDivisor(a.bindingSlot, a.divisor);
                     }
                 }
                 if (!dsa) glBindVertexArray(d->DefaultVao()); // restore; DSA never bound it
@@ -739,7 +743,7 @@ namespace vri::gl
                     bool seen = false;
                     for (const VboBindingGL& vb : p->vboBindings)
                         if (vb.slot == a.bindingSlot) { seen = true; break; }
-                    if (!seen) p->vboBindings.push_back(VboBindingGL{a.bindingSlot, a.stride});
+                    if (!seen) p->vboBindings.push_back(VboBindingGL{a.bindingSlot, a.stride, a.divisor});
                 }
             }
 #endif // !__EMSCRIPTEN__ (separate-format VAO)
@@ -1207,6 +1211,7 @@ namespace vri::gl
                     glEnableVertexAttribArray(a.location);
                     glVertexAttribPointer(a.location, a.size, a.type, a.normalized, a.stride,
                                           reinterpret_cast<const void*>(static_cast<uintptr_t>(it->second.offset + a.offset)));
+                    glVertexAttribDivisor(a.location, a.divisor); // per-instance streams advance per instance
                     mask |= (1u << a.location);
                 }
             c->enabledAttribMask = mask;

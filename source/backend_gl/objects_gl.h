@@ -172,6 +172,7 @@ namespace vri::gl
         GLuint    offset;     // within the vertex
         GLsizei   stride;     // of the owning stream
         uint32_t  bindingSlot; // CmdSetVertexBuffers slot to source from
+        uint32_t  divisor;    // 0 = per-vertex, 1 = per-instance (VriVertexStepRate)
     };
 
     // A vertex-buffer binding point used by the pipeline's separate-format VAO:
@@ -181,6 +182,7 @@ namespace vri::gl
     {
         uint32_t slot;
         GLsizei  stride;
+        uint32_t divisor; // 0 = per-vertex, 1 = per-instance
     };
 
     struct PipelineGL
