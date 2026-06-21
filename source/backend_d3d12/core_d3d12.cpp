@@ -660,6 +660,8 @@ namespace vri::d3d12
             pd.RasterizerState.CullMode = ToD3DCull(desc->rasterization.cullMode);
             pd.RasterizerState.FrontCounterClockwise = desc->rasterization.frontFace == VriFrontFace_CounterClockwise ? TRUE : FALSE;
             pd.RasterizerState.DepthClipEnable = TRUE;
+            pd.RasterizerState.ConservativeRaster = desc->rasterization.conservativeRaster
+                ? D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON : D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
             const VriColorAttachmentDesc* c0 = desc->outputMerger.colorNum ? &desc->outputMerger.colors[0] : nullptr;
             pd.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE; pd.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO; pd.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;

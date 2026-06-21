@@ -70,6 +70,9 @@ typedef struct VriRasterizationDesc
     VriBool          depthClamp;
     VriDepthBiasDesc depthBias;
     float            lineWidth;
+    /* Conservative rasterization: rasterize a primitive if it touches a pixel at all
+       (over-estimation). Requires VriDeviceDesc::hasConservativeRaster. */
+    VriBool          conservativeRaster;
 } VriRasterizationDesc;
 
 /* ---- depth / stencil -------------------------------------------------- */

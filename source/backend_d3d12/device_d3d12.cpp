@@ -241,6 +241,13 @@ namespace vri::d3d12
         m_desc.hasGeometryShader = VRI_TRUE;
         m_desc.hasComputeShader = VRI_TRUE;
 
+        D3D12_FEATURE_DATA_D3D12_OPTIONS o0 = {};
+        if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &o0, sizeof(o0))))
+            m_desc.hasConservativeRaster = o0.ConservativeRasterizationTier >= D3D12_CONSERVATIVE_RASTERIZATION_TIER_1 ? VRI_TRUE : VRI_FALSE;
+        D3D12_FEATURE_DATA_D3D12_OPTIONS3 o3 = {};
+        if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &o3, sizeof(o3))))
+            m_desc.hasFragmentShaderBarycentric = o3.BarycentricsSupported ? VRI_TRUE : VRI_FALSE;
+
         m_desc.enabledFeatures = m_enabledFeatures;
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasMeshShader = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;

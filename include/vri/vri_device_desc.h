@@ -63,6 +63,8 @@ typedef struct VriDeviceDesc
     VriBool        hasVariableShadingRate;
     VriBool        hasOpacityMicromap;
     VriBool        hasRayQuery; /* inline ray tracing in any shader stage */
+    VriBool        hasConservativeRaster;
+    VriBool        hasFragmentShaderBarycentric;
 
     /* ray-tracing shader-binding-table layout (valid when hasRayTracing) */
     uint32_t       rtShaderGroupHandleSize;

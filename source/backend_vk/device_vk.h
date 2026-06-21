@@ -76,6 +76,9 @@ namespace vri::vk
         uint32_t m_queueFamilies[VriQueueType_Count] = {};
         bool     m_validation = false;
         uint64_t m_enabledFeatures = 0; // granted VriFeatureBits
+        // Always-on-if-available pipeline-state extensions (capabilities, not opt-in features).
+        bool     m_hasConservativeRaster = false;
+        bool     m_hasBarycentric = false;
         ExtFunctions m_ext = {};
 
         VriDeviceDesc        m_desc = {};

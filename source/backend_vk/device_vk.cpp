@@ -295,6 +295,14 @@ namespace vri::vk
         for (uint32_t i = 0; i < desc.requiredDeviceExtensionNum; ++i)
             extensions.push_back(desc.requiredDeviceExtensions[i]);
 
+        // Always-on-if-available pipeline-state capability extensions (no opt-in feature;
+        // exposed via VriDeviceDesc::hasXxx, used by per-pipeline state when supported).
+        if (hasExt(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME))
+        {
+            extensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
+            m_hasConservativeRaster = true; // no VkPhysicalDevice feature to enable
+        }
+
         // ---- optional features: query -> enable -> report (bestEffort aware) ----
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
@@ -529,6 +537,8 @@ namespace vri::vk
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasConservativeRaster = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
 
         if (m_enabledFeatures & VriFeature_RayTracing)
         {

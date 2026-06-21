@@ -698,6 +698,12 @@ namespace vri::vk
                 raster.depthBiasClamp = rs.depthBias.clamp;
                 raster.depthBiasSlopeFactor = rs.depthBias.slope;
             }
+            VkPipelineRasterizationConservativeStateCreateInfoEXT conservative = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT};
+            if (rs.conservativeRaster)
+            {
+                conservative.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+                raster.pNext = &conservative;
+            }
 
             VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
             ms.rasterizationSamples = static_cast<VkSampleCountFlagBits>(desc->multisample.sampleNum ? desc->multisample.sampleNum : 1u);

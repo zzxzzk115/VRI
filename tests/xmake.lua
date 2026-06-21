@@ -31,6 +31,7 @@ target("vri-tests")
     add_files("test_tessellation_xbackend.cpp") -- legacy tessellation hull/domain (gated where absent)
     add_files("test_coordsys_xbackend.cpp")   -- Y-up coordinate parity across backends
     add_files("test_rayquery_xbackend.cpp")   -- inline ray tracing (VK ray_query + DXR 1.1) in compute
+    add_files("test_consrast_xbackend.cpp")   -- conservative rasterization (VK EXT + D3D12 tier)
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

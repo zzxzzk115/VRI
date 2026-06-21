@@ -39,6 +39,8 @@ Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures 
 
 **Ray query** (inline ray tracing, `VriFeature_RayQuery`) works on **both Vulkan (`VK_KHR_ray_query`) and D3D12 (DXR 1.1 inline)** from one VRI code path: it reuses the acceleration-structure interface, compute pipelines, and the AS/storage-image descriptors — no ray-tracing pipeline, no shader binding table. The shared test builds a BLAS+TLAS and a **compute** shader traces rays inline against the TLAS (`RayQuery`/`TraceRayInline`), writing hit→red / miss→black; it self-skips where ray query is unavailable. AS creation is enabled by either `VriFeature_RayTracing` or `VriFeature_RayQuery`.
 
+**Conservative rasterization** (`VriRasterizationDesc::conservativeRaster`, `VriDeviceDesc::hasConservativeRaster`) is a portable pipeline-state capability on Vulkan (`VK_EXT_conservative_rasterization`, always enabled when available) and D3D12 (`ConservativeRasterizationTier`); the cross-backend test draws a sub-pixel-thin triangle and confirms the conservative draw lights up strictly more pixels than the normal one. It's a capability (no opt-in feature), reported honestly and self-skipped where absent.
+
 ## Platforms
 
 Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU), all built + tested in CI. macOS is **built + run in CI** (compile-verified; GPU backends pending real-device validation — CI has no MoltenVK ICD, and desktop GL caps at 4.1). Android / iOS are planned per backend.
