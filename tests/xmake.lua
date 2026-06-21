@@ -59,6 +59,7 @@ target("vri-tests")
         add_files("test_vrs_d3d12.cpp")       -- variable rate shading (RSSetShadingRate)
         add_files("test_meshshader_d3d12.cpp")-- mesh shaders (DispatchMesh, DXIL)
         add_files("test_raytracing_d3d12.cpp")-- DXR ray tracing (state object + AS + DispatchRays)
+        add_files("test_omm_d3d12.cpp")       -- opacity micromap: explicit "unsupported" contract
     end
 
     add_tests("default")
