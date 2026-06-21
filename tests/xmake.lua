@@ -37,6 +37,7 @@ target("vri-tests")
         add_files("test_features_vk.cpp")
         add_files("test_vrs_vk.cpp")          -- variable rate shading (VK_KHR_fragment_shading_rate)
         add_files("test_meshshader_vk.cpp")   -- mesh shaders (VK_EXT_mesh_shader)
+        add_files("test_raytracing_vk.cpp")   -- ray tracing (KHR accel struct + RT pipeline)
     end
     if has_config("vri_backend_wgpu") then
         add_files("test_device_wgpu.cpp")

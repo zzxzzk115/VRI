@@ -62,6 +62,11 @@ typedef struct VriDeviceDesc
     VriBool        hasBindless;
     VriBool        hasVariableShadingRate;
     VriBool        hasOpacityMicromap;
+
+    /* ray-tracing shader-binding-table layout (valid when hasRayTracing) */
+    uint32_t       rtShaderGroupHandleSize;
+    uint32_t       rtShaderGroupBaseAlignment;
+    uint32_t       rtShaderGroupHandleAlignment;
 } VriDeviceDesc;
 
 VRI_EXTERN_C_END

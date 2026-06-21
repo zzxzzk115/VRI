@@ -45,6 +45,20 @@ namespace vri::vk
         uint64_t      size;
     };
 
+    struct AccelerationStructureVK
+    {
+        DeviceVK*                  device;
+        VkAccelerationStructureKHR as;
+        VkBuffer                   buffer;       // backing store (ACCELERATION_STRUCTURE_STORAGE)
+        VmaAllocation              bufferAlloc;
+        VkBuffer                   scratch;      // build scratch (STORAGE | SHADER_DEVICE_ADDRESS)
+        VmaAllocation              scratchAlloc;
+        VkDeviceAddress            deviceAddress;
+        VkDeviceAddress            scratchAddress;
+        VkAccelerationStructureTypeKHR type;
+    };
+    inline VriAccelerationStructure* ToHandle(AccelerationStructureVK* a) { return reinterpret_cast<VriAccelerationStructure*>(a); }
+
     struct TextureVK
     {
         DeviceVK*     device;
@@ -61,11 +75,12 @@ namespace vri::vk
     // A view (texture/buffer) or a sampler.
     struct DescriptorVK
     {
-        enum class Kind { TextureView, BufferView, Sampler } kind;
+        enum class Kind { TextureView, BufferView, Sampler, AccelerationStructure } kind;
         DeviceVK*    device;
         VkImageView  imageView;
         VkBufferView bufferView; // only for typed/texel buffer views
         VkSampler    sampler;
+        VkAccelerationStructureKHR accel = VK_NULL_HANDLE; // only for Kind::AccelerationStructure
         // texture-view metadata (attachments, transitions)
         VkFormat           format;
         VkImageAspectFlags aspect;

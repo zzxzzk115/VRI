@@ -53,6 +53,7 @@ namespace vri::core
             bool                 hasSwap = false;
             VriShadingRateInterface vrs;   // the backend's real VRS table (if supported)
             VriMeshShaderInterface  mesh;  // the backend's real mesh-shader table (if supported)
+            VriRayTracingInterface  rt;    // the backend's real ray-tracing table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>   queues;
             std::vector<CmdBufVal*>  cmds;
@@ -323,6 +324,27 @@ namespace vri::core
             if (!RecordingOk(c, "CmdDrawMeshTasksIndirect")) return;
             c->dev->mesh.CmdDrawMeshTasksIndirect(c->real, buffer, offset, drawNum, stride);
         }
+        // ---- ray tracing: unwrap the device on creates and the cmd buffer on records.
+        //      Handle-only entry points (Destroy/GetAddress/GetShaderGroupHandles) take
+        //      unwrapped handles and pass through (copied from the real table).
+        VriResult VRI_CALL RtCreateAccelerationStructure(VriDevice* device, const VriAccelerationStructureDesc* desc, VriAccelerationStructure** out)
+        { return DV(device)->rt.CreateAccelerationStructure(DV(device)->real, desc, out); }
+        VriResult VRI_CALL RtCreateAccelerationStructureDescriptor(VriDevice* device, VriAccelerationStructure* as, VriDescriptor** out)
+        { return DV(device)->rt.CreateAccelerationStructureDescriptor(DV(device)->real, as, out); }
+        VriResult VRI_CALL RtCreateRayTracingPipeline(VriDevice* device, const VriRayTracingPipelineDesc* desc, VriPipeline** out)
+        { return DV(device)->rt.CreateRayTracingPipeline(DV(device)->real, desc, out); }
+        void VRI_CALL RtCmdBuildAccelerationStructure(VriCommandBuffer* cmd, const VriBuildAccelerationStructureDesc* desc)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdBuildAccelerationStructure")) return;
+            c->dev->rt.CmdBuildAccelerationStructure(c->real, desc);
+        }
+        void VRI_CALL RtCmdTraceRays(VriCommandBuffer* cmd, const VriDispatchRaysDesc* desc)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdTraceRays")) return;
+            c->dev->rt.CmdTraceRays(c->real, desc);
+        }
 
         void BuildTable(DeviceVal* d)
         {
@@ -424,6 +446,23 @@ namespace vri::core
             if (r != VriResult_Success) return r;
             static const VriMeshShaderInterface wrapped = { CmdDrawMeshTasks, CmdDrawMeshTasksIndirect };
             *static_cast<VriMeshShaderInterface*>(out) = wrapped;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_RAYTRACING))
+        {
+            if (size != sizeof(VriRayTracingInterface)) return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(VRI_INTERFACE_RAYTRACING, sizeof(d->rt), &d->rt);
+            if (r != VriResult_Success) return r;
+            // Start from the real table (handle-only entry points pass through; the
+            // backend table is process-constant), then override the ones taking a
+            // wrapped device or command buffer.
+            VriRayTracingInterface w = d->rt;
+            w.CreateAccelerationStructure = RtCreateAccelerationStructure;
+            w.CreateAccelerationStructureDescriptor = RtCreateAccelerationStructureDescriptor;
+            w.CreateRayTracingPipeline = RtCreateRayTracingPipeline;
+            w.CmdBuildAccelerationStructure = RtCmdBuildAccelerationStructure;
+            w.CmdTraceRays = RtCmdTraceRays;
+            *static_cast<VriRayTracingInterface*>(out) = w;
             return VriResult_Success;
         }
         return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);

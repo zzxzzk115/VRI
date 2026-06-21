@@ -37,6 +37,15 @@ namespace vri::vk
             PFN_vkCmdSetFragmentShadingRateKHR  CmdSetFragmentShadingRate = nullptr;
             PFN_vkCmdDrawMeshTasksEXT           CmdDrawMeshTasks = nullptr;
             PFN_vkCmdDrawMeshTasksIndirectEXT   CmdDrawMeshTasksIndirect = nullptr;
+            // ray tracing (KHR acceleration structure + ray tracing pipeline)
+            PFN_vkCreateAccelerationStructureKHR        CreateAccelerationStructure = nullptr;
+            PFN_vkDestroyAccelerationStructureKHR       DestroyAccelerationStructure = nullptr;
+            PFN_vkGetAccelerationStructureBuildSizesKHR GetAccelerationStructureBuildSizes = nullptr;
+            PFN_vkCmdBuildAccelerationStructuresKHR     CmdBuildAccelerationStructures = nullptr;
+            PFN_vkGetAccelerationStructureDeviceAddressKHR GetAccelerationStructureDeviceAddress = nullptr;
+            PFN_vkCreateRayTracingPipelinesKHR          CreateRayTracingPipelines = nullptr;
+            PFN_vkGetRayTracingShaderGroupHandlesKHR    GetRayTracingShaderGroupHandles = nullptr;
+            PFN_vkCmdTraceRaysKHR                       CmdTraceRays = nullptr;
         };
         const ExtFunctions& Ext() const { return m_ext; }
         uint64_t EnabledFeatures() const { return m_enabledFeatures; }

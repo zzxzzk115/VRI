@@ -4,6 +4,7 @@
 #include "interop_vk.h"
 #include "vrs_vk.h"
 #include "meshshader_vk.h"
+#include "rt_vk.h"
 
 #include <cstdio>
 #include <cstring>
@@ -481,6 +482,17 @@ namespace vri::vk
         m_desc.hasBindless = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
+
+        if (m_enabledFeatures & VriFeature_RayTracing)
+        {
+            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
+            VkPhysicalDeviceProperties2 props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+            props2.pNext = &rtProps;
+            vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
+            m_desc.rtShaderGroupHandleSize = rtProps.shaderGroupHandleSize;
+            m_desc.rtShaderGroupBaseAlignment = rtProps.shaderGroupBaseAlignment;
+            m_desc.rtShaderGroupHandleAlignment = rtProps.shaderGroupHandleAlignment;
+        }
     }
 
     // Resolve extension entry points for the feature set granted at creation.
@@ -496,6 +508,18 @@ namespace vri::vk
             m_ext.CmdDrawMeshTasksIndirect = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(
                 vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksIndirectEXT"));
         }
+        if (m_enabledFeatures & VriFeature_RayTracing)
+        {
+            auto L = [&](const char* n) { return vkGetDeviceProcAddr(m_device, n); };
+            m_ext.CreateAccelerationStructure = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(L("vkCreateAccelerationStructureKHR"));
+            m_ext.DestroyAccelerationStructure = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(L("vkDestroyAccelerationStructureKHR"));
+            m_ext.GetAccelerationStructureBuildSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(L("vkGetAccelerationStructureBuildSizesKHR"));
+            m_ext.CmdBuildAccelerationStructures = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(L("vkCmdBuildAccelerationStructuresKHR"));
+            m_ext.GetAccelerationStructureDeviceAddress = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(L("vkGetAccelerationStructureDeviceAddressKHR"));
+            m_ext.CreateRayTracingPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(L("vkCreateRayTracingPipelinesKHR"));
+            m_ext.GetRayTracingShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(L("vkGetRayTracingShaderGroupHandlesKHR"));
+            m_ext.CmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(L("vkCmdTraceRaysKHR"));
+        }
     }
 
     void DeviceVK::FillRegistry()
@@ -509,6 +533,8 @@ namespace vri::vk
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceVK(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)
             m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceVK(), sizeof(VriMeshShaderInterface));
+        if (m_enabledFeatures & VriFeature_RayTracing)
+            m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceVK(), sizeof(VriRayTracingInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

@@ -115,6 +115,12 @@ namespace vri::vk
         if (u & VriBufferUsage_StorageBuffer)  r |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         if (u & VriBufferUsage_IndirectBuffer) r |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
         if (u & VriBufferUsage_ShaderDeviceAddress) r |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        if (u & VriBufferUsage_AccelerationBuildInput)
+            r |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        if (u & VriBufferUsage_AccelerationStorage)
+            r |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        if (u & VriBufferUsage_ShaderBindingTable)
+            r |= VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         return r;
     }
 
@@ -206,6 +212,12 @@ namespace vri::vk
             case VriShaderStage_Compute:      return VK_SHADER_STAGE_COMPUTE_BIT;
             case VriShaderStage_Mesh:         return VK_SHADER_STAGE_MESH_BIT_EXT;
             case VriShaderStage_Task:         return VK_SHADER_STAGE_TASK_BIT_EXT;
+            case VriShaderStage_RayGen:       return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+            case VriShaderStage_Miss:         return VK_SHADER_STAGE_MISS_BIT_KHR;
+            case VriShaderStage_ClosestHit:   return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+            case VriShaderStage_AnyHit:       return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+            case VriShaderStage_Intersection: return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+            case VriShaderStage_Callable:     return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
             default:                          return VK_SHADER_STAGE_ALL;
         }
     }
@@ -241,6 +253,7 @@ namespace vri::vk
         if (s & VriPipelineStage_LateFragmentTests)     r |= VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
         if (s & VriPipelineStage_ColorAttachmentOutput) r |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         if (s & VriPipelineStage_ComputeShader)         r |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        if (s & VriPipelineStage_RayTracingShader)      r |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
         if (s & VriPipelineStage_Transfer)              r |= VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
         if (s & VriPipelineStage_AllGraphics)           r |= VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
         if (s & VriPipelineStage_AllCommands)           r |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;

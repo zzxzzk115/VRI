@@ -862,6 +862,8 @@ namespace vri::vk
             std::vector<VkWriteDescriptorSet> writes;
             std::deque<VkDescriptorImageInfo> imageInfos;   // stable addresses across push_back
             std::deque<VkDescriptorBufferInfo> bufferInfos;
+            std::deque<std::vector<VkAccelerationStructureKHR>> accelLists; // stable across push_back
+            std::deque<VkWriteDescriptorSetAccelerationStructureKHR> accelWrites;
             writes.reserve(rangeNum);
 
             for (uint32_t r = 0; r < rangeNum; ++r)
@@ -871,6 +873,7 @@ namespace vri::vk
                 const bool isImage = info.type == VK_DESCRIPTOR_TYPE_SAMPLER ||
                                      info.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
                                      info.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                const bool isAccel = info.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 
                 VkWriteDescriptorSet w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
                 w.dstSet = s->set;
@@ -879,7 +882,19 @@ namespace vri::vk
                 w.descriptorCount = u.descriptorNum;
                 w.descriptorType = info.type;
 
-                if (isImage)
+                if (isAccel)
+                {
+                    accelLists.emplace_back();
+                    std::vector<VkAccelerationStructureKHR>& list = accelLists.back();
+                    for (uint32_t k = 0; k < u.descriptorNum; ++k)
+                        list.push_back(Desc(u.descriptors[k])->accel);
+                    VkWriteDescriptorSetAccelerationStructureKHR aw = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+                    aw.accelerationStructureCount = static_cast<uint32_t>(list.size());
+                    aw.pAccelerationStructures = list.data();
+                    accelWrites.push_back(aw);
+                    w.pNext = &accelWrites.back();
+                }
+                else if (isImage)
                 {
                     const VkDescriptorImageInfo* first = nullptr;
                     for (uint32_t k = 0; k < u.descriptorNum; ++k)
