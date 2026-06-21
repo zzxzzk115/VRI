@@ -34,6 +34,14 @@ if has_config("vri_backend_gl") then
     end
 end
 
+-- Direct3D 12 backend: the DirectX Agility SDK headers expose modern D3D12 the
+-- stock Windows SDK lacks (DXR 1.2 / opacity micromaps, mesh shaders, VRS). Only
+-- needed when the D3D12 backend is built (Windows). dxgi/d3d12/d3dcompiler libs
+-- themselves come from the system (add_syslinks in source/xmake.lua).
+if has_config("vri_backend_d3d12") and is_plat("windows") then
+    add_requires("directx12-agility")
+end
+
 -- Examples windowing (matches libvultra)
 if has_config("vri_build_examples") then
     add_requires("libsdl3")

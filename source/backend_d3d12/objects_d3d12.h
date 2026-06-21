@@ -194,6 +194,20 @@ namespace vri::d3d12
     };
     inline VriAccelerationStructure* ToHandle(AccelerationStructureD3D12* a) { return reinterpret_cast<VriAccelerationStructure*>(a); }
 
+    // A DXR opacity micromap array: result buffer + build scratch (built via the
+    // acceleration-structure build path with type OPACITY_MICROMAP_ARRAY).
+    struct MicromapD3D12
+    {
+        DeviceD3D12*             device = nullptr;
+        ComPtr<ID3D12Resource>   result;
+        ComPtr<ID3D12Resource>   scratch;
+        D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+        D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT format = D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT_OC1_2_STATE;
+        uint32_t                 subdivisionLevel = 0;
+        uint32_t                 triangleCount = 0;
+    };
+    inline VriMicromap* ToHandle(MicromapD3D12* m) { return reinterpret_cast<VriMicromap*>(m); }
+
     inline VriPipelineLayout* ToHandle(PipelineLayoutD3D12* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
     inline VriPipeline*       ToHandle(PipelineD3D12* p)       { return reinterpret_cast<VriPipeline*>(p); }
     inline VriDescriptorPool* ToHandle(DescriptorPoolD3D12* p) { return reinterpret_cast<VriDescriptorPool*>(p); }

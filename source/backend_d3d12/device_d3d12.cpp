@@ -4,6 +4,7 @@
 #include "vrs_d3d12.h"
 #include "meshshader_d3d12.h"
 #include "rt_d3d12.h"
+#include "omm_d3d12.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -171,8 +172,17 @@ namespace vri::d3d12
             else if (fail("ray tracing not supported")) return VriResult_Unsupported;
         }
 
-        if ((requested & VriFeature_OpacityMicromap) && fail("opacity micromap not supported on D3D12"))
-            return VriResult_Unsupported;
+        if (requested & VriFeature_OpacityMicromap)
+        {
+            // OMM extends ray-tracing geometry and is gated by Raytracing Tier 1.2 (DXR 1.2).
+            D3D12_FEATURE_DATA_D3D12_OPTIONS5 o5 = {};
+            const bool ok = (granted & VriFeature_RayTracing) &&
+                            SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &o5, sizeof(o5))) &&
+                            o5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_2;
+            if (ok) granted |= VriFeature_OpacityMicromap;
+            else if (fail("opacity micromap not supported (needs ray tracing + Raytracing Tier 1.2 / DXR 1.2 runtime)"))
+                return VriResult_Unsupported;
+        }
         if ((requested & VriFeature_Bindless) && fail("bindless not implemented on D3D12"))
             return VriResult_Unsupported;
         if ((requested & VriFeature_LowLatency) && fail("low-latency not implemented on D3D12"))
@@ -225,6 +235,7 @@ namespace vri::d3d12
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasMeshShader = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayTracing = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         if (m_enabledFeatures & VriFeature_RayTracing)
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).
@@ -259,6 +270,8 @@ namespace vri::d3d12
             m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceD3D12(), sizeof(VriMeshShaderInterface));
         if (m_enabledFeatures & VriFeature_RayTracing)
             m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceD3D12(), sizeof(VriRayTracingInterface));
+        if (m_enabledFeatures & VriFeature_OpacityMicromap)
+            m_registry.Register(VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceD3D12(), sizeof(VriOpacityMicromapInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

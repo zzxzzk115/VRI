@@ -56,9 +56,20 @@ namespace vri::d3d12
             return r;
         }
 
+        MicromapD3D12* MM(VriMicromap* h) { return reinterpret_cast<MicromapD3D12*>(h); }
+
+        // Geometry build storage: the geometry descs plus stable backing for the nested
+        // triangles/linkage descs an OMM geometry points at (must outlive the build call).
+        struct GeomStore
+        {
+            std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>                geoms;
+            std::deque<D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC>       tris;  // for OMM geometries
+            std::deque<D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC>     links;
+        };
+
         // Build the D3D12 geometry descs from the VRI desc. With withAddr the buffer GPU
         // VAs are filled (for build); without, only formats/counts (for sizing).
-        void BuildGeoms(const VriAccelerationStructureDesc* desc, bool withAddr, std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>& geoms)
+        void BuildGeoms(const VriAccelerationStructureDesc* desc, bool withAddr, GeomStore& gs)
         {
             for (uint32_t i = 0; i < desc->geometryCount; ++i)
             {
@@ -68,26 +79,45 @@ namespace vri::d3d12
                 if (g.type == VriAsGeometryType_Triangles)
                 {
                     const VriAsTrianglesDesc& t = g.triangles;
-                    vg.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-                    vg.Triangles.VertexFormat = ToDxgiVertexFormat(t.vertexFormat);
-                    vg.Triangles.VertexCount = t.vertexCount;
-                    vg.Triangles.VertexBuffer.StrideInBytes = t.vertexStride;
-                    vg.Triangles.IndexFormat = t.indexBuffer ? (t.indexType == VriIndexType_UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT) : DXGI_FORMAT_UNKNOWN;
-                    vg.Triangles.IndexCount = t.indexBuffer ? t.indexCount : 0;
+                    D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC tri = {};
+                    tri.VertexFormat = ToDxgiVertexFormat(t.vertexFormat);
+                    tri.VertexCount = t.vertexCount;
+                    tri.VertexBuffer.StrideInBytes = t.vertexStride;
+                    tri.IndexFormat = t.indexBuffer ? (t.indexType == VriIndexType_UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT) : DXGI_FORMAT_UNKNOWN;
+                    tri.IndexCount = t.indexBuffer ? t.indexCount : 0;
                     if (withAddr)
                     {
-                        vg.Triangles.VertexBuffer.StartAddress = BUF(t.vertexBuffer)->resource->GetGPUVirtualAddress() + t.vertexOffset;
-                        if (t.indexBuffer) vg.Triangles.IndexBuffer = BUF(t.indexBuffer)->resource->GetGPUVirtualAddress() + t.indexOffset;
-                        if (t.transformBuffer) vg.Triangles.Transform3x4 = BUF(t.transformBuffer)->resource->GetGPUVirtualAddress() + t.transformOffset;
+                        tri.VertexBuffer.StartAddress = BUF(t.vertexBuffer)->resource->GetGPUVirtualAddress() + t.vertexOffset;
+                        if (t.indexBuffer) tri.IndexBuffer = BUF(t.indexBuffer)->resource->GetGPUVirtualAddress() + t.indexOffset;
+                        if (t.transformBuffer) tri.Transform3x4 = BUF(t.transformBuffer)->resource->GetGPUVirtualAddress() + t.transformOffset;
+                    }
+                    if (t.micromap) // attach an opacity micromap (OMM-triangles geometry)
+                    {
+                        gs.tris.push_back(tri);
+                        D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC link = {};
+                        link.OpacityMicromapArray = MM(t.micromap)->address;
+                        link.OpacityMicromapIndexFormat = t.ommIndexType == VriIndexType_UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+                        if (withAddr && t.ommIndexBuffer)
+                        {
+                            link.OpacityMicromapIndexBuffer.StartAddress = BUF(t.ommIndexBuffer)->resource->GetGPUVirtualAddress() + t.ommIndexOffset;
+                            link.OpacityMicromapIndexBuffer.StrideInBytes = t.ommIndexType == VriIndexType_UInt16 ? 2 : 4;
+                        }
+                        gs.links.push_back(link);
+                        vg.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_OMM_TRIANGLES;
+                        vg.OmmTriangles.pTriangles = &gs.tris.back();
+                        vg.OmmTriangles.pOmmLinkage = &gs.links.back();
+                    }
+                    else
+                    {
+                        vg.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+                        vg.Triangles = tri;
                     }
                 }
                 else // instances (TLAS)
                 {
-                    const VriAsInstancesDesc& in = g.instances;
                     vg.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES; // unused for TLAS inputs
-                    (void)in;
                 }
-                geoms.push_back(vg);
+                gs.geoms.push_back(vg);
             }
         }
 
@@ -99,7 +129,7 @@ namespace vri::d3d12
 
         // Fill build inputs for sizing/build. For TLAS, instance data lives in a buffer.
         void FillInputs(const VriAccelerationStructureDesc* desc, bool withAddr,
-                        std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>& geoms,
+                        GeomStore& gs,
                         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS& inputs)
         {
             inputs = {};
@@ -114,9 +144,9 @@ namespace vri::d3d12
             }
             else
             {
-                BuildGeoms(desc, withAddr, geoms);
-                inputs.NumDescs = static_cast<UINT>(geoms.size());
-                inputs.pGeometryDescs = geoms.data();
+                BuildGeoms(desc, withAddr, gs);
+                inputs.NumDescs = static_cast<UINT>(gs.geoms.size());
+                inputs.pGeometryDescs = gs.geoms.data();
             }
         }
 
@@ -126,9 +156,9 @@ namespace vri::d3d12
             ComPtr<ID3D12Device5> dev5;
             if (FAILED(d->Device()->QueryInterface(IID_PPV_ARGS(&dev5)))) { d->ReportError("ID3D12Device5 unavailable"); return VriResult_Unsupported; }
 
-            std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoms;
+            GeomStore gs;
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs;
-            FillInputs(desc, false, geoms, inputs);
+            FillInputs(desc, false, gs, inputs);
 
             D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
             dev5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
@@ -163,9 +193,9 @@ namespace vri::d3d12
             ComPtr<ID3D12GraphicsCommandList4> list4;
             if (FAILED(c->list.As(&list4))) return;
 
-            std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoms;
+            GeomStore gs;
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs;
-            FillInputs(desc->geometry, true, geoms, inputs);
+            FillInputs(desc->geometry, true, gs, inputs);
 
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bd = {};
             bd.DestAccelerationStructureData = a->result->GetGPUVirtualAddress();
@@ -241,9 +271,13 @@ namespace vri::d3d12
             shaderCfg.MaxAttributeSizeInBytes = 8;    // barycentrics
             { D3D12_STATE_SUBOBJECT so = {}; so.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG; so.pDesc = &shaderCfg; subs.push_back(so); }
 
-            D3D12_RAYTRACING_PIPELINE_CONFIG pipeCfg = {};
+            // PIPELINE_CONFIG1 carries the flags; use ALLOW_OPACITY_MICROMAPS when OMM
+            // was enabled at device creation so a BLAS with OMM-triangles can be traced.
+            D3D12_RAYTRACING_PIPELINE_CONFIG1 pipeCfg = {};
             pipeCfg.MaxTraceRecursionDepth = desc->maxRecursionDepth ? desc->maxRecursionDepth : 1;
-            { D3D12_STATE_SUBOBJECT so = {}; so.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG; so.pDesc = &pipeCfg; subs.push_back(so); }
+            if (d->EnabledFeatures() & VriFeature_OpacityMicromap)
+                pipeCfg.Flags = D3D12_RAYTRACING_PIPELINE_FLAG_ALLOW_OPACITY_MICROMAPS;
+            { D3D12_STATE_SUBOBJECT so = {}; so.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG1; so.pDesc = &pipeCfg; subs.push_back(so); }
 
             D3D12_GLOBAL_ROOT_SIGNATURE grs = {}; grs.pGlobalRootSignature = layout->rootSig.Get();
             { D3D12_STATE_SUBOBJECT so = {}; so.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE; so.pDesc = &grs; subs.push_back(so); }

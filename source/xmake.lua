@@ -68,5 +68,9 @@ target("vri")
         add_includedirs("backend_d3d12", {public = false})
         -- D3D12 core + DXGI; d3dcompiler (FXC) for runtime HLSL->DXBC in early bring-up
         add_syslinks("d3d12", "dxgi", "d3dcompiler", {public = true})
+        -- Agility SDK: its d3d12.h (DXR 1.2 / opacity micromaps etc.) takes precedence
+        -- over the stock SDK header. {public=true} so a consuming exe can deploy the
+        -- Agility runtime (D3D12Core.dll) + set D3D12SDKVersion when it needs DXR 1.2.
+        add_packages("directx12-agility", {public = true})
     end
 target_end()
