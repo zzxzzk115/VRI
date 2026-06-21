@@ -72,9 +72,34 @@ namespace vri::d3d12
         }
         m_queue.device = this;
 
+        if (VriResult r = CreateDescriptorHeaps(); r != VriResult_Success) return r;
+
         FillDeviceDesc(chosen.Get());
         FillRegistry();
         return VriResult_Success;
+    }
+
+    VriResult DeviceD3D12::CreateDescriptorHeaps()
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC rtv = {};
+        rtv.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        rtv.NumDescriptors = kRtvHeapSize;
+        rtv.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // CPU-only
+        if (FAILED(m_device->CreateDescriptorHeap(&rtv, IID_PPV_ARGS(&m_rtvHeap))))
+        {
+            ReportError("CreateDescriptorHeap (RTV) failed");
+            return VriResult_Failure;
+        }
+        m_rtvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        return VriResult_Success;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocRtv()
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        h.ptr += static_cast<SIZE_T>(m_rtvNext % kRtvHeapSize) * m_rtvSize; // ring (Phase 1: few RTVs)
+        ++m_rtvNext;
+        return h;
     }
 
     void DeviceD3D12::FillDeviceDesc(IDXGIAdapter1* adapter)

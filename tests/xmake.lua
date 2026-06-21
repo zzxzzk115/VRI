@@ -45,6 +45,7 @@ target("vri-tests")
     end
     if has_config("vri_backend_d3d12") then
         add_files("test_device_d3d12.cpp")
+        add_files("test_clear_d3d12.cpp")
     end
 
     add_tests("default")
