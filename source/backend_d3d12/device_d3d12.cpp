@@ -3,6 +3,7 @@
 #include "swapchain_d3d12.h"
 #include "vrs_d3d12.h"
 #include "meshshader_d3d12.h"
+#include "rt_d3d12.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -256,6 +257,8 @@ namespace vri::d3d12
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)
             m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceD3D12(), sizeof(VriMeshShaderInterface));
+        if (m_enabledFeatures & VriFeature_RayTracing)
+            m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceD3D12(), sizeof(VriRayTracingInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

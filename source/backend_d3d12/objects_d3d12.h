@@ -9,6 +9,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -67,6 +68,7 @@ namespace vri::d3d12
         D3D12_CPU_DESCRIPTOR_HANDLE cpu = {}; // for RTV/DSV
         uint32_t                    mip = 0;
         VriSamplerDesc              sampler = {}; // for Kind::Sampler (built into the sampler heap at update)
+        D3D12_GPU_VIRTUAL_ADDRESS   accelAddress = 0; // for an acceleration-structure SRV (TLAS)
     };
 
     // Flattened pipeline-layout binding: a VRI (set, binding) -> its D3D12 binding slot.
@@ -175,7 +177,22 @@ namespace vri::d3d12
         std::vector<PipelineGraphicsVB> vbStrides; // for the draw-time vertex-buffer binding
         bool                            isCompute = false;
         bool                            isMesh = false; // mesh-shader pipeline (no IA topology)
+        bool                            isRt = false;   // ray-tracing state object (DXR)
+        ComPtr<ID3D12StateObject>           stateObject; // DXR pipeline
+        ComPtr<ID3D12StateObjectProperties> stateProps;  // for GetShaderIdentifier
+        std::vector<std::wstring>           groupNames;  // per VRI group -> export/hit-group name
     };
+
+    // A DXR acceleration structure: backing result buffer + build scratch.
+    struct AccelerationStructureD3D12
+    {
+        DeviceD3D12*              device = nullptr;
+        ComPtr<ID3D12Resource>   result;   // the AS (state RAYTRACING_ACCELERATION_STRUCTURE)
+        ComPtr<ID3D12Resource>   scratch;  // build scratch (ALLOW_UNORDERED_ACCESS)
+        D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+    };
+    inline VriAccelerationStructure* ToHandle(AccelerationStructureD3D12* a) { return reinterpret_cast<VriAccelerationStructure*>(a); }
 
     inline VriPipelineLayout* ToHandle(PipelineLayoutD3D12* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
     inline VriPipeline*       ToHandle(PipelineD3D12* p)       { return reinterpret_cast<VriPipeline*>(p); }

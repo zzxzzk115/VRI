@@ -418,8 +418,9 @@ namespace vri::d3d12
             {
                 const VriDescriptorSetDesc& sd = desc->descriptorSets[s];
                 LayoutSetD3D12 setInfo{}; setInfo.set = sd.registerSpace;
-                uint32_t srvIdx = 0, samplerIdx = 0;
-                std::vector<size_t> srvBindings, samplerBindings; // indices into l->bindings to patch rootParam
+                uint32_t srvIdx = 0, uavIdx = 0, samplerIdx = 0;
+                std::vector<size_t> srvBindings, uavBindings, samplerBindings; // indices into l->bindings to patch
+                auto isUav = [](VriDescriptorType t) { return t == VriDescriptorType_StorageTexture; };
                 for (uint32_t r = 0; r < sd.rangeNum; ++r)
                 {
                     const VriDescriptorRangeDesc& rd = sd.ranges[r];
@@ -440,26 +441,51 @@ namespace vri::d3d12
                         samplerBindings.push_back(l->bindings.size() - 1);
                         samplerIdx += n;
                     }
-                    else // Texture / StorageTexture / StructuredBuffer / StorageBuffer -> SRV/UAV table
+                    else if (isUav(rd.descriptorType)) // StorageTexture -> UAV (u#) in the set's table
+                    {
+                        l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, 0, uavIdx});
+                        uavBindings.push_back(l->bindings.size() - 1);
+                        uavIdx += n;
+                    }
+                    else // Texture / StructuredBuffer / AccelerationStructure -> SRV (t#) in the set's table
                     {
                         l->bindings.push_back({sd.registerSpace, rd.baseRegister, rd.descriptorType, 0, srvIdx});
                         srvBindings.push_back(l->bindings.size() - 1);
                         srvIdx += n;
                     }
                 }
-                if (srvIdx > 0)
+                // SRV + UAV share one descriptor table (one root param). Heap layout (APPEND):
+                // SRV slots [0, srvIdx) then UAV slots [srvIdx, srvIdx+uavIdx). UAV registers
+                // (u#) restart at 0, so the UAV range's BaseShaderRegister is 0 too.
+                if (srvIdx > 0 || uavIdx > 0)
                 {
-                    std::vector<D3D12_DESCRIPTOR_RANGE> ranges(1);
-                    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; ranges[0].NumDescriptors = srvIdx;
-                    ranges[0].BaseShaderRegister = 0; ranges[0].RegisterSpace = sd.registerSpace;
-                    ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
+                    if (srvIdx > 0)
+                    {
+                        D3D12_DESCRIPTOR_RANGE rg = {};
+                        rg.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV; rg.NumDescriptors = srvIdx;
+                        rg.BaseShaderRegister = 0; rg.RegisterSpace = sd.registerSpace;
+                        rg.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                        ranges.push_back(rg);
+                    }
+                    if (uavIdx > 0)
+                    {
+                        D3D12_DESCRIPTOR_RANGE rg = {};
+                        rg.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV; rg.NumDescriptors = uavIdx;
+                        rg.BaseShaderRegister = 0; rg.RegisterSpace = sd.registerSpace;
+                        rg.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                        ranges.push_back(rg);
+                    }
                     rangeStore.push_back(std::move(ranges));
                     D3D12_ROOT_PARAMETER p = {};
                     p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-                    p.DescriptorTable.NumDescriptorRanges = 1; p.DescriptorTable.pDescriptorRanges = rangeStore.back().data();
+                    p.DescriptorTable.NumDescriptorRanges = static_cast<UINT>(rangeStore.back().size());
+                    p.DescriptorTable.pDescriptorRanges = rangeStore.back().data();
                     p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-                    setInfo.srvTableParam = static_cast<int>(params.size()); setInfo.srvCount = srvIdx;
+                    setInfo.srvTableParam = static_cast<int>(params.size());
+                    setInfo.srvCount = srvIdx + uavIdx; // total heap slots for the table
                     for (size_t bi : srvBindings) l->bindings[bi].rootParam = static_cast<uint32_t>(params.size());
+                    for (size_t bi : uavBindings) { l->bindings[bi].rootParam = static_cast<uint32_t>(params.size()); l->bindings[bi].heapOffset += srvIdx; }
                     params.push_back(p);
                 }
                 if (samplerIdx > 0)
@@ -747,6 +773,23 @@ namespace vri::d3d12
                     D3D12_CPU_DESCRIPTOR_HANDLE h = s->samplerCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->samplerSize;
                     d->Device()->CreateSampler(&sd, h);
                 }
+                else if (lb->type == VriDescriptorType_AccelerationStructure) // TLAS SRV (no resource, by GPU VA)
+                {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+                    srv.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+                    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    srv.RaytracingAccelerationStructure.Location = v->accelAddress;
+                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->srvSize;
+                    d->Device()->CreateShaderResourceView(nullptr, &srv, h);
+                }
+                else if (lb->type == VriDescriptorType_StorageTexture && v->texture) // UAV
+                {
+                    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+                    uav.Format = v->texture->format;
+                    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->srvSize;
+                    d->Device()->CreateUnorderedAccessView(v->texture->resource.Get(), nullptr, &uav, h);
+                }
                 else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
                 {
                     D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
@@ -771,6 +814,13 @@ namespace vri::d3d12
             CommandBufferD3D12* c = CB(cmd);
             PipelineD3D12* p = Pipe(pipeline);
             c->boundPipeline = p;
+            if (p->isRt) // DXR state object: bound via SetPipelineState1, compute root binding
+            {
+                Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> list4;
+                if (SUCCEEDED(c->list.As(&list4))) list4->SetPipelineState1(p->stateObject.Get());
+                c->list->SetComputeRootSignature(p->rootSig);
+                return;
+            }
             c->list->SetPipelineState(p->pso.Get());
             // Set the root signature here too so a no-descriptor pipeline works without CmdSetPipelineLayout.
             if (p->isCompute) { c->list->SetComputeRootSignature(p->rootSig); }
