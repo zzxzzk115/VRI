@@ -41,6 +41,8 @@ Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures 
 
 **Conservative rasterization** (`VriRasterizationDesc::conservativeRaster`, `VriDeviceDesc::hasConservativeRaster`) is a portable pipeline-state capability on Vulkan (`VK_EXT_conservative_rasterization`, always enabled when available) and D3D12 (`ConservativeRasterizationTier`); the cross-backend test draws a sub-pixel-thin triangle and confirms the conservative draw lights up strictly more pixels than the normal one. It's a capability (no opt-in feature), reported honestly and self-skipped where absent.
 
+**Fragment-shader barycentrics** (`VriDeviceDesc::hasFragmentShaderBarycentric`) are likewise portable: Vulkan `VK_KHR_fragment_shader_barycentric` (enabled when available) and D3D12 SM6.1 `SV_Barycentrics`. The cross-backend test outputs the rasterizer barycentrics as color and checks the center pixel is `{0.5, 0.25, 0.25}` (they sum to 1).
+
 ## Platforms
 
 Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU), all built + tested in CI. macOS is **built + run in CI** (compile-verified; GPU backends pending real-device validation — CI has no MoltenVK ICD, and desktop GL caps at 4.1). Android / iOS are planned per backend.

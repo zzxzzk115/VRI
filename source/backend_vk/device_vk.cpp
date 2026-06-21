@@ -251,6 +251,7 @@ namespace vri::vk
         VkPhysicalDeviceMeshShaderFeaturesEXT meshSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
         VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrsSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
         VkPhysicalDeviceOpacityMicromapFeaturesEXT ommSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
+        VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR barySup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR};
         VkPhysicalDeviceVulkan12Features v12Sup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
@@ -262,6 +263,7 @@ namespace vri::vk
             if (hasExt(VK_EXT_MESH_SHADER_EXTENSION_NAME))            { *q = &meshSup; q = &meshSup.pNext; }
             if (hasExt(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME))  { *q = &vrsSup; q = &vrsSup.pNext; }
             if (hasExt(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME))       { *q = &ommSup; q = &ommSup.pNext; }
+            if (hasExt(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME)) { *q = &barySup; q = &barySup.pNext; }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
             baseSup = sup.features;
@@ -301,6 +303,15 @@ namespace vri::vk
         {
             extensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
             m_hasConservativeRaster = true; // no VkPhysicalDevice feature to enable
+        }
+        // Fragment-shader barycentrics: extension + a feature struct chained below.
+        VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR baryEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR};
+        if (hasExt(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME) && barySup.fragmentShaderBarycentric)
+        {
+            extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+            baryEn.fragmentShaderBarycentric = VK_TRUE;
+            baryEn.pNext = features2.pNext; features2.pNext = &baryEn; // chain into device create
+            m_hasBarycentric = true;
         }
 
         // ---- optional features: query -> enable -> report (bestEffort aware) ----
