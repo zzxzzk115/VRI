@@ -158,6 +158,7 @@ namespace vri::d3d12
             t->device = d; t->format = fi.format; t->texelSize = fi.texelSize;
             t->width = desc->width; t->height = desc->height ? desc->height : 1; t->depth = 1;
             t->mipNum = rd.MipLevels; t->layerNum = rd.DepthOrArraySize; t->state = D3D12_RESOURCE_STATE_COMMON;
+            t->sampleCount = rd.SampleDesc.Count;
             t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
             t->isDepthStencil = (desc->usage & VriTextureUsage_DepthStencilAttachment) != 0;
             *out = ToHandle(t);
@@ -189,8 +190,8 @@ namespace vri::d3d12
                 v->cpu = d->AllocRtv();
                 D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
                 rtv.Format = v->texture->format;
-                rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-                rtv.Texture2D.MipSlice = desc->baseMip;
+                if (v->texture->sampleCount > 1) rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+                else { rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D; rtv.Texture2D.MipSlice = desc->baseMip; }
                 d->Device()->CreateRenderTargetView(v->texture->resource.Get(), &rtv, v->cpu);
             }
             *out = ToHandle(v);
@@ -274,12 +275,18 @@ namespace vri::d3d12
         {
             CommandBufferD3D12* c = CB(cmd);
             c->rtvCount = a->colorNum <= 8 ? a->colorNum : 8;
+            c->resolveCount = 0;
             for (uint32_t i = 0; i < c->rtvCount; ++i)
             {
                 const DescriptorD3D12* v = Desc(a->colors[i].view);
                 TextureD3D12* t = const_cast<TextureD3D12*>(v->texture);
                 Transition(c, t, D3D12_RESOURCE_STATE_RENDER_TARGET); // defensive (usually already RT)
                 c->rtvs[i] = v->cpu;
+                if (a->colors[i].resolveView) // MSAA -> single-sample resolve at EndRendering
+                {
+                    const DescriptorD3D12* rv = Desc(a->colors[i].resolveView);
+                    c->resolves[c->resolveCount++] = {t, const_cast<TextureD3D12*>(rv->texture)};
+                }
             }
             D3D12_CPU_DESCRIPTOR_HANDLE dsv = {};
             const bool hasDepth = a->depth && a->depth->view;
@@ -296,7 +303,19 @@ namespace vri::d3d12
             if (hasDepth && a->depth->loadOp == VriAttachmentLoadOp_Clear)
                 c->list->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, a->depth->clearValue.depthStencil.depth, static_cast<UINT8>(a->depth->clearValue.depthStencil.stencil), 0, nullptr);
         }
-        void VRI_CALL CmdEndRendering(VriCommandBuffer*) {}
+        void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            for (uint32_t i = 0; i < c->resolveCount; ++i)
+            {
+                TextureD3D12* src = c->resolves[i].src;
+                TextureD3D12* dst = c->resolves[i].dst;
+                Transition(c, src, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+                Transition(c, dst, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+                c->list->ResolveSubresource(dst->resource.Get(), 0, src->resource.Get(), 0, dst->format);
+            }
+            c->resolveCount = 0;
+        }
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)
         {
             if (!num) return;

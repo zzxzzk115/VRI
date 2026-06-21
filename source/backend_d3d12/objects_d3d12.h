@@ -44,6 +44,7 @@ namespace vri::d3d12
         uint32_t               width = 0, height = 0, depth = 1;
         uint32_t               mipNum = 1, layerNum = 1;
         uint32_t               texelSize = 0;
+        uint32_t               sampleCount = 1;        // >1 => multisample (TEXTURE2DMS views)
         bool                   isRenderTarget = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
         bool                   isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
         D3D12_RESOURCE_STATES  state = D3D12_RESOURCE_STATE_COMMON;
@@ -112,6 +113,10 @@ namespace vri::d3d12
         D3D12_CPU_DESCRIPTOR_HANDLE        rtvs[8] = {}; // bound color RTVs for the active pass
         uint32_t                           rtvCount = 0;
         const PipelineD3D12*               boundPipeline = nullptr; // for vertex-buffer strides at draw
+        // MSAA color attachments to resolve at EndRendering (src multisample -> dst single).
+        struct PendingResolve { TextureD3D12* src; TextureD3D12* dst; };
+        PendingResolve                     resolves[8] = {};
+        uint32_t                           resolveCount = 0;
     };
 
     struct FenceD3D12
