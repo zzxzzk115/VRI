@@ -32,6 +32,10 @@ namespace vri::d3d12
         D3D12_CPU_DESCRIPTOR_HANDLE AllocRtv();
         D3D12_CPU_DESCRIPTOR_HANDLE AllocDsv();
 
+        // Lazily-created command signature for ExecuteIndirect(DispatchMesh) - must
+        // outlive GPU execution, so it lives on the device (12-byte: 3x uint32 x,y,z).
+        ID3D12CommandSignature* DispatchMeshSignature();
+
     private:
         VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
         void      FillDeviceDesc(IDXGIAdapter1* adapter);
@@ -40,6 +44,7 @@ namespace vri::d3d12
 
         ComPtr<IDXGIFactory4>        m_factory;
         ComPtr<ID3D12Device>         m_device;
+        ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;       // CPU-only RTV heap
         ComPtr<ID3D12DescriptorHeap> m_dsvHeap;       // CPU-only DSV heap
         uint32_t                     m_rtvSize = 0;    // descriptor increment

@@ -493,10 +493,87 @@ namespace vri::d3d12
         }
         void VRI_CALL DestroyPipelineLayout(VriPipelineLayout* layout) { if (layout) delete PL(layout); }
 
+        // Mesh-shader pipeline (MS [+ AS] + PS) via the pipeline-state-stream API
+        // (ID3D12Device2). No vertex input / input assembly. Returns Success/Failure.
+        VriResult CreateMeshPipeline(DeviceD3D12* d, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
+        {
+            PipelineLayoutD3D12* layout = PL(desc->pipelineLayout);
+            D3D12_SHADER_BYTECODE ms = {}, as = {}, ps = {};
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+            {
+                const VriShaderDesc& s = desc->shaders[i];
+                const D3D12_SHADER_BYTECODE bc = {s.bytecode, s.bytecodeSize};
+                if (s.stage == VriShaderStage_Mesh) ms = bc;
+                else if (s.stage == VriShaderStage_Task) as = bc;
+                else if (s.stage == VriShaderStage_Fragment) ps = bc;
+            }
+
+            D3D12_RASTERIZER_DESC raster = {};
+            raster.FillMode = D3D12_FILL_MODE_SOLID;
+            raster.CullMode = ToD3DCull(desc->rasterization.cullMode);
+            raster.FrontCounterClockwise = desc->rasterization.frontFace == VriFrontFace_CounterClockwise ? TRUE : FALSE;
+            raster.DepthClipEnable = TRUE;
+
+            D3D12_BLEND_DESC blend = {};
+            blend.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE; blend.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO; blend.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blend.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE; blend.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO; blend.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+            const VriColorAttachmentDesc* c0 = desc->outputMerger.colorNum ? &desc->outputMerger.colors[0] : nullptr;
+            const VriColorWriteFlags wm = c0 ? c0->colorWriteMask : VriColorWrite_RGBA;
+            blend.RenderTarget[0].RenderTargetWriteMask = static_cast<UINT8>((wm == 0 ? VriColorWrite_RGBA : wm) & 0xF);
+
+            D3D12_DEPTH_STENCIL_DESC ds = {};
+            ds.DepthEnable = desc->depthStencil.depthTest ? TRUE : FALSE;
+            ds.DepthWriteMask = desc->depthStencil.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+            ds.DepthFunc = ToD3DCompare(desc->depthStencil.depthCompareOp);
+
+            D3D12_RT_FORMAT_ARRAY rtv = {};
+            rtv.NumRenderTargets = desc->outputMerger.colorNum <= 8 ? desc->outputMerger.colorNum : 8;
+            for (uint32_t i = 0; i < rtv.NumRenderTargets; ++i) rtv.RTFormats[i] = ToDxgiFormat(desc->outputMerger.colors[i].format).format;
+            DXGI_SAMPLE_DESC sample = {};
+            sample.Count = desc->multisample.sampleNum ? desc->multisample.sampleNum : 1;
+
+            // Packed stream of subobjects (each aligned to void*); CreatePipelineState
+            // reads them by their leading type tag.
+            struct alignas(void*) SubRoot { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE; ID3D12RootSignature* v; };
+            struct alignas(void*) SubMS   { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS; D3D12_SHADER_BYTECODE v; };
+            struct alignas(void*) SubAS   { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS; D3D12_SHADER_BYTECODE v; };
+            struct alignas(void*) SubPS   { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS; D3D12_SHADER_BYTECODE v; };
+            struct alignas(void*) SubRast { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER; D3D12_RASTERIZER_DESC v; };
+            struct alignas(void*) SubBlend{ D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND; D3D12_BLEND_DESC v; };
+            struct alignas(void*) SubDS   { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL; D3D12_DEPTH_STENCIL_DESC v; };
+            struct alignas(void*) SubRTV  { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS; D3D12_RT_FORMAT_ARRAY v; };
+            struct alignas(void*) SubDSV  { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT; DXGI_FORMAT v; };
+            struct alignas(void*) SubSamp { D3D12_PIPELINE_STATE_SUBOBJECT_TYPE t = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC; DXGI_SAMPLE_DESC v; };
+            struct Stream {
+                SubRoot rootSig; SubMS msBc; SubAS asBc; SubPS psBc; SubRast rast; SubBlend blend; SubDS ds; SubRTV rtv; SubDSV dsv; SubSamp sample;
+            } stream;
+            stream.rootSig.v = layout->rootSig.Get();
+            stream.msBc.v = ms; stream.asBc.v = as; stream.psBc.v = ps;
+            stream.rast.v = raster; stream.blend.v = blend; stream.ds.v = ds; stream.rtv.v = rtv;
+            stream.dsv.v = desc->outputMerger.depthStencilFormat != VriFormat_Unknown ? ToDxgiFormat(desc->outputMerger.depthStencilFormat).format : DXGI_FORMAT_UNKNOWN;
+            stream.sample.v = sample;
+
+            ComPtr<ID3D12Device2> dev2;
+            if (FAILED(d->Device()->QueryInterface(IID_PPV_ARGS(&dev2))))
+            { d->ReportError("mesh pipeline: ID3D12Device2 unavailable"); return VriResult_Unsupported; }
+            D3D12_PIPELINE_STATE_STREAM_DESC sdesc = {sizeof(stream), &stream};
+
+            PipelineD3D12* p = new PipelineD3D12{};
+            p->device = d; p->rootSig = layout->rootSig.Get(); p->isMesh = true;
+            if (FAILED(dev2->CreatePipelineState(&sdesc, IID_PPV_ARGS(&p->pso))))
+            { delete p; d->ReportError("CreatePipelineState (mesh) failed"); return VriResult_Failure; }
+            *out = ToHandle(p);
+            return VriResult_Success;
+        }
+
         VriResult VRI_CALL CreateGraphicsPipeline(VriDevice* device, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
         {
             DeviceD3D12* d = Dev(device);
             PipelineLayoutD3D12* layout = PL(desc->pipelineLayout);
+
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+                if (desc->shaders[i].stage == VriShaderStage_Mesh || desc->shaders[i].stage == VriShaderStage_Task)
+                    return CreateMeshPipeline(d, desc, out);
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC pd = {};
             pd.pRootSignature = layout->rootSig.Get();
@@ -697,7 +774,7 @@ namespace vri::d3d12
             c->list->SetPipelineState(p->pso.Get());
             // Set the root signature here too so a no-descriptor pipeline works without CmdSetPipelineLayout.
             if (p->isCompute) { c->list->SetComputeRootSignature(p->rootSig); }
-            else { c->list->SetGraphicsRootSignature(p->rootSig); c->list->IASetPrimitiveTopology(p->topology); }
+            else { c->list->SetGraphicsRootSignature(p->rootSig); if (!p->isMesh) c->list->IASetPrimitiveTopology(p->topology); }
         }
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
         {

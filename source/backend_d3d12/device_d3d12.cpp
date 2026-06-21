@@ -2,6 +2,7 @@
 #include "core_d3d12.h"
 #include "swapchain_d3d12.h"
 #include "vrs_d3d12.h"
+#include "meshshader_d3d12.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -232,12 +233,29 @@ namespace vri::d3d12
         }
     }
 
+    ID3D12CommandSignature* DeviceD3D12::DispatchMeshSignature()
+    {
+        if (!m_dispatchMeshSig)
+        {
+            D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+            arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH;
+            D3D12_COMMAND_SIGNATURE_DESC sd = {};
+            sd.ByteStride = 3 * sizeof(uint32_t); // x, y, z
+            sd.NumArgumentDescs = 1;
+            sd.pArgumentDescs = &arg;
+            m_device->CreateCommandSignature(&sd, nullptr, IID_PPV_ARGS(&m_dispatchMeshSig));
+        }
+        return m_dispatchMeshSig.Get();
+    }
+
     void DeviceD3D12::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceD3D12(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceD3D12(), sizeof(VriSwapChainInterface)); // DXGI flip-model present
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
+        if (m_enabledFeatures & VriFeature_MeshShader)
+            m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceD3D12(), sizeof(VriMeshShaderInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

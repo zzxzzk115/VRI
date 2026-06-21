@@ -57,6 +57,7 @@ target("vri-tests")
         add_files("test_depth_d3d12.cpp")
         add_files("test_msaa_d3d12.cpp")
         add_files("test_vrs_d3d12.cpp")       -- variable rate shading (RSSetShadingRate)
+        add_files("test_meshshader_d3d12.cpp")-- mesh shaders (DispatchMesh, DXIL)
     end
 
     add_tests("default")

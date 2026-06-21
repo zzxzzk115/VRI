@@ -174,6 +174,7 @@ namespace vri::d3d12
         D3D12_PRIMITIVE_TOPOLOGY        topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
         std::vector<PipelineGraphicsVB> vbStrides; // for the draw-time vertex-buffer binding
         bool                            isCompute = false;
+        bool                            isMesh = false; // mesh-shader pipeline (no IA topology)
     };
 
     inline VriPipelineLayout* ToHandle(PipelineLayoutD3D12* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
