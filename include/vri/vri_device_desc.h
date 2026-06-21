@@ -66,6 +66,8 @@ typedef struct VriDeviceDesc
     VriBool        hasConservativeRaster;
     VriBool        hasFragmentShaderBarycentric;
     VriBool        hasCustomBorderColor;
+    VriBool        hasShaderWaveOps; /* subgroup/wave intrinsics (WaveActiveSum, ballots, ...) */
+    uint32_t       subgroupSize;     /* lanes per subgroup/wave (0 if unknown) */
 
     /* ray-tracing shader-binding-table layout (valid when hasRayTracing) */
     uint32_t       rtShaderGroupHandleSize;

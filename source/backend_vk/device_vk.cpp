@@ -509,6 +509,12 @@ namespace vri::vk
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
 
+        // Subgroup (wave) size + whether arithmetic wave ops are available.
+        VkPhysicalDeviceVulkan11Properties props11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES};
+        VkPhysicalDeviceProperties2 props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        props2.pNext = &props11;
+        vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
+
         m_desc = {};
         std::strncpy(m_desc.adapter.name, props.deviceName, sizeof(m_desc.adapter.name) - 1);
         m_desc.adapter.deviceId = props.deviceID;
@@ -563,6 +569,8 @@ namespace vri::vk
         m_desc.hasConservativeRaster = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;
+        m_desc.subgroupSize = props11.subgroupSize;
+        m_desc.hasShaderWaveOps = (props11.subgroupSupportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) ? VRI_TRUE : VRI_FALSE;
 
         if (m_enabledFeatures & VriFeature_RayTracing)
         {

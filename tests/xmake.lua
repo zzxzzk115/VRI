@@ -34,6 +34,7 @@ target("vri-tests")
     add_files("test_consrast_xbackend.cpp")   -- conservative rasterization (VK EXT + D3D12 tier)
     add_files("test_barycentric_xbackend.cpp")-- fragment-shader barycentrics (VK KHR + D3D12 SM6.1)
     add_files("test_bordercolor_xbackend.cpp")-- custom sampler border color (VK EXT + D3D12 native)
+    add_files("test_wave_xbackend.cpp")       -- subgroup/wave ops (VK subgroups + D3D12 SM6.0)
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

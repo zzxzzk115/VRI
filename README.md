@@ -45,6 +45,8 @@ Covered: solid + Y-up coordinate orientation, UBO descriptors, sampled textures 
 
 **Custom sampler border color** (`VriSamplerDesc::useCustomBorderColor` + `customBorderColor`, `VriDeviceDesc::hasCustomBorderColor`): an arbitrary RGBA border for `ClampToBorder` addressing — Vulkan `VK_EXT_custom_border_color`, D3D12 native (`D3D12_SAMPLER_DESC::BorderColor`). The cross-backend test samples a blue texture far outside `[0,1]` with a custom green border and reads back green.
 
+**Subgroup / wave operations** (`VriDeviceDesc::hasShaderWaveOps` + `subgroupSize`): Vulkan subgroups and D3D12 SM6.0 wave intrinsics, queried uniformly. The cross-backend test runs a compute shader where each lane adds 1 to `WaveActiveSum` and checks the result equals the reported `subgroupSize` (proving wave ops work and the size is consistent) — runs on WARP too.
+
 ## Platforms
 
 Windows / Linux (Vulkan, WebGPU, OpenGL) and Web (Emscripten → WebGL2 **and** WebGPU), all built + tested in CI. macOS is **built + run in CI** (compile-verified; GPU backends pending real-device validation — CI has no MoltenVK ICD, and desktop GL caps at 4.1). Android / iOS are planned per backend.

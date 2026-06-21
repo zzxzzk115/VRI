@@ -248,6 +248,12 @@ namespace vri::d3d12
         if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &o3, sizeof(o3))))
             m_desc.hasFragmentShaderBarycentric = o3.BarycentricsSupported ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor = VRI_TRUE; // D3D12 sampler border color is always a float4
+        D3D12_FEATURE_DATA_D3D12_OPTIONS1 o1 = {};
+        if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &o1, sizeof(o1))))
+        {
+            m_desc.hasShaderWaveOps = o1.WaveOps ? VRI_TRUE : VRI_FALSE;
+            m_desc.subgroupSize = o1.WaveLaneCountMin; // SM6.0 wave width
+        }
 
         m_desc.enabledFeatures = m_enabledFeatures;
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
