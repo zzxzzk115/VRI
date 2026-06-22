@@ -220,6 +220,7 @@ namespace vri::gl
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             glDrawBuffer(GL_BACK);
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have left it on
             glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
             SwapBuffers(hdc); // vsync follows the window's swap interval (WGL_EXT_swap_control not wired)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -243,6 +244,7 @@ namespace vri::gl
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             glDrawBuffer(GL_BACK);
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have left it on
             glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
             glXSwapBuffers(s->xdisplay, s->xwindow);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -257,6 +259,7 @@ namespace vri::gl
             glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // the canvas
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have left it on
             glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             return VriResult_Success;

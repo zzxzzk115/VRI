@@ -81,6 +81,12 @@ namespace vri::gl
         {
             if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
                 return; // too chatty (buffer-mapped hints etc.)
+            // Performance / "other" messages are benign hints (e.g. a DYNAMIC_DRAW buffer moved
+            // VIDEO<->HOST, or pixel-transfer sync) that fire every frame for normal patterns like
+            // ImGui's per-frame buffers. Surface only actual correctness issues, not perf noise.
+            if (type == GL_DEBUG_TYPE_PERFORMANCE || type == GL_DEBUG_TYPE_OTHER ||
+                type == GL_DEBUG_TYPE_MARKER || type == GL_DEBUG_TYPE_PUSH_GROUP || type == GL_DEBUG_TYPE_POP_GROUP)
+                return;
             const auto* dev = static_cast<const DeviceGL*>(userParam);
             if (!dev)
                 return;
