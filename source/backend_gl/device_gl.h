@@ -82,6 +82,8 @@ namespace vri::gl
         uint32_t             ShaderVersion() const { return m_shaderVersion; }
         const GlFeatures&    Features() const { return m_features; }
         void                 ReportError(const char* message) const;
+        // Route a backend diagnostic (GL KHR_debug message) to the app's callback.
+        void                 Diagnostic(VriMessageSeverity severity, const char* message) const;
 
         // Render-pass FBO cache. AcquireFbo returns a cached FBO for the attachment set
         // (isNew=true means the caller must configure its attachments once); textures

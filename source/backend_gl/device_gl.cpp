@@ -61,13 +61,37 @@ namespace vri::gl
         }
     }
 
-    void DeviceGL::ReportError(const char* message) const
+    void DeviceGL::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+
+    void DeviceGL::Diagnostic(VriMessageSeverity severity, const char* message) const
     {
         if (m_callback.MessageCallback)
-            m_callback.MessageCallback(m_callback.userArg, VriMessageSeverity_Error, message);
+            m_callback.MessageCallback(m_callback.userArg, severity, message);
         else
             std::fprintf(stderr, "[VRI/GL] %s\n", message);
     }
+
+#if !defined(__EMSCRIPTEN__)
+    // KHR_debug message pump (desktop GL 4.3+): forward the driver's diagnostics to the app
+    // callback. WebGL2/ES has no glDebugMessageCallback, so this is desktop-only.
+    namespace
+    {
+        void APIENTRY GLDebugCallback(GLenum /*source*/, GLenum type, GLuint /*id*/, GLenum severity,
+                                      GLsizei /*length*/, const GLchar* message, const void* userParam)
+        {
+            if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
+                return; // too chatty (buffer-mapped hints etc.)
+            const auto* dev = static_cast<const DeviceGL*>(userParam);
+            if (!dev)
+                return;
+            const VriMessageSeverity s = (severity == GL_DEBUG_SEVERITY_HIGH ||
+                                          type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
+                                             ? VriMessageSeverity_Error
+                                             : VriMessageSeverity_Warning;
+            dev->Diagnostic(s, message ? message : "<null>");
+        }
+    } // namespace
+#endif
 
     VriResult DeviceGL::Init(const VriDeviceCreationDesc& desc)
     {
@@ -132,6 +156,17 @@ namespace vri::gl
         {
             ReportError("gladLoadGLLoader failed");
             return VriResult_Failure;
+        }
+#endif
+
+#if !defined(__EMSCRIPTEN__)
+        // KHR_debug (GL 4.3+): forward driver diagnostics to the app callback. Synchronous so
+        // the message arrives at the offending call. WebGL2/ES has no glDebugMessageCallback.
+        if (desc.enableValidation && glDebugMessageCallback)
+        {
+            glEnable(GL_DEBUG_OUTPUT);
+            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            glDebugMessageCallback(GLDebugCallback, this);
         }
 #endif
 

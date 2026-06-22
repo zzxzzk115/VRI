@@ -14,16 +14,40 @@ namespace vri::d3d12
 {
     DeviceD3D12::~DeviceD3D12()
     {
+        // Unregister the debug-message callback before any D3D12 object is released: object
+        // teardown itself emits debug-layer messages, which would otherwise invoke the
+        // callback with a now-dangling `this`.
+        if (m_infoQueue && m_msgCookie)
+            m_infoQueue->UnregisterMessageCallback(m_msgCookie);
         if (m_queue.idleEvent) CloseHandle(m_queue.idleEvent);
     }
 
-    void DeviceD3D12::ReportError(const char* message) const
+    void DeviceD3D12::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+
+    void DeviceD3D12::Diagnostic(VriMessageSeverity severity, const char* message) const
     {
         if (m_callback.MessageCallback)
-            m_callback.MessageCallback(m_callback.userArg, VriMessageSeverity_Error, message);
+            m_callback.MessageCallback(m_callback.userArg, severity, message);
         else
             std::fprintf(stderr, "[VRI/D3D12] %s\n", message);
     }
+
+    namespace
+    {
+        // D3D12 debug-layer messages -> the app callback (ID3D12InfoQueue1, Win10 SDK 20348+).
+        void CALLBACK D3D12MessageCallback(D3D12_MESSAGE_CATEGORY /*category*/, D3D12_MESSAGE_SEVERITY severity,
+                                           D3D12_MESSAGE_ID /*id*/, LPCSTR description, void* context)
+        {
+            if (severity == D3D12_MESSAGE_SEVERITY_INFO || severity == D3D12_MESSAGE_SEVERITY_MESSAGE)
+                return; // info/message is too chatty
+            const auto* dev = static_cast<const DeviceD3D12*>(context);
+            if (!dev)
+                return;
+            const VriMessageSeverity s = severity == D3D12_MESSAGE_SEVERITY_WARNING ? VriMessageSeverity_Warning
+                                                                                    : VriMessageSeverity_Error;
+            dev->Diagnostic(s, description ? description : "<null>");
+        }
+    } // namespace
 
     VriResult DeviceD3D12::Init(const VriDeviceCreationDesc& desc)
     {
@@ -69,6 +93,14 @@ namespace vri::d3d12
         {
             ReportError("D3D12CreateDevice failed (no FL11_0 hardware or WARP adapter)");
             return VriResult_Unsupported;
+        }
+
+        if (desc.enableValidation)
+        {
+            // Forward debug-layer messages to the app callback (ID3D12InfoQueue1; Win10 SDK
+            // 20348+). If unavailable the debug layer still prints to the VS output window.
+            if (SUCCEEDED(m_device->QueryInterface(IID_PPV_ARGS(&m_infoQueue))))
+                m_infoQueue->RegisterMessageCallback(D3D12MessageCallback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, this, &m_msgCookie);
         }
 
         D3D12_COMMAND_QUEUE_DESC qd = {};

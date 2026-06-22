@@ -55,6 +55,18 @@ namespace vriex
         return api;
     }
 
+    // Default diagnostic sink: every backend routes its native validation/diagnostics (VK
+    // debug-utils, D3D12 InfoQueue, GL KHR_debug, WebGPU uncaptured errors) plus VRI's own
+    // validation layer through this one callback. The examples install it so problems print
+    // instead of vanishing; a real app would plug in its own logger here.
+    inline void VRI_CALL DefaultMessageCallback(void*, VriMessageSeverity severity, const char* message)
+    {
+        const char* s = severity == VriMessageSeverity_Error ? "ERROR"
+                      : severity == VriMessageSeverity_Warning ? "WARN" : "INFO";
+        std::fprintf(stderr, "[VRI][%s] %s\n", s, message);
+        std::fflush(stderr);
+    }
+
     // VRI_MAX_FRAMES env (desktop) or ?frames=N URL (web): auto-exit after N frames.
     inline uint64_t QueryMaxFrames()
     {
@@ -121,6 +133,7 @@ namespace vriex
             if (!SDL_Init(SDL_INIT_VIDEO)) Fail("SDL_Init failed");
 #endif
             VriDeviceCreationDesc dd{}; dd.graphicsAPI = api; dd.enableValidation = VRI_TRUE; dd.bestEffort = VRI_TRUE;
+            static VriCallbackInterface cb{}; cb.MessageCallback = DefaultMessageCallback; dd.callbackInterface = &cb;
             if (vriCreateDevice(&dd, &dev) != VriResult_Success) Fail("vriCreateDevice failed");
             if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success ||
                 vriGetInterface(dev, VRI_INTERFACE_SWAPCHAIN, sizeof(swap), &swap) != VriResult_Success)

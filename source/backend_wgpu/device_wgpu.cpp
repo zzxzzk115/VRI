@@ -56,13 +56,18 @@ namespace vri::wgpu
         }
 
         // WebGPU validation errors are otherwise silent (they go to the browser devtools
-        // console, which emrun does not forward). Surface them on stderr so they show up in
-        // headless runs and CI - matching VRI's "explicit, never silent" stance.
-        void OnUncapturedError(const WGPUDevice*, WGPUErrorType type, WGPUStringView message, void*, void*)
+        // console, which emrun does not forward). Route them to the app's message callback
+        // (userdata1 = the device) so every backend surfaces native diagnostics uniformly -
+        // matching VRI's "explicit, never silent" stance.
+        void OnUncapturedError(const WGPUDevice*, WGPUErrorType type, WGPUStringView message, void* ud1, void*)
         {
-            std::fprintf(stderr, "[VRI/WGPU] uncaptured error (type %d): %.*s\n",
-                         static_cast<int>(type), static_cast<int>(message.length), message.data ? message.data : "");
-            std::fflush(stderr);
+            char buf[1024];
+            std::snprintf(buf, sizeof(buf), "uncaptured error (type %d): %.*s",
+                          static_cast<int>(type), static_cast<int>(message.length), message.data ? message.data : "");
+            if (const auto* dev = static_cast<const DeviceWGPU*>(ud1))
+                dev->Diagnostic(VriMessageSeverity_Error, buf);
+            else
+                std::fprintf(stderr, "[VRI/WGPU] %s\n", buf);
         }
     } // namespace
 
@@ -83,10 +88,12 @@ namespace vri::wgpu
             wgpuInstanceRelease(m_instance);
     }
 
-    void DeviceWGPU::ReportError(const char* message) const
+    void DeviceWGPU::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+
+    void DeviceWGPU::Diagnostic(VriMessageSeverity severity, const char* message) const
     {
         if (m_callback.MessageCallback)
-            m_callback.MessageCallback(m_callback.userArg, VriMessageSeverity_Error, message);
+            m_callback.MessageCallback(m_callback.userArg, severity, message);
         else
             std::fprintf(stderr, "[VRI/WGPU] %s\n", message);
     }
@@ -126,6 +133,7 @@ namespace vri::wgpu
         DeviceRequest dreq;
         WGPUDeviceDescriptor deviceDesc = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback = OnUncapturedError;
+        deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
         WGPURequestDeviceCallbackInfo dcb = {};
         dcb.mode = kCallbackMode;
         dcb.callback = OnDevice;

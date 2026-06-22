@@ -27,6 +27,8 @@ namespace vri::d3d12
         QueueD3D12*          GetQueue(VriQueueType /*type*/) { return &m_queue; }
         uint64_t             EnabledFeatures() const { return m_enabledFeatures; }
         void                 ReportError(const char* message) const;
+        // Route a backend diagnostic (D3D12 InfoQueue message) to the app's callback.
+        void                 Diagnostic(VriMessageSeverity severity, const char* message) const;
 
         // Bump-allocate one CPU render-target-view / depth-stencil-view descriptor.
         D3D12_CPU_DESCRIPTOR_HANDLE AllocRtv();
@@ -44,6 +46,8 @@ namespace vri::d3d12
 
         ComPtr<IDXGIFactory4>        m_factory;
         ComPtr<ID3D12Device>         m_device;
+        ComPtr<ID3D12InfoQueue1>     m_infoQueue;      // debug-layer message sink (validation)
+        DWORD                        m_msgCookie = 0;  // RegisterMessageCallback token
         ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;       // CPU-only RTV heap
         ComPtr<ID3D12DescriptorHeap> m_dsvHeap;       // CPU-only DSV heap
