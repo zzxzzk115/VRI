@@ -1,37 +1,28 @@
 // Instanced textured cubes: a field of cubes drawn in one indexed instanced draw, each
 // placed by a per-instance model matrix (vertex stream 1), with a shared view-projection
-// (constant buffer) that orbits the field. Builds on examples/cube - same texture and
-// helpers - and adds instancing. Set VRI_API=vulkan|webgpu|opengl|d3d12 (default vulkan)
-// and VRI_MAX_FRAMES=N to auto-exit.
-#include <SDL3/SDL.h>
-
-#include <vri/vri.h>
-#include <vri/integration/vri_sdl3.h>
+// (constant buffer) that orbits the field. Builds on examples/cube; the shared host
+// scaffolding lives in examples/common/example_app.h. VRI_API / ?backend force a backend;
+// VRI_MAX_FRAMES / ?frames=N auto-exit.
+#include "../common/example_app.h"
 
 #include <cmath>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../cube/mat4.h"
 #include "../cube/ktx.h"
-#include "../cube/capture.h"
 
-#include "tests/shaders/cube_inst_spv.h"  // g_cube_instSpv
-#include "tests/shaders/cube_inst_wgsl.h" // g_cube_instWgsl
-#include "tests/shaders/cube_inst_dxbc.h" // g_cube_instDxbcVS / PS
+#include "tests/shaders/cube_inst_spv.h"  // g_cubeInstSpv
+#include "tests/shaders/cube_inst_wgsl.h" // g_cubeInstWgsl
+#include "tests/shaders/cube_inst_dxbc.h" // g_cubeInstDxbcVS / PS
 
 namespace
 {
-    constexpr uint32_t kWidth = 640, kHeight = 480; // width*4 is 256-aligned (D3D12 readback pitch)
-    constexpr VriFormat kSwapFormat = VriFormat_BGRA8_UNORM;
-    constexpr VriFormat kDepthFormat = VriFormat_D32_SFLOAT;
-    constexpr int kGrid = 4; // kGrid^3 cubes
-
-    void Fail(const char* msg) { std::fprintf(stderr, "[instancing] %s\n", msg); std::exit(1); }
+    constexpr uint32_t kWidth = 640, kHeight = 480; // width*4 is 256-aligned (readback pitch)
+    constexpr int kGrid = 4;            // kGrid^3 cubes
+    constexpr float kSpacing = 2.2f;
 
     struct Vertex { float px, py, pz; float u, v; };
 
@@ -62,73 +53,40 @@ int main(int, char**)
     // per-instance model matrices (static grid; each cube fixed-rotated and scaled)
     std::vector<Mat4> instances;
     instances.reserve(kGrid * kGrid * kGrid);
-    const float spacing = 2.2f, half = (kGrid - 1) * spacing * 0.5f;
+    const float half = (kGrid - 1) * kSpacing * 0.5f;
     for (int z = 0; z < kGrid; ++z)
         for (int y = 0; y < kGrid; ++y)
             for (int x = 0; x < kGrid; ++x)
             {
                 const float phase = float(x + y * 3 + z * 7) * 0.5f;
-                Mat4 m = Mul(Translate(x * spacing - half, y * spacing - half, z * spacing - half), Mul(RotateY(phase), Scale(0.7f)));
-                instances.push_back(m);
+                instances.push_back(Mul(Translate(x * kSpacing - half, y * kSpacing - half, z * kSpacing - half), Mul(RotateY(phase), Scale(0.7f))));
             }
+    const uint64_t instBytes = instances.size() * sizeof(Mat4);
     const uint32_t instanceNum = static_cast<uint32_t>(instances.size());
-    const uint64_t instBytes = instanceNum * sizeof(Mat4);
 
-    const char* apiEnv = std::getenv("VRI_API");
-    VriGraphicsAPI api = VriGraphicsAPI_Vulkan;
-    if (apiEnv && std::strcmp(apiEnv, "webgpu") == 0) api = VriGraphicsAPI_WebGPU;
-    else if (apiEnv && (std::strcmp(apiEnv, "opengl") == 0 || std::strcmp(apiEnv, "gl") == 0)) api = VriGraphicsAPI_OpenGL;
-    else if (apiEnv && (std::strcmp(apiEnv, "d3d12") == 0 || std::strcmp(apiEnv, "dx12") == 0)) api = VriGraphicsAPI_D3D12;
-    const bool useWgsl = api == VriGraphicsAPI_WebGPU;
-    const bool useDxbc = api == VriGraphicsAPI_D3D12;
-    const char* apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : (api == VriGraphicsAPI_OpenGL ? "OpenGL" : (api == VriGraphicsAPI_D3D12 ? "D3D12" : "Vulkan"));
+    static vriex::ExampleApp app;
+    app.Init("instancing", kWidth, kHeight, /*hasDepth*/ true);
+    VriCoreInterface& c = app.c;
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) Fail("SDL_Init failed");
-    char title[64]; std::snprintf(title, sizeof(title), "VRI Instancing (%s)", apiName);
-    SDL_Window* window = SDL_CreateWindow(title, kWidth, kHeight, 0);
-    if (!window) Fail("SDL_CreateWindow failed");
-
+    // load the texture (desktop: next to the exe; web: preloaded into MEMFS at root)
     KtxImage tex;
+#if defined(__EMSCRIPTEN__)
+    if (!LoadKtxRgba("/metalplate01_rgba.ktx", tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
+        app.Fail("failed to load metalplate01_rgba.ktx");
+#else
     {
         const char* base = SDL_GetBasePath();
         std::string path = (base ? std::string(base) : std::string()) + "metalplate01_rgba.ktx";
         if (!LoadKtxRgba(path.c_str(), tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
-            Fail("failed to load metalplate01_rgba.ktx");
+            app.Fail("failed to load metalplate01_rgba.ktx");
     }
+#endif
 
-    VriDeviceCreationDesc dd{};
-    dd.graphicsAPI = api; dd.enableValidation = VRI_TRUE; dd.bestEffort = VRI_TRUE;
-    VriDevice* dev = nullptr;
-    if (vriCreateDevice(&dd, &dev) != VriResult_Success) Fail("vriCreateDevice failed");
-
-    VriCoreInterface c{}; VriSwapChainInterface swap{};
-    if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success ||
-        vriGetInterface(dev, VRI_INTERFACE_SWAPCHAIN, sizeof(swap), &swap) != VriResult_Success)
-        Fail("vriGetInterface failed");
-
-    VriQueue* queue = nullptr; c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
-
-    VriSwapChainDesc scd{};
-    scd.window = vriWindowHandleFromSDL3(window); scd.queue = queue; scd.format = kSwapFormat;
-    scd.width = kWidth; scd.height = kHeight; scd.textureNum = 3; scd.vsync = VRI_TRUE;
-    VriSwapChain* swapchain = nullptr;
-    if (swap.CreateSwapChain(dev, &scd, &swapchain) != VriResult_Success) Fail("CreateSwapChain failed");
-
-    VriTextureDesc dtd{};
-    dtd.type = VriTextureType_2D; dtd.format = kDepthFormat; dtd.width = kWidth; dtd.height = kHeight; dtd.depth = 1;
-    dtd.mipNum = 1; dtd.layerNum = 1; dtd.sampleNum = 1; dtd.usage = VriTextureUsage_DepthStencilAttachment; dtd.memoryLocation = VriMemoryLocation_Device;
-    VriTexture* depth = nullptr;
-    if (c.CreateTexture(dev, &dtd, &depth) != VriResult_Success) Fail("depth CreateTexture failed");
-    VriTextureViewDesc dvd{}; dvd.texture = depth; dvd.viewType = VriTextureViewType_2D; dvd.format = VriFormat_Unknown; dvd.aspect = VriImageAspect_Depth;
-    VriDescriptor* depthView = nullptr;
-    if (c.CreateTextureView(dev, &dvd, &depthView) != VriResult_Success) Fail("depth view failed");
-
-    // device-local vertex / index / instance buffers + their staging
     auto makeDeviceBuf = [&](uint64_t size, VriBufferUsageFlags usage, const void* src) {
         VriBufferDesc bd{}; bd.size = size; bd.usage = usage | VriBufferUsage_TransferDst; bd.memoryLocation = VriMemoryLocation_Device;
-        VriBuffer* b = nullptr; c.CreateBuffer(dev, &bd, &b);
+        VriBuffer* b = nullptr; c.CreateBuffer(app.dev, &bd, &b);
         VriBufferDesc sd{}; sd.size = size; sd.usage = VriBufferUsage_TransferSrc; sd.memoryLocation = VriMemoryLocation_HostUpload;
-        VriBuffer* s = nullptr; c.CreateBuffer(dev, &sd, &s);
+        VriBuffer* s = nullptr; c.CreateBuffer(app.dev, &sd, &s);
         std::memcpy(c.MapBuffer(s, 0, size), src, size); c.UnmapBuffer(s);
         return std::pair<VriBuffer*, VriBuffer*>(b, s);
     };
@@ -136,44 +94,44 @@ int main(int, char**)
     auto [ibuf, istg] = makeDeviceBuf(sizeof(kIndices), VriBufferUsage_IndexBuffer, kIndices);
     auto [inst, inststg] = makeDeviceBuf(instBytes, VriBufferUsage_VertexBuffer, instances.data());
 
-    // view-projection constant buffer (refreshed each frame via staging)
+    // shared view-projection constant buffer (orbits the field), refreshed each frame
     VriBufferDesc ubd{}; ubd.size = sizeof(Mat4); ubd.usage = VriBufferUsage_ConstantBuffer | VriBufferUsage_TransferDst; ubd.memoryLocation = VriMemoryLocation_Device;
-    VriBuffer* ubo = nullptr; c.CreateBuffer(dev, &ubd, &ubo);
+    VriBuffer* ubo = nullptr; c.CreateBuffer(app.dev, &ubd, &ubo);
     VriBufferDesc usd{}; usd.size = sizeof(Mat4); usd.usage = VriBufferUsage_TransferSrc; usd.memoryLocation = VriMemoryLocation_HostUpload;
-    VriBuffer* ustg = nullptr; c.CreateBuffer(dev, &usd, &ustg);
+    VriBuffer* ustg = nullptr; c.CreateBuffer(app.dev, &usd, &ustg);
     VriBufferViewDesc ubv{}; ubv.buffer = ubo; ubv.viewType = VriDescriptorType_ConstantBuffer; ubv.offset = 0; ubv.size = sizeof(Mat4);
-    VriDescriptor* uboView = nullptr; c.CreateBufferView(dev, &ubv, &uboView);
+    VriDescriptor* uboView = nullptr; c.CreateBufferView(app.dev, &ubv, &uboView);
 
-    // texture + staging + view + sampler
+    // texture (device-local) + staging upload + view + sampler
     VriTextureDesc ttd{};
     ttd.type = VriTextureType_2D; ttd.format = VriFormat_RGBA8_UNORM; ttd.width = tex.width; ttd.height = tex.height; ttd.depth = 1;
     ttd.mipNum = 1; ttd.layerNum = 1; ttd.sampleNum = 1; ttd.usage = VriTextureUsage_ShaderResource | VriTextureUsage_TransferDst; ttd.memoryLocation = VriMemoryLocation_Device;
-    VriTexture* texture = nullptr; c.CreateTexture(dev, &ttd, &texture);
+    VriTexture* texture = nullptr; c.CreateTexture(app.dev, &ttd, &texture);
     VriTextureViewDesc tvd{}; tvd.texture = texture; tvd.viewType = VriTextureViewType_2D; tvd.format = VriFormat_Unknown; tvd.aspect = VriImageAspect_Color;
-    VriDescriptor* texView = nullptr; c.CreateTextureView(dev, &tvd, &texView);
+    VriDescriptor* texView = nullptr; c.CreateTextureView(app.dev, &tvd, &texView);
     VriBufferDesc stg{}; stg.size = tex.rgba.size(); stg.usage = VriBufferUsage_TransferSrc; stg.memoryLocation = VriMemoryLocation_HostUpload;
-    VriBuffer* staging = nullptr; c.CreateBuffer(dev, &stg, &staging);
+    VriBuffer* staging = nullptr; c.CreateBuffer(app.dev, &stg, &staging);
     std::memcpy(c.MapBuffer(staging, 0, tex.rgba.size()), tex.rgba.data(), tex.rgba.size()); c.UnmapBuffer(staging);
     VriSamplerDesc smp{}; smp.magFilter = VriFilter_Linear; smp.minFilter = VriFilter_Linear; smp.mipmapMode = VriMipmapMode_Linear;
     smp.addressModeU = VriAddressMode_Repeat; smp.addressModeV = VriAddressMode_Repeat; smp.addressModeW = VriAddressMode_Repeat; smp.maxLod = 1.0f;
-    VriDescriptor* sampler = nullptr; c.CreateSampler(dev, &smp, &sampler);
+    VriDescriptor* sampler = nullptr; c.CreateSampler(app.dev, &smp, &sampler);
 
+    // pipeline layout: CB@0 (vertex), Texture@1 + Sampler@2 (fragment)
     VriDescriptorRangeDesc ranges[3]{};
     ranges[0].baseRegister = 0; ranges[0].descriptorNum = 1; ranges[0].descriptorType = VriDescriptorType_ConstantBuffer; ranges[0].shaderStages = VriShaderStage_Vertex;
     ranges[1].baseRegister = 1; ranges[1].descriptorNum = 1; ranges[1].descriptorType = VriDescriptorType_Texture;        ranges[1].shaderStages = VriShaderStage_Fragment;
     ranges[2].baseRegister = 2; ranges[2].descriptorNum = 1; ranges[2].descriptorType = VriDescriptorType_Sampler;        ranges[2].shaderStages = VriShaderStage_Fragment;
     VriDescriptorSetDesc setDesc{}; setDesc.registerSpace = 0; setDesc.ranges = ranges; setDesc.rangeNum = 3;
     VriPipelineLayoutDesc ld{}; ld.descriptorSets = &setDesc; ld.descriptorSetNum = 1;
-    VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(dev, &ld, &layout);
+    VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(app.dev, &ld, &layout);
 
     VriShaderDesc sh[2]{};
     sh[0].stage = VriShaderStage_Vertex;   sh[0].entryPointName = "vertexMain";
     sh[1].stage = VriShaderStage_Fragment; sh[1].entryPointName = "fragmentMain";
-    if (useDxbc) { sh[0].bytecode = g_cubeInstDxbcVS; sh[0].bytecodeSize = sizeof(g_cubeInstDxbcVS); sh[1].bytecode = g_cubeInstDxbcPS; sh[1].bytecodeSize = sizeof(g_cubeInstDxbcPS); }
-    else { sh[0].bytecode = sh[1].bytecode = useWgsl ? static_cast<const void*>(g_cubeInstWgsl) : static_cast<const void*>(g_cubeInstSpv);
-           sh[0].bytecodeSize = sh[1].bytecodeSize = useWgsl ? sizeof(g_cubeInstWgsl) : sizeof(g_cubeInstSpv); }
+    if (app.useDxbc) { sh[0].bytecode = g_cubeInstDxbcVS; sh[0].bytecodeSize = sizeof(g_cubeInstDxbcVS); sh[1].bytecode = g_cubeInstDxbcPS; sh[1].bytecodeSize = sizeof(g_cubeInstDxbcPS); }
+    else { sh[0].bytecode = sh[1].bytecode = app.useWgsl ? static_cast<const void*>(g_cubeInstWgsl) : static_cast<const void*>(g_cubeInstSpv);
+           sh[0].bytecodeSize = sh[1].bytecodeSize = app.useWgsl ? sizeof(g_cubeInstWgsl) : sizeof(g_cubeInstSpv); }
 
-    // stream 0: per-vertex {pos, uv}; stream 1: per-instance model matrix (4 columns)
     VriVertexAttributeDesc attrs[6]{};
     attrs[0].format = VriFormat_RGB32_SFLOAT;  attrs[0].offset = 0;  attrs[0].streamIndex = 0;
     attrs[1].format = VriFormat_RG32_SFLOAT;   attrs[1].offset = 12; attrs[1].streamIndex = 0;
@@ -182,7 +140,7 @@ int main(int, char**)
     streams[0].stride = sizeof(Vertex); streams[0].bindingSlot = 0; streams[0].stepRate = VriVertexStepRate_PerVertex;
     streams[1].stride = sizeof(Mat4);   streams[1].bindingSlot = 1; streams[1].stepRate = VriVertexStepRate_PerInstance;
 
-    VriColorAttachmentDesc ca{}; ca.format = kSwapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
+    VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
     VriGraphicsPipelineDesc pd{};
     pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2;
     pd.vertexInput.attributes = attrs; pd.vertexInput.attributeNum = 6; pd.vertexInput.streams = streams; pd.vertexInput.streamNum = 2;
@@ -190,24 +148,21 @@ int main(int, char**)
     pd.rasterization.cullMode = VriCullMode_Back; pd.rasterization.frontFace = VriFrontFace_CounterClockwise; pd.rasterization.lineWidth = 1.0f;
     pd.multisample.sampleNum = 1;
     pd.depthStencil.depthTest = VRI_TRUE; pd.depthStencil.depthWrite = VRI_TRUE; pd.depthStencil.depthCompareOp = VriCompareOp_Less;
-    pd.outputMerger.colors = &ca; pd.outputMerger.colorNum = 1; pd.outputMerger.depthStencilFormat = kDepthFormat;
+    pd.outputMerger.colors = &ca; pd.outputMerger.colorNum = 1; pd.outputMerger.depthStencilFormat = app.depthFormat;
     VriPipeline* pipeline = nullptr;
-    if (c.CreateGraphicsPipeline(dev, &pd, &pipeline) != VriResult_Success) Fail("CreateGraphicsPipeline failed");
+    if (c.CreateGraphicsPipeline(app.dev, &pd, &pipeline) != VriResult_Success) app.Fail("CreateGraphicsPipeline failed");
 
     VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 1; pdsc.constantBufferMaxNum = 1; pdsc.textureMaxNum = 1; pdsc.samplerMaxNum = 1;
-    VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(dev, &pdsc, &pool);
+    VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(app.dev, &pdsc, &pool);
     VriDescriptorSet* set = nullptr; c.AllocateDescriptorSets(pool, layout, 0, &set, 1);
     const VriDescriptor* d0[1] = {uboView}; const VriDescriptor* d1[1] = {texView}; const VriDescriptor* d2[1] = {sampler};
     VriDescriptorRangeUpdateDesc upd[3]{};
     upd[0].descriptors = d0; upd[0].descriptorNum = 1; upd[1].descriptors = d1; upd[1].descriptorNum = 1; upd[2].descriptors = d2; upd[2].descriptorNum = 1;
     c.UpdateDescriptorRanges(set, 0, 3, upd);
 
-    VriCommandAllocator* alloc = nullptr; c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
-    VriCommandBuffer* cmd = nullptr; c.CreateCommandBuffer(alloc, &cmd);
-    VriFence* fence = nullptr; c.CreateFence(dev, 0, &fence);
-
-    // one-time upload: vertex / index / instance / texture -> read state
+    // one-time upload: vertex / index / instance / texture -> read state (fence value 1)
     {
+        VriCommandBuffer* cmd = app.cmd;
         c.BeginCommandBuffer(cmd);
         VriBufferCopyDesc cp{}; cp.size = sizeof(kCube); c.CmdCopyBuffer(cmd, vbuf, vstg, &cp);
         cp.size = sizeof(kIndices); c.CmdCopyBuffer(cmd, ibuf, istg, &cp);
@@ -228,119 +183,46 @@ int main(int, char**)
         tb2.after.access = VriAccess_ShaderResourceRead; tb2.after.layout = VriLayout_ShaderResource; tb2.after.stages = VriPipelineStage_FragmentShader; tb2.aspect = VriImageAspect_Color;
         VriBarrierGroupDesc g1{}; g1.textures = &tb2; g1.textureNum = 1; c.CmdBarrier(cmd, &g1);
         c.EndCommandBuffer(cmd);
-        VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = 1;
+        VriFenceSubmitDesc sig{}; sig.fence = app.fence; sig.value = 1;
         VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
-        c.QueueSubmit(queue, &sub); c.Wait(fence, 1);
+        c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1);
     }
 
-    const char* maxFramesEnv = std::getenv("VRI_MAX_FRAMES");
-    uint64_t maxFrames = maxFramesEnv ? std::strtoull(maxFramesEnv, nullptr, 10) : 0;
-
-    // optional screenshot of the last presented frame (swapchain readback) for verification
-    const char* capturePath = std::getenv("VRI_CAPTURE");
-    if (capturePath && maxFrames == 0) maxFrames = 60;
-    VriBuffer* captureBuf = nullptr;
-    if (capturePath) { VriBufferDesc cb{}; cb.size = uint64_t(kWidth) * kHeight * 4; cb.usage = VriBufferUsage_TransferDst; cb.memoryLocation = VriMemoryLocation_HostReadback; c.CreateBuffer(dev, &cb, &captureBuf); }
-    uint64_t frameValue = 1;
-    bool depthInit = false, running = true;
-    float t = 0.0f;
-    while (running)
-    {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) running = false;
-        if (!running) break;
-
-        // orbit the camera around the field
-        t += 0.01f;
-        const float r = kGrid * spacing + 6.0f;
+    // per-frame: orbit the camera, refresh the shared view-projection, draw all instances
+    app.onUpdate = [ustg](uint64_t frame) {
+        const float t = static_cast<float>(frame) * 0.01f;
+        const float r = kGrid * kSpacing + 6.0f;
         const float eye[3] = {std::cos(t) * r, 4.0f, std::sin(t) * r}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         // transpose for Slang's mul(viewProj, world); the per-instance columns stay column-major
         Mat4 viewProj = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 200.0f), LookAt(eye, ctr, up)));
-        std::memcpy(c.MapBuffer(ustg, 0, sizeof(Mat4)), &viewProj, sizeof(Mat4)); c.UnmapBuffer(ustg);
-
-        uint32_t index = 0;
-        if (swap.AcquireNextTexture(swapchain, nullptr, 0, &index) == VriResult_OutOfDate) { swap.Resize(swapchain, kWidth, kHeight); continue; }
-        VriTexture* backbuffers[8] = {}; uint32_t count = 8; swap.GetSwapChainTextures(swapchain, backbuffers, &count);
-        VriTexture* backbuffer = backbuffers[index];
-        VriTextureViewDesc bvd{}; bvd.texture = backbuffer; bvd.viewType = VriTextureViewType_2D; bvd.format = VriFormat_Unknown; bvd.aspect = VriImageAspect_Color;
-        VriDescriptor* bbView = nullptr; c.CreateTextureView(dev, &bvd, &bbView);
-
-        c.BeginCommandBuffer(cmd);
-        VriBufferCopyDesc ucp{}; ucp.size = sizeof(Mat4); c.CmdCopyBuffer(cmd, ubo, ustg, &ucp);
+        std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Mat4)), &viewProj, sizeof(Mat4)); app.c.UnmapBuffer(ustg);
+    };
+    app.onPreRender = [ubo, ustg](VriCommandBuffer* cmd) {
+        VriBufferCopyDesc ucp{}; ucp.size = sizeof(Mat4); app.c.CmdCopyBuffer(cmd, ubo, ustg, &ucp);
         VriBufferBarrierDesc ub{}; ub.buffer = ubo; ub.before.access = VriAccess_CopyDestinationWrite; ub.before.stages = VriPipelineStage_Transfer;
         ub.after.access = VriAccess_ConstantBufferRead; ub.after.stages = VriPipelineStage_VertexShader;
-        VriBarrierGroupDesc ubg{}; ubg.buffers = &ub; ubg.bufferNum = 1; c.CmdBarrier(cmd, &ubg);
-
-        VriTextureBarrierDesc toColor{}; toColor.texture = backbuffer; toColor.before.layout = VriLayout_Undefined; toColor.before.stages = VriPipelineStage_None;
-        toColor.after.access = VriAccess_ColorAttachmentWrite; toColor.after.layout = VriLayout_ColorAttachment; toColor.after.stages = VriPipelineStage_ColorAttachmentOutput; toColor.aspect = VriImageAspect_Color;
-        VriTextureBarrierDesc toDepth{}; toDepth.texture = depth; toDepth.before.layout = depthInit ? VriLayout_DepthStencilAttachment : VriLayout_Undefined; toDepth.before.stages = VriPipelineStage_None;
-        toDepth.after.access = VriAccess_DepthStencilAttachmentWrite; toDepth.after.layout = VriLayout_DepthStencilAttachment; toDepth.after.stages = VriPipelineStage_EarlyFragmentTests; toDepth.aspect = VriImageAspect_Depth;
-        VriTextureBarrierDesc bgr[2] = {toColor, toDepth};
-        VriBarrierGroupDesc g{}; g.textures = bgr; g.textureNum = 2; c.CmdBarrier(cmd, &g);
-        depthInit = true;
-
-        VriAttachmentDesc colorRT{}; colorRT.view = bbView; colorRT.loadOp = VriAttachmentLoadOp_Clear; colorRT.storeOp = VriAttachmentStoreOp_Store;
-        colorRT.clearValue.color.f32[0] = 0.08f; colorRT.clearValue.color.f32[1] = 0.10f; colorRT.clearValue.color.f32[2] = 0.14f; colorRT.clearValue.color.f32[3] = 1.0f;
-        VriAttachmentDesc depthRT{}; depthRT.view = depthView; depthRT.loadOp = VriAttachmentLoadOp_Clear; depthRT.storeOp = VriAttachmentStoreOp_DontCare; depthRT.clearValue.depthStencil.depth = 1.0f;
-        VriAttachmentsDesc att{}; att.colors = &colorRT; att.colorNum = 1; att.depth = &depthRT; att.renderArea.width = kWidth; att.renderArea.height = kHeight; att.layerNum = 1;
-        c.CmdBeginRendering(cmd, &att);
-        VriViewport vp{0, 0, float(kWidth), float(kHeight), 0, 1}; c.CmdSetViewports(cmd, &vp, 1);
-        VriRect scis{0, 0, kWidth, kHeight}; c.CmdSetScissors(cmd, &scis, 1);
-        c.CmdSetPipeline(cmd, pipeline);
-        c.CmdSetPipelineLayout(cmd, layout);
-        c.CmdSetDescriptorSet(cmd, 0, set);
+        VriBarrierGroupDesc ubg{}; ubg.buffers = &ub; ubg.bufferNum = 1; app.c.CmdBarrier(cmd, &ubg);
+    };
+    app.onRecord = [pipeline, layout, set, vbuf, ibuf, inst, instanceNum](VriCommandBuffer* cmd) {
+        app.c.CmdSetPipeline(cmd, pipeline);
+        app.c.CmdSetPipelineLayout(cmd, layout);
+        app.c.CmdSetDescriptorSet(cmd, 0, set);
         VriVertexBufferBinding vbs[2]{}; vbs[0].buffer = vbuf; vbs[0].offset = 0; vbs[1].buffer = inst; vbs[1].offset = 0;
-        c.CmdSetVertexBuffers(cmd, 0, vbs, 2);
-        c.CmdSetIndexBuffer(cmd, ibuf, 0, VriIndexType_UInt16);
-        VriDrawIndexedDesc di{}; di.indexNum = 36; di.instanceNum = instanceNum; c.CmdDrawIndexed(cmd, &di);
-        c.CmdEndRendering(cmd);
+        app.c.CmdSetVertexBuffers(cmd, 0, vbs, 2);
+        app.c.CmdSetIndexBuffer(cmd, ibuf, 0, VriIndexType_UInt16);
+        VriDrawIndexedDesc di{}; di.indexNum = 36; di.instanceNum = instanceNum; app.c.CmdDrawIndexed(cmd, &di);
+    };
 
-        const bool capturing = captureBuf && maxFrames != 0 && frameValue >= maxFrames;
-        if (capturing)
-        {
-            VriTextureBarrierDesc toSrc{}; toSrc.texture = backbuffer; toSrc.before.access = VriAccess_ColorAttachmentWrite; toSrc.before.layout = VriLayout_ColorAttachment; toSrc.before.stages = VriPipelineStage_ColorAttachmentOutput;
-            toSrc.after.access = VriAccess_CopySourceRead; toSrc.after.layout = VriLayout_CopySource; toSrc.after.stages = VriPipelineStage_Transfer; toSrc.aspect = VriImageAspect_Color;
-            VriBarrierGroupDesc gs{}; gs.textures = &toSrc; gs.textureNum = 1; c.CmdBarrier(cmd, &gs);
-            VriBufferTextureCopyDesc rc{}; rc.texture.aspect = VriImageAspect_Color; rc.texture.layerNum = 1; c.CmdReadbackTextureToBuffer(cmd, captureBuf, backbuffer, &rc);
-            VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_CopySourceRead; toPresent.before.layout = VriLayout_CopySource; toPresent.before.stages = VriPipelineStage_Transfer;
-            toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
-            VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
-        }
-        else
-        {
-            VriTextureBarrierDesc toPresent{}; toPresent.texture = backbuffer; toPresent.before.access = VriAccess_ColorAttachmentWrite; toPresent.before.layout = VriLayout_ColorAttachment; toPresent.before.stages = VriPipelineStage_ColorAttachmentOutput;
-            toPresent.after.layout = VriLayout_Present; toPresent.after.stages = VriPipelineStage_AllCommands; toPresent.aspect = VriImageAspect_Color;
-            VriBarrierGroupDesc gp{}; gp.textures = &toPresent; gp.textureNum = 1; c.CmdBarrier(cmd, &gp);
-        }
-        c.EndCommandBuffer(cmd);
+    app.SetupCapture();
+    app.Run();
 
-        VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = ++frameValue; sig.stages = VriPipelineStage_AllCommands;
-        VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
-        c.QueueSubmit(queue, &sub);
-        c.Wait(fence, frameValue);
-        swap.Present(swapchain, nullptr, 0);
-        c.DestroyDescriptor(bbView);
-
-        if (capturing)
-        {
-            const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(captureBuf, 0, uint64_t(kWidth) * kHeight * 4));
-            if (WriteBmpBGRA(capturePath, px, kWidth, kHeight)) std::printf("[instancing] %s: wrote %s\n", apiName, capturePath);
-            c.UnmapBuffer(captureBuf);
-        }
-        if (maxFrames != 0 && frameValue - 1 >= maxFrames) running = false;
-    }
-
-    c.DeviceWaitIdle(dev);
-    c.DestroyFence(fence); c.DestroyCommandAllocator(alloc); c.DestroyDescriptorPool(pool);
+#if !defined(__EMSCRIPTEN__)
+    c.DestroyDescriptorPool(pool);
     c.DestroyPipeline(pipeline); c.DestroyPipelineLayout(layout);
     c.DestroyDescriptor(sampler); c.DestroyDescriptor(texView); c.DestroyTexture(texture); c.DestroyBuffer(staging);
     c.DestroyDescriptor(uboView); c.DestroyBuffer(ustg); c.DestroyBuffer(ubo);
     c.DestroyBuffer(inststg); c.DestroyBuffer(inst); c.DestroyBuffer(istg); c.DestroyBuffer(vstg); c.DestroyBuffer(ibuf); c.DestroyBuffer(vbuf);
-    c.DestroyDescriptor(depthView); c.DestroyTexture(depth);
-    if (captureBuf) c.DestroyBuffer(captureBuf);
-    swap.DestroySwapChain(swapchain);
-    vriDestroyDevice(dev);
-    SDL_DestroyWindow(window); SDL_Quit();
-    std::printf("[instancing] %s: %u cubes, %llu frames presented\n", apiName, instanceNum, static_cast<unsigned long long>(frameValue - 1));
+    app.Shutdown();
+#endif
     return 0;
 }

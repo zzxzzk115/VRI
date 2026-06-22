@@ -11,17 +11,23 @@
 
 #include "../ext/vri_ext_swapchain.h"
 
-#if defined(_WIN32)
-#    define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__APPLE__)
-#    define GLFW_EXPOSE_NATIVE_COCOA
-#elif defined(__linux__)
-#    define GLFW_EXPOSE_NATIVE_X11
-#    define GLFW_EXPOSE_NATIVE_WAYLAND
+/* Emscripten's GLFW port renders to an HTML canvas (default "#canvas") and has no
+ * native-handle access, so glfw3native.h is desktop-only. */
+#if !defined(__EMSCRIPTEN__)
+#    if defined(_WIN32)
+#        define GLFW_EXPOSE_NATIVE_WIN32
+#    elif defined(__APPLE__)
+#        define GLFW_EXPOSE_NATIVE_COCOA
+#    elif defined(__linux__)
+#        define GLFW_EXPOSE_NATIVE_X11
+#        define GLFW_EXPOSE_NATIVE_WAYLAND
+#    endif
 #endif
 
 #include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#if !defined(__EMSCRIPTEN__)
+#    include <GLFW/glfw3native.h>
+#endif
 
 #if defined(__cplusplus)
 extern "C" {
@@ -32,7 +38,13 @@ static inline VriWindowHandle vriWindowHandleFromGLFW(GLFWwindow* window)
     VriWindowHandle h;
     h.type = VriWindowSystem_None;
 
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+    /* GLFW on Emscripten owns the page's default canvas; the swapchain targets it by
+     * CSS selector. (GLFW doesn't expose the canvas id, so use the conventional one.) */
+    (void)window;
+    h.type = VriWindowSystem_Web;
+    h.handle.web.selector = "#canvas";
+#elif defined(_WIN32)
     h.type = VriWindowSystem_Win32;
     h.handle.win32.hwnd = (void*)glfwGetWin32Window(window);
     h.handle.win32.hinstance = (void*)0; /* backend resolves via GetModuleHandle(NULL) */

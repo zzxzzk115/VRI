@@ -19,6 +19,10 @@ extern "C" void          glXSwapBuffers(void* dpy, unsigned long drawable);
 #include "conversions_gl.h"
 #include "device_gl.h"
 
+#if defined(__EMSCRIPTEN__)
+#    include <emscripten/html5.h> // emscripten_set_canvas_element_size
+#endif
+
 namespace vri::gl
 {
     namespace
@@ -134,6 +138,12 @@ namespace vri::gl
                 d->ReportError("GL swapchain (web): expected VriWindowSystem_Web (canvas); presenting to the default canvas");
             SwapChainGL* s = new SwapChainGL{};
             s->device = d; s->width = w; s->height = h; s->format = desc->format; s->vsync = desc->vsync != VRI_FALSE;
+            if (desc->window.type == VriWindowSystem_Web && desc->window.handle.web.selector)
+                s->canvasSelector = desc->window.handle.web.selector;
+            // The GL device's WebGL2 context comes from a 1x1 GLFW window, so the canvas
+            // drawing buffer starts at 1x1. Size it to the swapchain or the present blit
+            // (640x480 -> canvas) lands on a single pixel and nothing is visible.
+            emscripten_set_canvas_element_size(s->canvasSelector.c_str(), static_cast<int>(w), static_cast<int>(h));
             for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
             glGenFramebuffers(1, &s->blitFbo);
             *out = ToHandle(s);
@@ -263,6 +273,9 @@ namespace vri::gl
             DestroyBackbuffers(s);
             s->width = width ? width : 1u;
             s->height = height ? height : 1u;
+#if defined(__EMSCRIPTEN__)
+            emscripten_set_canvas_element_size(s->canvasSelector.c_str(), static_cast<int>(s->width), static_cast<int>(s->height));
+#endif
             for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(s->device, s->width, s->height, s->format));
             s->currentIndex = 0;
             return VriResult_Success;

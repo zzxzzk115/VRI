@@ -46,13 +46,15 @@ option("vri_backend_vulkan")
 option_end()
 
 option("vri_backend_wgpu")
-    set_default(false)
+    -- default on for wasm: WebGPU is the primary web backend (Auto picks it first), with
+    -- the GL/WebGL2 backend (also default-on below) as the fallback.
+    set_default(is_plat("wasm"))
     set_showmenu(true)
     set_description("Enable the WebGPU backend")
 option_end()
 
 option("vri_backend_gl")
-    -- default on for wasm so `xmake f -p wasm` gives the WebGL backend out of the box
+    -- default on for wasm so `xmake f -p wasm` has the WebGL2 fallback out of the box
     set_default(is_plat("wasm"))
     set_showmenu(true)
     set_description("Enable the OpenGL / OpenGL ES / WebGL backend")

@@ -65,7 +65,7 @@ xmake
 # run the tests
 xmake run vri-tests
 
-# windowed examples (VRI_API=vulkan|webgpu|opengl|d3d12)
+# windowed examples (backend auto-picked; override with VRI_API=vulkan|webgpu|opengl|d3d12)
 xmake run example-triangle
 xmake run example-cube        # textured, depth-tested, animated-MVP rotating cube
 xmake run example-instancing  # a field of textured cubes via per-instance matrices
@@ -73,5 +73,18 @@ xmake run example-instancing  # a field of textured cubes via per-instance matri
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
 ```
+
+The examples request `VriGraphicsAPI_Auto`, so `vriCreateDevice` picks the best backend for
+the platform (Vulkan on desktop, WebGPU then WebGL in the browser) and reports the choice in
+`VriDeviceDesc::graphicsAPI`. They share one host layer ([examples/common/example_app.h](examples/common/example_app.h))
+across **desktop (SDL3) and the web (Emscripten)** — backend selection, windowing, the
+present loop (while-loop on desktop, `emscripten_set_main_loop` in the browser), and headless
+capture all live there, so each example only builds its resources + records a draw.
+
+Build the web examples with `xmake f -p wasm` (WebGPU + WebGL2 are on by default there) then
+`xmake build example-cube`, and host the resulting `.html` (e.g. with `emrun`). The page uses
+a small themed shell ([examples/common/shell.html](examples/common/shell.html)) with a
+**WebGPU/WebGL switch** and an in-page console; you can also force a backend with the
+`?backend=webgpu` / `?backend=webgl` URL query (or `VRI_API=vulkan|webgpu|opengl|d3d12` on desktop).
 
 Dependencies are pulled via xmake from the `my-xmake-repo` repository (Vulkan headers + VMA, `webgpu-sdk`, libsdl3, doctest); the Vulkan SDK provides the Vulkan loader and the Slang compiler that `vri-shaderc` links.

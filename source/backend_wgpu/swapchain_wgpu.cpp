@@ -27,7 +27,17 @@ namespace vri::wgpu
 
         WGPUSurface CreateSurface(DeviceWGPU* d, const VriWindowHandle& window)
         {
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+            // Browser: surface from the HTML canvas selector (emdawnwebgpu).
+            if (window.type != VriWindowSystem_Web || window.handle.web.selector == nullptr)
+                return nullptr;
+            WGPUEmscriptenSurfaceSourceCanvasHTMLSelector src = {};
+            src.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
+            src.selector = WGPUStringView{window.handle.web.selector, WGPU_STRLEN};
+            WGPUSurfaceDescriptor sd = {};
+            sd.nextInChain = &src.chain;
+            return wgpuInstanceCreateSurface(d->Instance(), &sd);
+#elif defined(_WIN32)
             if (window.type != VriWindowSystem_Win32)
                 return nullptr;
             WGPUSurfaceSourceWindowsHWND src = {};
@@ -138,10 +148,20 @@ namespace vri::wgpu
         VriResult VRI_CALL Present(VriSwapChain* swapChain, VriFence* /*waitFence*/, uint64_t /*waitValue*/)
         {
             SwapChainWGPU* sc = SC(swapChain);
+#if defined(__EMSCRIPTEN__)
+            // The browser presents the canvas automatically when the requestAnimationFrame
+            // callback returns (the app drives it via emscripten_set_main_loop), and
+            // wgpuSurfacePresent aborts on the web ("unsupported"). So just drop the frame's
+            // acquired texture; presentation happens implicitly when control returns to JS.
+            if (sc->acquired) { wgpuTextureRelease(sc->acquired); sc->acquired = nullptr; }
+            sc->current.texture = nullptr;
+            return VriResult_Success;
+#else
             const WGPUStatus s = wgpuSurfacePresent(sc->surface);
             if (sc->acquired) { wgpuTextureRelease(sc->acquired); sc->acquired = nullptr; }
             sc->current.texture = nullptr;
             return s == WGPUStatus_Success ? VriResult_Success : VriResult_OutOfDate;
+#endif
         }
 
         VriResult VRI_CALL Resize(VriSwapChain* swapChain, uint32_t width, uint32_t height)

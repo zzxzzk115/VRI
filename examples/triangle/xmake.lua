@@ -4,10 +4,19 @@ target("example-triangle")
     set_default(false)
 
     add_deps("vri")
-    add_packages("libsdl3")
 
     -- for the shared Slang-compiled SPIR-V header under tests/shaders
     add_includedirs("$(projectdir)")
 
     add_files("main.cpp")
+
+    if is_plat("wasm") then
+        -- Web build: GLFW (Emscripten port) windowing, ASYNCIFY for WebGPU's async calls,
+        -- -fexceptions for spirv-cross (GL fallback). Emitted as .html for emrun.
+        set_extension(".html")
+        add_ldflags("-sASYNCIFY", "-sALLOW_MEMORY_GROWTH=1", "-sEXIT_RUNTIME=1", "-fexceptions", "--emrun", {force = true})
+        add_ldflags("--shell-file=" .. path.join(os.scriptdir(), "..", "common", "shell.html"), {force = true}) -- Bevy-style page
+    else
+        add_packages("libsdl3")
+    end
 target_end()

@@ -59,10 +59,14 @@ namespace vri::wgpu
     DeviceWGPU::~DeviceWGPU()
     {
         if (m_device)
-        {
             PollDevice(m_device);
+        // Release the queue too (wgpuDeviceGetQueue returns an owned ref that holds the
+        // device alive); without this the device + its memory leak across create/destroy
+        // cycles, exhausting limited adapters (CI software WebGPU OOMs).
+        if (m_queue)
+            wgpuQueueRelease(m_queue);
+        if (m_device)
             wgpuDeviceRelease(m_device);
-        }
         if (m_adapter)
             wgpuAdapterRelease(m_adapter);
         if (m_instance)

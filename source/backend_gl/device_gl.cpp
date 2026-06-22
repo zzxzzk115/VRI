@@ -75,7 +75,15 @@ namespace vri::gl
             m_callback = *desc.callbackInterface;
 
         m_api = desc.graphicsAPI;
+#if defined(__EMSCRIPTEN__)
+        // In the browser the only GL is WebGL2 (== GLES3). Honor a VriGraphicsAPI_OpenGL
+        // request (e.g. ?backend=webgl) as ES too, otherwise the desktop-GL paths run
+        // against WebGL2 and abort: real buffer mapping ("glMapBufferRange access must
+        // include INVALIDATE_*" -> "buffer was never mapped") and ESSL 430.
+        m_es = true;
+#else
         m_es = (desc.graphicsAPI == VriGraphicsAPI_OpenGLES);
+#endif
         // The command path is the GLES3/WebGL2-compatible (non-DSA) subset, which
         // also runs on desktop GL. We still create a 4.x core context on desktop
         // so debug tooling and future fast-paths are available. ESSL 300 (ES 3.0)
@@ -90,6 +98,12 @@ namespace vri::gl
         }
 
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+#if defined(__EMSCRIPTEN__)
+        // Opaque canvas: a swapchain backbuffer is opaque, but a WebGL2 context defaults to
+        // an alpha canvas, so low fragment alpha would make the page show through (the cube
+        // looks transparent / "empty"). 0 alpha bits => the browser composites it opaque.
+        glfwWindowHint(GLFW_ALPHA_BITS, 0);
+#endif
         if (m_es)
         {
             glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);

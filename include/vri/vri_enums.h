@@ -23,6 +23,10 @@ typedef enum VriGraphicsAPI
     VriGraphicsAPI_D3D11,
     VriGraphicsAPI_D3D12,
     VriGraphicsAPI_Metal,
+    // Let VRI pick the best available backend for the platform (tries a platform-ordered
+    // list of the compiled-in backends until one creates a device). Query the actual
+    // choice afterwards via VriDeviceDesc::graphicsAPI.
+    VriGraphicsAPI_Auto,
     VriGraphicsAPI_MaxEnum = 0x7fffffff
 } VriGraphicsAPI;
 

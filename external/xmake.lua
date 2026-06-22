@@ -7,8 +7,10 @@ if has_config("vri_build_tests") then
     add_requires("doctest")
 end
 
--- Vulkan backend (MVP / reference backend)
-if has_config("vri_backend_vulkan") then
+-- Vulkan backend (MVP / reference backend). Not available on wasm (VMA is unsupported
+-- there), so guard on the platform too: that way a sticky `--vri_backend_vulkan=y` left
+-- over from a desktop config can't pull these packages when you `xmake f -p wasm`.
+if has_config("vri_backend_vulkan") and not is_plat("wasm") then
     add_requires("vulkan-headers 1.4.335")
     -- The backend uses the C VMA (vk_mem_alloc.h), not the C++ wrapper. The -hpp
     -- package (v3.2.1) fails to compile against vulkan-headers 1.4.335

@@ -1343,8 +1343,27 @@ namespace vri::gl
                 return;
             }
 #endif
-            const GLenum rt = s->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_READ_BUFFER;
-            const GLenum wt = d->target == GL_ELEMENT_ARRAY_BUFFER ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
+            // WebGL2/GLES reject glCopyBufferSubData between an element-array buffer and a
+            // non-element one ("cannot copy into an element buffer destination from a
+            // non-element buffer source"), no matter the targets used. The common case is a
+            // staging upload into an index buffer; bounce it through CPU, each buffer bound
+            // only to its own (locked) target so neither gets tainted.
+            const bool srcEl = s->target == GL_ELEMENT_ARRAY_BUFFER;
+            const bool dstEl = d->target == GL_ELEMENT_ARRAY_BUFFER;
+            if (s->device->IsES() && srcEl != dstEl)
+            {
+                void* tmp = std::malloc(static_cast<size_t>(r->size));
+                glBindBuffer(s->target, s->id);
+                glGetBufferSubData(s->target, static_cast<GLintptr>(r->srcOffset), static_cast<GLsizeiptr>(r->size), tmp);
+                glBindBuffer(s->target, 0);
+                glBindBuffer(d->target, d->id);
+                glBufferSubData(d->target, static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size), tmp);
+                glBindBuffer(d->target, 0);
+                std::free(tmp);
+                return;
+            }
+            const GLenum rt = srcEl ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_READ_BUFFER;
+            const GLenum wt = dstEl ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
             glBindBuffer(rt, s->id);
             glBindBuffer(wt, d->id);
             glCopyBufferSubData(rt, wt, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
@@ -1409,7 +1428,14 @@ namespace vri::gl
 
             glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
             glPixelStorei(GL_PACK_ALIGNMENT, 1);
-            glReadPixels(0, 0, w, h, t->glFormat, t->glType,
+            // WebGL2 glReadPixels only accepts GL_RGBA (+ GL_UNSIGNED_BYTE); GL_BGRA is
+            // rejected (INVALID_ENUM -> zeroed readback). The BGRA8 backbuffer is GL_RGBA8
+            // internally, so read it as RGBA. Bytes land R,G,B,A (B/R swapped vs the BGRA
+            // label) - callers that need exact BGRA must swizzle; the example self-check is
+            // channel-order agnostic.
+            GLenum readFmt = t->glFormat;
+            if (b->device->IsES() && readFmt == GL_BGRA) readFmt = GL_RGBA;
+            glReadPixels(0, 0, w, h, readFmt, t->glType,
                          reinterpret_cast<void*>(static_cast<uintptr_t>(region->bufferOffset)));
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 

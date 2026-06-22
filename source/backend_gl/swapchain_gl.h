@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "gl_loader.h"
@@ -32,7 +33,9 @@ namespace vri::gl
         uint32_t                currentIndex = 0;
         bool                    vsync = true;
         GLuint                  blitFbo = 0;        // read FBO holding the backbuffer for the present blit
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
+        std::string             canvasSelector = "#canvas"; // sized to the swapchain so the present blit fills it
+#elif defined(_WIN32)
         void*                   hwnd = nullptr;     // HWND target window
         void*                   hdc = nullptr;      // HDC for that window (GetDC)
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)

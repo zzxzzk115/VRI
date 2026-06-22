@@ -4,15 +4,27 @@ target("example-cube")
     set_default(false)
 
     add_deps("vri")
-    add_packages("libsdl3")
 
     -- for the shared Slang-compiled shader headers under tests/shaders
     add_includedirs("$(projectdir)")
 
     add_files("main.cpp")
 
-    -- copy the .ktx asset next to the executable (loaded via SDL_GetBasePath)
-    after_build(function (target)
-        os.cp(path.join(os.scriptdir(), "assets", "metalplate01_rgba.ktx"), target:targetdir())
-    end)
+    if is_plat("wasm") then
+        -- Web build: GLFW (Emscripten port) for windowing, ASYNCIFY for WebGPU's async
+        -- device/adapter/map, and the .ktx baked into MEMFS via --preload-file (the
+        -- libvultra resource-link approach). Emitted as a .html so emrun can host it.
+        set_extension(".html")
+        -- ASYNCIFY: WebGPU's async device/adapter/map; -fexceptions: spirv-cross (GL fallback) throws.
+        -- (GLFW for the GL backend's context comes transitively from the vri target.)
+        add_ldflags("-sASYNCIFY", "-sALLOW_MEMORY_GROWTH=1", "-sEXIT_RUNTIME=1", "-fexceptions", "--emrun", {force = true})
+        add_ldflags("--shell-file=" .. path.join(os.scriptdir(), "..", "common", "shell.html"), {force = true}) -- Bevy-style page
+        add_ldflags("--preload-file=" .. path.join(os.scriptdir(), "assets", "metalplate01_rgba.ktx") .. "@/metalplate01_rgba.ktx", {force = true})
+    else
+        add_packages("libsdl3")
+        -- copy the .ktx asset next to the executable (loaded via SDL_GetBasePath)
+        after_build(function (target)
+            os.cp(path.join(os.scriptdir(), "assets", "metalplate01_rgba.ktx"), target:targetdir())
+        end)
+    end
 target_end()
