@@ -71,6 +71,7 @@ xmake run example-cube        # textured, depth-tested, animated-MVP rotating cu
 xmake run example-instancing  # a field of textured cubes via per-instance matrices
 xmake run example-pbrbasic    # PBR metallic-roughness sphere grid lit by 4 point lights
 xmake run example-pushconstants # push constants across backends (VK/D3D12 native, GL/WebGPU emulated)
+xmake run example-normalmapping # tangent-space normal mapping (color + normal map, orbiting light)
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
