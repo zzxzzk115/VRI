@@ -96,6 +96,21 @@ namespace vri::gl
         }
     }
 
+    inline GLenum ToGLAddress(VriAddressMode m)
+    {
+        switch (m)
+        {
+            case VriAddressMode_MirroredRepeat: return GL_MIRRORED_REPEAT;
+            case VriAddressMode_ClampToEdge:    return GL_CLAMP_TO_EDGE;
+#if !defined(__EMSCRIPTEN__)
+            case VriAddressMode_ClampToBorder:  return GL_CLAMP_TO_BORDER; // WebGL2/GLES has no border clamp
+#else
+            case VriAddressMode_ClampToBorder:  return GL_CLAMP_TO_EDGE;
+#endif
+            default:                            return GL_REPEAT;
+        }
+    }
+
     inline GLenum ToGLStencilOp(VriStencilOp o)
     {
         switch (o)

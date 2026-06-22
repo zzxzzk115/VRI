@@ -126,10 +126,14 @@ namespace vri::d3d12
     {
         D3D12_SAMPLER_DESC d = {};
         const bool linear = s.magFilter == VriFilter_Linear || s.minFilter == VriFilter_Linear;
-        d.Filter = linear ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_MIN_MAG_MIP_POINT;
+        // A comparison sampler (shadow PCF) needs a COMPARISON filter variant + the compare func.
+        if (s.compareEnable)
+            d.Filter = linear ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR : D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
+        else
+            d.Filter = linear ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_MIN_MAG_MIP_POINT;
         d.AddressU = ToD3DAddress(s.addressModeU); d.AddressV = ToD3DAddress(s.addressModeV); d.AddressW = ToD3DAddress(s.addressModeW);
         d.MipLODBias = s.mipLodBias; d.MaxAnisotropy = 1;
-        d.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        d.ComparisonFunc = s.compareEnable ? ToD3DCompare(s.compareOp) : D3D12_COMPARISON_FUNC_ALWAYS;
         d.MinLOD = s.minLod; d.MaxLOD = s.maxLod > 0.0f ? s.maxLod : D3D12_FLOAT32_MAX;
         // D3D12 border color is always an arbitrary float4 (native custom support).
         if (s.useCustomBorderColor)

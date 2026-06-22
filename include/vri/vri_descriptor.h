@@ -22,6 +22,11 @@ typedef enum VriDescriptorRangeBits
     VriDescriptorRange_None          = 0,
     VriDescriptorRange_PartiallyBound = 1u << 0, /* not every descriptor need be set */
     VriDescriptorRange_VariableSized  = 1u << 1, /* bindless / runtime array (last range) */
+    /* Shadow / depth comparison. On a Sampler range: it's a comparison sampler (PCF). On a
+       Texture range: the texture is a depth texture sampled for comparison. WebGPU bakes these
+       into the bind-group layout (sampler type = Comparison, texture sampleType = Depth) and
+       rejects a mismatch; other backends ignore the flag (comparison comes from the sampler). */
+    VriDescriptorRange_Comparison     = 1u << 2,
     VriDescriptorRange_MaxEnum       = 0x7fffffff
 } VriDescriptorRangeBits;
 

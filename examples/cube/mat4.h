@@ -50,6 +50,20 @@ inline Mat4 Perspective(float fovYRadians, float aspect, float zNear, float zFar
     return r;
 }
 
+// Right-handed orthographic with depth in [0,1] (glm orthoRH_ZO). For directional shadow maps.
+inline Mat4 Ortho(float left, float right, float bottom, float top, float zNear, float zFar)
+{
+    Mat4 r{}; for (float& v : r.m) v = 0.0f;
+    r.m[0]  = 2.0f / (right - left);
+    r.m[5]  = 2.0f / (top - bottom);
+    r.m[10] = -1.0f / (zFar - zNear);
+    r.m[12] = -(right + left) / (right - left);
+    r.m[13] = -(top + bottom) / (top - bottom);
+    r.m[14] = -zNear / (zFar - zNear);
+    r.m[15] = 1.0f;
+    return r;
+}
+
 // Right-handed look-at (glm lookAtRH).
 inline Mat4 LookAt(const float eye[3], const float center[3], const float up[3])
 {

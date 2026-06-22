@@ -83,11 +83,16 @@ namespace vri::wgpu
         WGPUPipelineLayout                     layout;
         std::vector<WGPUBindGroupLayout>       bindGroupLayouts;
         std::vector<std::vector<RangeInfoWGPU>> setRanges; // [set][range]
-        // Push constants are emulated as a uniform in a reserved bind group (group ==
-        // descriptorSetNum). The buffer + bind group are created lazily in CmdSetConstants.
+        // Push constants are emulated as a dynamic-offset uniform in a reserved bind group (group
+        // == descriptorSetNum). pushBuffer is a RING: each CmdSetConstants writes the next slot and
+        // binds it with a dynamic offset, so multiple per-draw push values in one pass each keep
+        // their own value (a single fixed binding would collapse to the last queue-written value).
+        // The buffer + bind group are created lazily in CmdSetConstants.
         bool          hasPush = false;
         uint32_t      pushGroup = 0;
         uint32_t      pushSize = 0;
+        uint32_t      pushStride = 0; // per-slot stride (push size rounded up to the 256B dynamic-offset alignment)
+        uint32_t      pushCursor = 0; // next ring slot (monotonic, wraps mod the slot count)
         WGPUBuffer    pushBuffer = nullptr;
         WGPUBindGroup pushBindGroup = nullptr;
     };

@@ -361,6 +361,10 @@ namespace vri::wgpu
             sd.lodMinClamp = desc->minLod;
             sd.lodMaxClamp = desc->maxLod;
             sd.maxAnisotropy = desc->anisotropyEnable ? (desc->maxAnisotropy > 1.0f ? (uint16_t)desc->maxAnisotropy : 1) : 1;
+            // A comparison sampler (shadow PCF): set sd.compare so it becomes a "comparison" sampler;
+            // the matching bind-group-layout entry must declare WGPUSamplerBindingType_Comparison.
+            if (desc->compareEnable)
+                sd.compare = ToWgpuCompareOp(desc->compareOp);
 
             WGPUSampler sampler = wgpuDeviceCreateSampler(Dev(device)->Device(), &sd);
             if (!sampler)
@@ -408,7 +412,9 @@ namespace vri::wgpu
                         case VriDescriptorType_StorageBuffer:    e.buffer.type = WGPUBufferBindingType_Storage; break;
                         case VriDescriptorType_StructuredBuffer: e.buffer.type = WGPUBufferBindingType_ReadOnlyStorage; break;
                         case VriDescriptorType_Texture:
-                            e.texture.sampleType = WGPUTextureSampleType_Float;
+                            // Depth texture sampled for comparison -> sampleType must be Depth (shadow map).
+                            e.texture.sampleType = (range.flags & VriDescriptorRange_Comparison)
+                                                 ? WGPUTextureSampleType_Depth : WGPUTextureSampleType_Float;
                             e.texture.viewDimension = range.viewType == VriTextureViewType_2DArray ? WGPUTextureViewDimension_2DArray
                                                     : range.viewType == VriTextureViewType_Cube ? WGPUTextureViewDimension_Cube
                                                     : WGPUTextureViewDimension_2D; // 0/1D/2D -> 2D
@@ -419,7 +425,8 @@ namespace vri::wgpu
                             e.storageTexture.viewDimension = WGPUTextureViewDimension_2D;
                             break;
                         case VriDescriptorType_Sampler:
-                            e.sampler.type = WGPUSamplerBindingType_Filtering;
+                            e.sampler.type = (range.flags & VriDescriptorRange_Comparison)
+                                           ? WGPUSamplerBindingType_Comparison : WGPUSamplerBindingType_Filtering;
                             break;
                         default:
                             break; // acceleration structure: not WebGPU core
@@ -444,6 +451,7 @@ namespace vri::wgpu
                 e.binding = 0;
                 e.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
                 e.buffer.type = WGPUBufferBindingType_Uniform;
+                e.buffer.hasDynamicOffset = true; // per-draw push values live at different ring offsets
                 WGPUBindGroupLayoutDescriptor ld = {}; ld.entryCount = 1; ld.entries = &e;
                 layout->hasPush = true;
                 layout->pushGroup = static_cast<uint32_t>(layout->bindGroupLayouts.size());
@@ -892,23 +900,32 @@ namespace vri::wgpu
             if (!l->hasPush)
                 return;
             DeviceWGPU* d = c->device;
+            // Ring of dynamic-offset slots so per-draw push values coexist within one pass. Each
+            // slot is 256-byte aligned (the dynamic-offset granularity); the cursor wraps mod the
+            // slot count, which is far more than any frame's draw count, so an in-flight slot is
+            // never overwritten (queue writes + submits stay ordered on the queue timeline).
+            constexpr uint32_t kPushSlots = 256u;
+            constexpr uint32_t kAlign = 256u;
             if (!l->pushBuffer)
             {
+                l->pushStride = ((l->pushSize ? l->pushSize : 1u) + kAlign - 1u) & ~(kAlign - 1u);
                 WGPUBufferDescriptor bd = {};
                 bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-                bd.size = (l->pushSize + 15u) & ~15u; // 16-byte aligned uniform buffer
-                if (!bd.size) bd.size = 16u;
+                bd.size = static_cast<uint64_t>(l->pushStride) * kPushSlots;
                 l->pushBuffer = wgpuDeviceCreateBuffer(d->Device(), &bd);
                 WGPUBindGroupEntry e = {};
-                e.binding = 0; e.buffer = l->pushBuffer; e.offset = 0; e.size = bd.size;
+                e.binding = 0; e.buffer = l->pushBuffer; e.offset = 0; e.size = l->pushStride; // dynamic offset slides this window
                 WGPUBindGroupDescriptor bgd = {};
                 bgd.layout = l->bindGroupLayouts[l->pushGroup];
                 bgd.entryCount = 1; bgd.entries = &e;
                 l->pushBindGroup = wgpuDeviceCreateBindGroup(d->Device(), &bgd);
             }
-            wgpuQueueWriteBuffer(d->Queue(), l->pushBuffer, 0, data, (size + 3u) & ~3u);
+            const uint32_t offset = (l->pushCursor++ % kPushSlots) * l->pushStride;
+            wgpuQueueWriteBuffer(d->Queue(), l->pushBuffer, offset, data, (size + 3u) & ~3u);
             if (c->pass)
-                wgpuRenderPassEncoderSetBindGroup(c->pass, l->pushGroup, l->pushBindGroup, 0, nullptr);
+                wgpuRenderPassEncoderSetBindGroup(c->pass, l->pushGroup, l->pushBindGroup, 1, &offset);
+            else if (c->computePass)
+                wgpuComputePassEncoderSetBindGroup(c->computePass, l->pushGroup, l->pushBindGroup, 1, &offset);
         }
 
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)

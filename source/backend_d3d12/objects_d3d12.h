@@ -44,7 +44,9 @@ namespace vri::d3d12
     {
         DeviceD3D12*           device = nullptr;
         ComPtr<ID3D12Resource> resource;
-        DXGI_FORMAT            format = DXGI_FORMAT_UNKNOWN;
+        DXGI_FORMAT            format = DXGI_FORMAT_UNKNOWN;  // resource format (TYPELESS for a sampled depth target)
+        DXGI_FORMAT            dsvFormat = DXGI_FORMAT_UNKNOWN; // typed depth format for the DSV (== format if not depth)
+        DXGI_FORMAT            srvFormat = DXGI_FORMAT_UNKNOWN; // typed format for the SRV (R32_FLOAT for sampled D32)
         uint32_t               width = 0, height = 0, depth = 1;
         uint32_t               mipNum = 1, layerNum = 1;
         uint32_t               texelSize = 0;

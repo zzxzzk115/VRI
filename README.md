@@ -83,6 +83,8 @@ xmake run example-offscreen     # render-to-texture + MRT: a cube drawn into two
                                 # targets (albedo + face normals), then composited side by side
 xmake run example-descriptorindexing # bindless: a grid of quads each sampling a per-vertex-indexed
                                 # texture (VK/D3D12); 2D-array-texture fallback where bindless is absent
+xmake run example-shadowmapping # directional-light shadow map: a depth-only pass from the light,
+                                # then PCF shadows via a comparison sampler (per-object push constants)
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders

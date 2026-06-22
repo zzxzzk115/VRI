@@ -580,6 +580,14 @@ namespace vri::gl
             glGenSamplers(1, &s);
             glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, desc->magFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
             glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, desc->minFilter == VriFilter_Linear ? GL_LINEAR : GL_NEAREST);
+            glSamplerParameteri(s, GL_TEXTURE_WRAP_S, ToGLAddress(desc->addressModeU));
+            glSamplerParameteri(s, GL_TEXTURE_WRAP_T, ToGLAddress(desc->addressModeV));
+            glSamplerParameteri(s, GL_TEXTURE_WRAP_R, ToGLAddress(desc->addressModeW));
+            if (desc->compareEnable) // shadow PCF: sampler2DShadow reads compare(ref, depth)
+            {
+                glSamplerParameteri(s, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+                glSamplerParameteri(s, GL_TEXTURE_COMPARE_FUNC, ToGLCompareOp(desc->compareOp));
+            }
             DescriptorGL* v = new DescriptorGL{};
             v->kind = DescriptorGL::Kind::Sampler;
             v->device = Dev(device);

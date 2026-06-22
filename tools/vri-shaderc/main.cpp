@@ -107,6 +107,39 @@ namespace
         return src;
     }
 
+    // WGSL textureSampleCompare(Level) requires a texture_depth_* bound to a sampler_comparison,
+    // but Slang emits an HLSL `Texture2D<float>` sampled via SampleCmp as `texture_2d<f32>`, which
+    // makes the call ill-typed (it would return vec4 instead of f32). Find every texture used as
+    // the first argument of a comparison sample and rewrite its declaration to texture_depth_2d.
+    std::string DepthTexturesForComparison(std::string src)
+    {
+        auto isIdent = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; };
+        std::vector<std::string> names;
+        for (const std::string& fn : {std::string("textureSampleCompareLevel("), std::string("textureSampleCompare(")})
+        {
+            size_t scan = 0;
+            while (true)
+            {
+                const size_t c = src.find(fn, scan);
+                if (c == std::string::npos) break;
+                size_t a = c + fn.size();
+                while (a < src.size() && (src[a] == '(' || src[a] == ' ')) ++a; // skip "((" / spaces
+                size_t e = a;
+                while (e < src.size() && isIdent(src[e])) ++e;
+                if (e > a) names.push_back(src.substr(a, e - a));
+                scan = c + fn.size();
+            }
+        }
+        for (const std::string& n : names)
+        {
+            const std::string decl = "var " + n + " : texture_2d<f32>";
+            const size_t d = src.find(decl);
+            if (d != std::string::npos)
+                src.replace(d, decl.size(), "var " + n + " : texture_depth_2d");
+        }
+        return src;
+    }
+
     bool WriteTextHeader(const std::string& path, const std::string& varName, const char* text, size_t len)
     {
         while (len > 0 && text[len - 1] == '\0')
@@ -339,9 +372,10 @@ int main(int argc, char** argv)
     bool ok;
     if (wgsl)
     {
-        const std::string narrowed = NarrowWriteOnlyStorageTextures(
+        std::string wgslSrc = NarrowWriteOnlyStorageTextures(
             std::string(static_cast<const char*>(code->getBufferPointer()), byteSize));
-        ok = WriteTextHeader(output, varName, narrowed.c_str(), narrowed.size());
+        wgslSrc = DepthTexturesForComparison(std::move(wgslSrc));
+        ok = WriteTextHeader(output, varName, wgslSrc.c_str(), wgslSrc.size());
     }
     else
     {

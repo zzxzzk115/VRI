@@ -83,6 +83,8 @@ namespace vri::d3d12
             if (a & VriAccess_CopySourceRead) return D3D12_RESOURCE_STATE_COPY_SOURCE;
             if (a & VriAccess_CopyDestinationWrite) return D3D12_RESOURCE_STATE_COPY_DEST;
             if (a & (VriAccess_ShaderResourceStorageWrite | VriAccess_ShaderResourceStorageRead)) return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if (a & VriAccess_IndexBufferRead) return D3D12_RESOURCE_STATE_INDEX_BUFFER;
+            if (a & (VriAccess_VertexBufferRead | VriAccess_ConstantBufferRead)) return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
             return D3D12_RESOURCE_STATE_COMMON;
         }
 
@@ -148,14 +150,35 @@ namespace vri::d3d12
             rd.MipLevels = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
             rd.Format = fi.format; rd.SampleDesc.Count = desc->sampleNum ? desc->sampleNum : 1;
             rd.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            // A depth target that is ALSO sampled (shadow map) must use a TYPELESS resource so it
+            // can carry both a typed DSV and a typed SRV (D3D12 forbids a D*_ format SRV directly).
+            DXGI_FORMAT dsvFormat = fi.format, srvFormat = fi.format;
+            const bool depthSampled = (desc->usage & VriTextureUsage_DepthStencilAttachment) &&
+                                      (desc->usage & VriTextureUsage_ShaderResource);
+            if (depthSampled)
+            {
+                switch (fi.format)
+                {
+                    case DXGI_FORMAT_D32_FLOAT:         rd.Format = DXGI_FORMAT_R32_TYPELESS; srvFormat = DXGI_FORMAT_R32_FLOAT; break;
+                    case DXGI_FORMAT_D16_UNORM:         rd.Format = DXGI_FORMAT_R16_TYPELESS; srvFormat = DXGI_FORMAT_R16_UNORM; break;
+                    case DXGI_FORMAT_D24_UNORM_S8_UINT: rd.Format = DXGI_FORMAT_R24G8_TYPELESS; srvFormat = DXGI_FORMAT_R24_UNORM_X8_TYPELESS; break;
+                    default: break; // already a sampleable format
+                }
+            }
             if (desc->usage & VriTextureUsage_ColorAttachment) rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             if (desc->usage & VriTextureUsage_DepthStencilAttachment) rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
             if (desc->usage & VriTextureUsage_ShaderResourceStorage) rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
+            // Depth/render-target resources want an optimized clear value (D3D12 warns + is slower
+            // without one, and a typeless depth target needs the typed clear format).
+            D3D12_CLEAR_VALUE cv{}; const D3D12_CLEAR_VALUE* pcv = nullptr;
+            if (desc->usage & VriTextureUsage_DepthStencilAttachment) { cv.Format = dsvFormat; cv.DepthStencil.Depth = 1.0f; pcv = &cv; }
+            else if (desc->usage & VriTextureUsage_ColorAttachment) { cv.Format = fi.format; pcv = &cv; }
+
             TextureD3D12* t = new TextureD3D12{};
-            if (FAILED(d->Device()->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&t->resource))))
+            if (FAILED(d->Device()->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COMMON, pcv, IID_PPV_ARGS(&t->resource))))
             { delete t; d->ReportError("CreateCommittedResource (texture) failed"); return VriResult_Failure; }
-            t->device = d; t->format = fi.format; t->texelSize = fi.texelSize;
+            t->device = d; t->format = rd.Format; t->dsvFormat = dsvFormat; t->srvFormat = srvFormat; t->texelSize = fi.texelSize;
             t->width = desc->width; t->height = desc->height ? desc->height : 1; t->depth = 1;
             t->mipNum = rd.MipLevels; t->layerNum = rd.DepthOrArraySize; t->state = D3D12_RESOURCE_STATE_COMMON;
             t->sampleCount = rd.SampleDesc.Count;
@@ -180,7 +203,7 @@ namespace vri::d3d12
             {
                 v->cpu = d->AllocDsv();
                 D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
-                dsv.Format = v->texture->format;
+                dsv.Format = v->texture->dsvFormat; // typed depth (resource may be TYPELESS for sampling)
                 dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
                 dsv.Texture2D.MipSlice = desc->baseMip;
                 d->Device()->CreateDepthStencilView(v->texture->resource.Get(), &dsv, v->cpu);
@@ -823,7 +846,7 @@ namespace vri::d3d12
                     else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
                     {
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
-                        srv.Format = v->texture->format;
+                        srv.Format = v->texture->srvFormat; // typed sampleable format (R32_FLOAT for a sampled D32 depth)
                         srv.ViewDimension = v->texture->layerNum > 1 ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
                         srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                         if (v->texture->layerNum > 1) { srv.Texture2DArray.MipLevels = v->texture->mipNum; srv.Texture2DArray.ArraySize = v->texture->layerNum; }
@@ -949,11 +972,13 @@ namespace vri::d3d12
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
-            // Buffers implicitly promote from COMMON to COPY_DEST/COPY_SOURCE on a direct
-            // queue and decay back, so no explicit transition barriers are needed here.
+            // Buffers implicitly promote from COMMON to COPY_DEST on a direct queue. Record that
+            // so a following read-state barrier (CmdBarrier -> TransitionBuffer) emits the correct
+            // StateBefore (COPY_DEST), instead of a stale COMMON that the debug layer rejects.
             BufferD3D12* s = Buf(src);
             BufferD3D12* d = Buf(dst);
             CB(cmd)->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
+            if (d->heapType == D3D12_HEAP_TYPE_DEFAULT) d->state = D3D12_RESOURCE_STATE_COPY_DEST;
         }
         void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture*, VriTexture*, const VriTextureCopyDesc*) {}
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer* cmd, VriTexture* dst, VriBuffer* src, const VriBufferTextureCopyDesc* region)
