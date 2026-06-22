@@ -205,6 +205,18 @@ namespace vri::gl
                             comp.set_decoration(s.id, spv::DecorationBinding, lb->glUnit);
                         }
                     }
+                    // Storage images (compute UAV writes): remap to the image unit; bound via
+                    // glBindImageTexture in CmdSetDescriptorSet.
+                    for (const spirv_cross::Resource& im : res.storage_images)
+                    {
+                        const uint32_t set = comp.get_decoration(im.id, spv::DecorationDescriptorSet);
+                        const uint32_t bind = comp.get_decoration(im.id, spv::DecorationBinding);
+                        if (const LayoutBindingGL* lb = layout->Find(set, bind))
+                        {
+                            comp.unset_decoration(im.id, spv::DecorationDescriptorSet);
+                            comp.set_decoration(im.id, spv::DecorationBinding, lb->glUnit);
+                        }
+                    }
                     for (const spirv_cross::CombinedImageSampler& cis : comp.get_combined_image_samplers())
                     {
                         const uint32_t texSet = comp.get_decoration(cis.image_id, spv::DecorationDescriptorSet);
@@ -495,6 +507,7 @@ namespace vri::gl
             t->isRenderbuffer = isRenderbuffer;
             t->glFormat = gf.format;
             t->glType = gf.type;
+            t->internalFormat = gf.internalFormat;
             t->width = desc->width;
             t->height = desc->height ? desc->height : 1u;
             t->depth = 1;
@@ -577,7 +590,7 @@ namespace vri::gl
             // Flatten (set, binding) -> per-type GL unit. GL has independent binding
             // namespaces for uniform buffers, shader-storage buffers and texture
             // units, so each type gets its own running counter.
-            uint32_t uboNext = 0, ssboNext = 0, texNext = 0;
+            uint32_t uboNext = 0, ssboNext = 0, texNext = 0, imgNext = 0;
             for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
             {
                 const VriDescriptorSetDesc& sd = desc->descriptorSets[s];
@@ -590,8 +603,8 @@ namespace vri::gl
                     if (rd.descriptorType == VriDescriptorType_ConstantBuffer) counter = &uboNext;
                     else if (rd.descriptorType == VriDescriptorType_StorageBuffer ||
                              rd.descriptorType == VriDescriptorType_StructuredBuffer) counter = &ssboNext;
-                    else if (rd.descriptorType == VriDescriptorType_Texture ||
-                             rd.descriptorType == VriDescriptorType_StorageTexture) counter = &texNext;
+                    else if (rd.descriptorType == VriDescriptorType_Texture) counter = &texNext;
+                    else if (rd.descriptorType == VriDescriptorType_StorageTexture) counter = &imgNext; // image unit (glBindImageTexture)
                     LayoutBindingGL b{};
                     b.set = sd.registerSpace;
                     b.binding = rd.baseRegister;
@@ -1145,6 +1158,14 @@ namespace vri::gl
                                       static_cast<GLintptr>(view->bufferOffset),
                                       static_cast<GLsizeiptr>(view->bufferRange ? view->bufferRange : view->buffer->size));
                 }
+#if !defined(__EMSCRIPTEN__) // image load/store is desktop GL 4.2+; WebGL2 has no compute
+                else if (lb->type == VriDescriptorType_StorageTexture && view->texture)
+                {
+                    // storage image (compute UAV): bind to its image unit for image load/store.
+                    glBindImageTexture(lb->glUnit, view->texture->id, static_cast<GLint>(view->mip),
+                                       GL_FALSE, 0, GL_READ_WRITE, view->texture->internalFormat);
+                }
+#endif
             }
             // Textures + samplers are bound per combined sampler the pipeline declared:
             // GLSL fuses (texture, sampler) into one sampler2D at a texture unit.
@@ -1382,7 +1403,7 @@ namespace vri::gl
             glDispatchCompute(d->x, d->y, d->z);
             // Make SSBO writes visible to the subsequent copy/readback (single context,
             // but the GPU pipeline still needs an explicit memory barrier).
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 #endif
         }
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
@@ -1393,7 +1414,7 @@ namespace vri::gl
             // extra gate). Command layout {x, y, z} matches VK/WebGPU.
             glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, Buf(buffer)->id);
             glDispatchComputeIndirect(static_cast<GLintptr>(offset));
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
             glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0);
 #else
             (void)buffer; (void)offset;

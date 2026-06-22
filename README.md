@@ -20,7 +20,7 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 | --- | --- | --- |
 | Vulkan | desktop (Windows/Linux) | ✅ resources, explicit memory, descriptor sets, graphics + compute pipelines, command recording, swapchain (Win32), interop, feature query+enable |
 | WebGPU (`webgpu-sdk`) | desktop **+ Web** (Emscripten) | ✅ resources, bind groups, graphics + compute pipelines, command recording, swapchain (Win32). Same backend runs native (wgpu-native) and **in-browser** (emdawnwebgpu) |
-| OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL via SPIRV-Cross), modern-GL fast paths (DSA, separate-format VAOs, base-vertex/instance, indirect draw/dispatch, immutable+persistent buffers — version/feature-gated), headless rendering + windowed swapchain present (Win32) |
+| OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL via SPIRV-Cross), storage-image compute (image load/store + memory barriers), modern-GL fast paths (DSA, separate-format VAOs, base-vertex/instance, indirect draw/dispatch, immutable+persistent buffers — version/feature-gated), headless rendering + windowed swapchain present (Win32) |
 | WebGL 2 (OpenGL ES 3.0) | Web (Emscripten) | ✅ the same GL backend on the GLES3/WebGL2 subset; runs in-browser, incl. canvas swapchain present. No compute (ES 3.0) — reported via `hasComputeShader` |
 | Direct3D 12 | desktop (Windows) | ✅ resources, descriptor sets (root CBV/UAV + SRV/sampler tables), graphics + compute pipelines (Slang→DXBC, reflection-built input layout), depth-stencil, 4x MSAA + resolve, command recording, swapchain (Win32). Tests run on the WARP software adapter in CI |
 | OpenGL ES (native) / Metal | — | ⏳ planned |
@@ -72,6 +72,8 @@ xmake run example-instancing  # a field of textured cubes via per-instance matri
 xmake run example-pbrbasic    # PBR metallic-roughness sphere grid lit by 4 point lights
 xmake run example-pushconstants # push constants across backends (VK/D3D12 native, GL/WebGPU emulated)
 xmake run example-normalmapping # tangent-space normal mapping (color + normal map, orbiting light)
+xmake run example-computeshader # compute writes a plasma to a storage image, then samples it
+                                # (WebGL2 has no compute -> explicit fragment-shader fallback)
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders

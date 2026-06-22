@@ -87,6 +87,7 @@ namespace vri::gl
         GLenum    target;
         GLenum    glFormat; // for read/write (e.g. GL_RGBA)
         GLenum    glType;   // e.g. GL_UNSIGNED_BYTE
+        GLenum    internalFormat = 0; // e.g. GL_RGBA8 (for glBindImageTexture on storage images)
         uint32_t  width;
         uint32_t  height;
         uint32_t  depth;

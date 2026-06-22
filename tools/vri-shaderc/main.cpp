@@ -58,6 +58,55 @@ namespace
         return true;
     }
 
+    // WGSL requires storage textures to declare an access mode, and Slang emits "read_write"
+    // for every RWTexture. But WebGPU only permits read_write storage access on the r32*
+    // formats; rgba8unorm and the rest must be "write" (or "read"). When a storage texture is
+    // only written (no textureLoad of it anywhere), narrow it to "write" so the common
+    // write-only compute pattern is valid on WebGPU. Genuinely read-write textures (a
+    // textureLoad exists) are left untouched, and will simply require an r32* format.
+    std::string NarrowWriteOnlyStorageTextures(std::string src)
+    {
+        const std::string marker = "texture_storage_";
+        const std::string rwTok = ", read_write>";
+        size_t scan = 0;
+        while (true)
+        {
+            const size_t m = src.find(marker, scan);
+            if (m == std::string::npos)
+                break;
+            const size_t close = src.find('>', m);
+            if (close == std::string::npos)
+                break;
+            const size_t rw = src.rfind(rwTok, close);
+            if (rw == std::string::npos || rw < m) // this declaration isn't read_write
+            {
+                scan = close + 1;
+                continue;
+            }
+            // Recover the variable name: "var <name> : texture_storage_..."
+            std::string name;
+            const size_t varKw = src.rfind("var ", m);
+            if (varKw != std::string::npos)
+            {
+                const size_t ns = varKw + 4;
+                const size_t ne = src.find_first_of(" :", ns);
+                if (ne != std::string::npos && ne <= m)
+                    name = src.substr(ns, ne - ns);
+            }
+            const bool isRead = !name.empty() && src.find("textureLoad(" + name) != std::string::npos;
+            if (!isRead)
+            {
+                src.replace(rw, rwTok.size(), ", write>");
+                scan = rw + std::string(", write>").size();
+            }
+            else
+            {
+                scan = close + 1;
+            }
+        }
+        return src;
+    }
+
     bool WriteTextHeader(const std::string& path, const std::string& varName, const char* text, size_t len)
     {
         while (len > 0 && text[len - 1] == '\0')
@@ -290,7 +339,9 @@ int main(int argc, char** argv)
     bool ok;
     if (wgsl)
     {
-        ok = WriteTextHeader(output, varName, static_cast<const char*>(code->getBufferPointer()), byteSize);
+        const std::string narrowed = NarrowWriteOnlyStorageTextures(
+            std::string(static_cast<const char*>(code->getBufferPointer()), byteSize));
+        ok = WriteTextHeader(output, varName, narrowed.c_str(), narrowed.size());
     }
     else
     {
