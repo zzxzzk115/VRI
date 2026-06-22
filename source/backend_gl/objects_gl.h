@@ -184,6 +184,7 @@ namespace vri::gl
         GLint     size;       // components
         GLenum    type;
         GLboolean normalized;
+        bool      integer;    // true -> glVertexAttribIPointer (integer attribute, no float cast)
         GLuint    offset;     // within the vertex
         GLsizei   stride;     // of the owning stream
         uint32_t  bindingSlot; // CmdSetVertexBuffers slot to source from

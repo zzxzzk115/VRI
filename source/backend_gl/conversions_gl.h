@@ -42,20 +42,27 @@ namespace vri::gl
         GLint     size;       // components (1..4)
         GLenum    type;       // GL_FLOAT / GL_UNSIGNED_BYTE / ...
         GLboolean normalized;
+        bool      integer;    // true -> bind with glVertexAttribIPointer (no float conversion)
     };
 
     inline GLVertexFormat ToGLVertexFormat(VriFormat f)
     {
         switch (f)
         {
-            case VriFormat_R32_SFLOAT:    return {1, GL_FLOAT, GL_FALSE};
-            case VriFormat_RG32_SFLOAT:   return {2, GL_FLOAT, GL_FALSE};
-            case VriFormat_RGB32_SFLOAT:  return {3, GL_FLOAT, GL_FALSE};
-            case VriFormat_RGBA32_SFLOAT: return {4, GL_FLOAT, GL_FALSE};
-            case VriFormat_RGBA8_UNORM:   return {4, GL_UNSIGNED_BYTE, GL_TRUE};
-            case VriFormat_RG8_UNORM:     return {2, GL_UNSIGNED_BYTE, GL_TRUE};
-            case VriFormat_R8_UNORM:      return {1, GL_UNSIGNED_BYTE, GL_TRUE};
-            default:                      return {4, GL_FLOAT, GL_FALSE};
+            case VriFormat_R32_SFLOAT:    return {1, GL_FLOAT, GL_FALSE, false};
+            case VriFormat_RG32_SFLOAT:   return {2, GL_FLOAT, GL_FALSE, false};
+            case VriFormat_RGB32_SFLOAT:  return {3, GL_FLOAT, GL_FALSE, false};
+            case VriFormat_RGBA32_SFLOAT: return {4, GL_FLOAT, GL_FALSE, false};
+            case VriFormat_RGBA8_UNORM:   return {4, GL_UNSIGNED_BYTE, GL_TRUE, false};
+            case VriFormat_RG8_UNORM:     return {2, GL_UNSIGNED_BYTE, GL_TRUE, false};
+            case VriFormat_R8_UNORM:      return {1, GL_UNSIGNED_BYTE, GL_TRUE, false};
+            case VriFormat_R32_UINT:      return {1, GL_UNSIGNED_INT, GL_FALSE, true};
+            case VriFormat_R32_SINT:      return {1, GL_INT, GL_FALSE, true};
+            case VriFormat_RG32_UINT:     return {2, GL_UNSIGNED_INT, GL_FALSE, true};
+            case VriFormat_RG32_SINT:     return {2, GL_INT, GL_FALSE, true};
+            case VriFormat_RGBA32_UINT:   return {4, GL_UNSIGNED_INT, GL_FALSE, true};
+            case VriFormat_RGBA32_SINT:   return {4, GL_INT, GL_FALSE, true};
+            default:                      return {4, GL_FLOAT, GL_FALSE, false};
         }
     }
 

@@ -761,7 +761,7 @@ namespace vri::gl
                     bindingSlot = desc->vertexInput.streams[a.streamIndex].bindingSlot;
                     divisor = desc->vertexInput.streams[a.streamIndex].stepRate == VriVertexStepRate_PerInstance ? 1u : 0u;
                 }
-                p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, a.offset, stride, bindingSlot, divisor});
+                p->vertexAttribs.push_back(VertexAttribGL{i, vf.size, vf.type, vf.normalized, vf.integer, a.offset, stride, bindingSlot, divisor});
             }
             // Separate attribute format (GL 4.3+): bake the vertex format into a
             // per-pipeline VAO once. At draw we only point each stream binding at a
@@ -781,14 +781,16 @@ namespace vri::gl
                     if (dsa)
                     {
                         glEnableVertexArrayAttrib(vao, a.location);
-                        glVertexArrayAttribFormat(vao, a.location, a.size, a.type, a.normalized, a.offset);
+                        if (a.integer) glVertexArrayAttribIFormat(vao, a.location, a.size, a.type, a.offset);
+                        else glVertexArrayAttribFormat(vao, a.location, a.size, a.type, a.normalized, a.offset);
                         glVertexArrayAttribBinding(vao, a.location, a.bindingSlot);
                         glVertexArrayBindingDivisor(vao, a.bindingSlot, a.divisor);
                     }
                     else
                     {
                         glEnableVertexAttribArray(a.location);
-                        glVertexAttribFormat(a.location, a.size, a.type, a.normalized, a.offset);
+                        if (a.integer) glVertexAttribIFormat(a.location, a.size, a.type, a.offset);
+                        else glVertexAttribFormat(a.location, a.size, a.type, a.normalized, a.offset);
                         glVertexAttribBinding(a.location, a.bindingSlot);
                         glVertexBindingDivisor(a.bindingSlot, a.divisor);
                     }
@@ -1313,8 +1315,9 @@ namespace vri::gl
                         continue;
                     glBindBuffer(GL_ARRAY_BUFFER, it->second.id);
                     glEnableVertexAttribArray(a.location);
-                    glVertexAttribPointer(a.location, a.size, a.type, a.normalized, a.stride,
-                                          reinterpret_cast<const void*>(static_cast<uintptr_t>(it->second.offset + a.offset)));
+                    const void* attrOff = reinterpret_cast<const void*>(static_cast<uintptr_t>(it->second.offset + a.offset));
+                    if (a.integer) glVertexAttribIPointer(a.location, a.size, a.type, a.stride, attrOff);
+                    else glVertexAttribPointer(a.location, a.size, a.type, a.normalized, a.stride, attrOff);
                     glVertexAttribDivisor(a.location, a.divisor); // per-instance streams advance per instance
                     mask |= (1u << a.location);
                 }

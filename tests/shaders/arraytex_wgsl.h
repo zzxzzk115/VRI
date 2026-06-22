@@ -20,14 +20,14 @@ struct VSOutput_0
 {
     @builtin(position) position_0 : vec4<f32>,
     @location(0) uv_0 : vec2<f32>,
-    @interpolate(flat) @location(1) texIndex_0 : f32,
+    @interpolate(flat) @location(1) texIndex_0 : i32,
 };
 
 struct vertexInput_0
 {
     @location(0) position_1 : vec3<f32>,
     @location(1) uv_1 : vec2<f32>,
-    @location(2) texIndex_1 : f32,
+    @location(2) texIndex_1 : i32,
 };
 
 @vertex
@@ -48,13 +48,13 @@ struct pixelOutput_0
 struct pixelInput_0
 {
     @location(0) uv_2 : vec2<f32>,
-    @interpolate(flat) @location(1) texIndex_2 : f32,
+    @interpolate(flat) @location(1) texIndex_2 : i32,
 };
 
 @fragment
 fn fragmentMain( _S2 : pixelInput_0, @builtin(position) position_2 : vec4<f32>) -> pixelOutput_0
 {
-    var _S3 : vec3<f32> = vec3<f32>(_S2.uv_2, _S2.texIndex_2);
+    var _S3 : vec3<f32> = vec3<f32>(_S2.uv_2, f32(_S2.texIndex_2));
     var _S4 : pixelOutput_0 = pixelOutput_0( (textureSample((uTexArray_0), (uSmp_0), ((_S3)).xy, i32(((_S3)).z))) );
     return _S4;
 }

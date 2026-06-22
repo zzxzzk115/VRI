@@ -6,13 +6,13 @@ struct VSInput
 {
     float3 position : TEXCOORD0;
     float2 uv : TEXCOORD1;
-    float  texIndex : TEXCOORD2; // float, not int: integer vertex formats aren't mapped on every backend
+    int    texIndex : TEXCOORD2; // integer vertex attribute (R32_SINT) - works on every backend
 };
 struct VSOutput
 {
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;
-    nointerpolation float texIndex : TEXCOORD1;
+    nointerpolation int texIndex : TEXCOORD1;
 };
 struct Camera { float4x4 mvp; };
 
@@ -33,5 +33,5 @@ VSOutput vertexMain(VSInput input)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    return uTexArray.Sample(uSmp, float3(input.uv, input.texIndex));
+    return uTexArray.Sample(uSmp, float3(input.uv, float(input.texIndex)));
 }

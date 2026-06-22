@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <vector>
 
 #include "capture.h"
 
@@ -115,6 +116,7 @@ namespace vriex
 
         // ---- internal ----
         VriBuffer* captureBuf = nullptr; const char* capturePath = nullptr;
+        std::vector<VriBuffer*> uploadStaging; // staging buffers held until EndUpload() frees them
         uint64_t frameValue = 1; uint64_t maxFrames = 0; bool depthInit = false; bool running = true;
 #if !defined(__EMSCRIPTEN__)
         SDL_Window* window = nullptr;
@@ -184,6 +186,57 @@ namespace vriex
             c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
             c.CreateCommandBuffer(alloc, &cmd);
             c.CreateFence(dev, 0, &fence);
+        }
+
+        // ---- one-shot upload helper (kills the staging boilerplate examples kept repeating) --
+        // Usage: BeginUpload(); UploadBuffer(...)/UploadTexture(...) ...; EndUpload();
+        // Each Upload* creates a host staging buffer, records the copy + the
+        // copy->read barrier, and EndUpload() submits, waits, and frees the staging.
+        void BeginUpload() { c.BeginCommandBuffer(cmd); }
+
+        void UploadBuffer(VriBuffer* dst, const void* data, uint64_t size, VriAccessFlags afterAccess, VriPipelineStageFlags afterStage)
+        {
+            VriBufferDesc sd{}; sd.size = size; sd.usage = VriBufferUsage_TransferSrc; sd.memoryLocation = VriMemoryLocation_HostUpload;
+            VriBuffer* stg = nullptr; c.CreateBuffer(dev, &sd, &stg);
+            std::memcpy(c.MapBuffer(stg, 0, size), data, size); c.UnmapBuffer(stg);
+            uploadStaging.push_back(stg);
+            VriBufferCopyDesc cp{}; cp.size = size; c.CmdCopyBuffer(cmd, dst, stg, &cp);
+            VriBufferBarrierDesc bb{}; bb.buffer = dst; bb.before.access = VriAccess_CopyDestinationWrite; bb.before.stages = VriPipelineStage_Transfer;
+            bb.after.access = afterAccess; bb.after.stages = afterStage;
+            VriBarrierGroupDesc g{}; g.buffers = &bb; g.bufferNum = 1; c.CmdBarrier(cmd, &g);
+        }
+
+        // Upload `layers` images (each w*h, layerBytes each, contiguous in `data`) into a 2D or
+        // 2D-array texture, leaving it sampleable. Backends handle row-pitch alignment internally.
+        void UploadTexture(VriTexture* dst, const void* data, uint32_t w, uint32_t h, uint32_t layers, uint32_t layerBytes)
+        {
+            const uint64_t total = uint64_t(layerBytes) * layers;
+            VriBufferDesc sd{}; sd.size = total; sd.usage = VriBufferUsage_TransferSrc; sd.memoryLocation = VriMemoryLocation_HostUpload;
+            VriBuffer* stg = nullptr; c.CreateBuffer(dev, &sd, &stg);
+            std::memcpy(c.MapBuffer(stg, 0, total), data, total); c.UnmapBuffer(stg);
+            uploadStaging.push_back(stg);
+            VriTextureBarrierDesc tb{}; tb.texture = dst; tb.before.layout = VriLayout_Undefined; tb.before.stages = VriPipelineStage_None;
+            tb.after.access = VriAccess_CopyDestinationWrite; tb.after.layout = VriLayout_CopyDestination; tb.after.stages = VriPipelineStage_Transfer; tb.aspect = VriImageAspect_Color; tb.layerNum = layers;
+            VriBarrierGroupDesc g0{}; g0.textures = &tb; g0.textureNum = 1; c.CmdBarrier(cmd, &g0);
+            for (uint32_t layer = 0; layer < layers; ++layer)
+            {
+                VriBufferTextureCopyDesc up{}; up.bufferOffset = uint64_t(layer) * layerBytes;
+                up.texture.aspect = VriImageAspect_Color; up.texture.baseLayer = layer; up.texture.layerNum = 1; up.texture.width = w; up.texture.height = h;
+                c.CmdUploadBufferToTexture(cmd, dst, stg, &up);
+            }
+            VriTextureBarrierDesc tb2{}; tb2.texture = dst; tb2.before.access = VriAccess_CopyDestinationWrite; tb2.before.layout = VriLayout_CopyDestination; tb2.before.stages = VriPipelineStage_Transfer;
+            tb2.after.access = VriAccess_ShaderResourceRead; tb2.after.layout = VriLayout_ShaderResource; tb2.after.stages = VriPipelineStage_FragmentShader; tb2.aspect = VriImageAspect_Color; tb2.layerNum = layers;
+            VriBarrierGroupDesc g1{}; g1.textures = &tb2; g1.textureNum = 1; c.CmdBarrier(cmd, &g1);
+        }
+
+        void EndUpload()
+        {
+            c.EndCommandBuffer(cmd);
+            VriFenceSubmitDesc sig{}; sig.fence = fence; sig.value = 1; // before the first frame (frameValue starts at 1 -> first frame signals 2)
+            VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
+            c.QueueSubmit(queue, &sub); c.Wait(fence, 1);
+            for (VriBuffer* stg : uploadStaging) c.DestroyBuffer(stg);
+            uploadStaging.clear();
         }
 
         // Enable headless auto-exit + capture. Call after the example's resources exist.

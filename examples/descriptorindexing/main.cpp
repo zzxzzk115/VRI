@@ -7,6 +7,10 @@
 // 2D-array texture indexed by layer (arraytex.slang) - same picture, different mechanism. The
 // row of 16 cells should look identical on every backend. No assets; the textures are
 // procedurally generated solid colors. Host scaffolding is examples/common/example_app.h.
+//
+// Uses an integer vertex attribute (R32_SINT for the index) and tiny 4x4 textures - both work
+// uniformly across backends now (VRI handles GL/WebGPU integer attribs and D3D12's upload
+// row-pitch alignment internally), and the upload boilerplate is the shared ExampleApp helper.
 #include "../common/example_app.h"
 
 #include <cmath>
@@ -17,36 +21,28 @@
 #include "tests/shaders/descriptorindexing_dxbc.h" // g_descriptorindexingDxbcVS / PS (D3D12)
 #include "tests/shaders/arraytex_spv.h"            // g_arraytexSpv  (OpenGL fallback)
 #include "tests/shaders/arraytex_wgsl.h"           // g_arraytexWgsl (WebGPU/WebGL2 fallback)
-#include "tests/shaders/arraytex_dxbc.h"           // g_arraytexDxbcVS / PS (unused; D3D12 is bindless)
 
 namespace
 {
     constexpr uint32_t kWidth = 640, kHeight = 480;
     constexpr uint32_t kTexCount = 16; // must match Texture2D uTex[kTexCount] in descriptorindexing.slang
-    constexpr uint32_t kTexDim = 64;   // each texture/layer is a 64x64 solid color; 64*4=256 keeps the
-                                       // upload row pitch 256-aligned (D3D12 requires it for buffer->texture copies)
+    constexpr uint32_t kTexDim = 4;    // each texture/layer is a tiny 4x4 solid color
     constexpr uint32_t kGrid = 4;      // 4x4 grid of quads = 16 cells
+    constexpr uint32_t kImgBytes = kTexDim * kTexDim * 4;
 
-    struct Vertex { float px, py, pz; float u, v; float texIndex; };
+    struct Vertex { float px, py, pz; float u, v; int32_t texIndex; };
 
     // HSV->RGBA8 (s,v fixed) for a distinct-per-index palette.
     void PaletteColor(uint32_t i, uint8_t out[4])
     {
         const float h = (static_cast<float>(i) / kTexCount) * 6.0f;
         const float s = 0.75f, v = 0.95f;
-        const float c = v * s, x = c * (1.0f - std::fabs(std::fmod(h, 2.0f) - 1.0f)), m = v - c;
+        const float cc = v * s, x = cc * (1.0f - std::fabs(std::fmod(h, 2.0f) - 1.0f)), m = v - cc;
         float r = 0, g = 0, b = 0;
-        if (h < 1) { r = c; g = x; } else if (h < 2) { r = x; g = c; } else if (h < 3) { g = c; b = x; }
-        else if (h < 4) { g = x; b = c; } else if (h < 5) { r = x; b = c; } else { r = c; b = x; }
+        if (h < 1) { r = cc; g = x; } else if (h < 2) { r = x; g = cc; } else if (h < 3) { g = cc; b = x; }
+        else if (h < 4) { g = x; b = cc; } else if (h < 5) { r = x; b = cc; } else { r = cc; b = x; }
         out[0] = static_cast<uint8_t>((r + m) * 255.0f); out[1] = static_cast<uint8_t>((g + m) * 255.0f);
         out[2] = static_cast<uint8_t>((b + m) * 255.0f); out[3] = 255;
-    }
-
-    // Fill one kTexDim*kTexDim RGBA8 image with palette color `i`.
-    void FillSolid(uint32_t i, uint8_t* dst)
-    {
-        uint8_t c[4]; PaletteColor(i, c);
-        for (uint32_t p = 0; p < kTexDim * kTexDim; ++p) std::memcpy(dst + p * 4, c, 4);
     }
 } // namespace
 
@@ -68,7 +64,7 @@ int main(int, char**)
     for (uint32_t gy = 0; gy < kGrid; ++gy)
         for (uint32_t gx = 0; gx < kGrid; ++gx)
         {
-            const float ti = static_cast<float>(gy * kGrid + gx);
+            const int32_t ti = static_cast<int32_t>(gy * kGrid + gx);
             const float x0 = -1.0f + gx * cell + pad, x1 = -1.0f + (gx + 1) * cell - pad;
             const float y0 = -1.0f + gy * cell + pad, y1 = -1.0f + (gy + 1) * cell - pad;
             const uint16_t base = static_cast<uint16_t>(verts.size());
@@ -81,20 +77,14 @@ int main(int, char**)
     const uint32_t ibSize = static_cast<uint32_t>(indices.size() * sizeof(uint16_t));
     const uint32_t indexCount = static_cast<uint32_t>(indices.size());
 
-    auto deviceBuf = [&](uint32_t size, VriBufferUsageFlags usage, const void* src) {
+    auto deviceBuf = [&](uint32_t size, VriBufferUsageFlags usage) {
         VriBufferDesc bd{}; bd.size = size; bd.usage = usage | VriBufferUsage_TransferDst; bd.memoryLocation = VriMemoryLocation_Device;
-        VriBuffer* b = nullptr; c.CreateBuffer(app.dev, &bd, &b);
-        VriBufferDesc sd{}; sd.size = size; sd.usage = VriBufferUsage_TransferSrc; sd.memoryLocation = VriMemoryLocation_HostUpload;
-        VriBuffer* s = nullptr; c.CreateBuffer(app.dev, &sd, &s);
-        std::memcpy(c.MapBuffer(s, 0, size), src, size); c.UnmapBuffer(s);
-        return std::pair<VriBuffer*, VriBuffer*>{b, s};
+        VriBuffer* b = nullptr; c.CreateBuffer(app.dev, &bd, &b); return b;
     };
-    auto [vbuf, vstg] = deviceBuf(vbSize, VriBufferUsage_VertexBuffer, verts.data());
-    auto [ibuf, istg] = deviceBuf(ibSize, VriBufferUsage_IndexBuffer, indices.data());
-
-    // identity MVP (the grid is already in clip space) - the shaders still read a camera CB.
-    float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-    auto [ubo, ustg] = deviceBuf(sizeof(identity), VriBufferUsage_ConstantBuffer, identity);
+    VriBuffer* vbuf = deviceBuf(vbSize, VriBufferUsage_VertexBuffer);
+    VriBuffer* ibuf = deviceBuf(ibSize, VriBufferUsage_IndexBuffer);
+    float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1}; // grid is already in clip space; shaders still read a camera CB
+    VriBuffer* ubo = deviceBuf(sizeof(identity), VriBufferUsage_ConstantBuffer);
     VriBufferViewDesc ubv{}; ubv.buffer = ubo; ubv.viewType = VriDescriptorType_ConstantBuffer; ubv.offset = 0; ubv.size = sizeof(identity);
     VriDescriptor* uboView = nullptr; c.CreateBufferView(app.dev, &ubv, &uboView);
 
@@ -102,12 +92,13 @@ int main(int, char**)
     smp.addressModeU = VriAddressMode_ClampToEdge; smp.addressModeV = VriAddressMode_ClampToEdge; smp.addressModeW = VriAddressMode_ClampToEdge; smp.maxLod = 1.0f;
     VriDescriptor* sampler = nullptr; c.CreateSampler(app.dev, &smp, &sampler);
 
-    // ---- textures: N separate (bindless) or one N-layer array (fallback) ----
-    constexpr uint32_t kImgBytes = kTexDim * kTexDim * 4;
-    std::vector<VriTexture*> texes;        // bindless
-    std::vector<VriDescriptor*> texViews;  // bindless
-    VriTexture* arrayTex = nullptr; VriDescriptor* arrayView = nullptr; // fallback
-    VriBuffer* texStaging = nullptr;
+    // the kTexCount palette images, contiguous (one 4x4 RGBA8 image each)
+    std::vector<uint8_t> pixels(kImgBytes * kTexCount);
+    for (uint32_t i = 0; i < kTexCount; ++i)
+    {
+        uint8_t col[4]; PaletteColor(i, col);
+        for (uint32_t p = 0; p < kTexDim * kTexDim; ++p) std::memcpy(pixels.data() + i * kImgBytes + p * 4, col, 4);
+    }
 
     auto makeTex = [&](uint32_t layerNum) {
         VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM; td.width = kTexDim; td.height = kTexDim; td.depth = 1;
@@ -115,32 +106,20 @@ int main(int, char**)
         VriTexture* t = nullptr; c.CreateTexture(app.dev, &td, &t); return t;
     };
 
+    std::vector<VriTexture*> texes; std::vector<VriDescriptor*> texViews; // bindless: kTexCount separate textures
+    VriTexture* arrayTex = nullptr; VriDescriptor* arrayView = nullptr;   // fallback: one kTexCount-layer array
     if (bindless)
-    {
-        std::vector<uint8_t> px(kImgBytes);
         for (uint32_t i = 0; i < kTexCount; ++i)
         {
             texes.push_back(makeTex(1));
             VriTextureViewDesc vd{}; vd.texture = texes[i]; vd.viewType = VriTextureViewType_2D; vd.format = VriFormat_Unknown; vd.aspect = VriImageAspect_Color;
             VriDescriptor* v = nullptr; c.CreateTextureView(app.dev, &vd, &v); texViews.push_back(v);
         }
-        // one staging buffer holding all kTexCount images back to back
-        VriBufferDesc sd{}; sd.size = kImgBytes * kTexCount; sd.usage = VriBufferUsage_TransferSrc; sd.memoryLocation = VriMemoryLocation_HostUpload;
-        c.CreateBuffer(app.dev, &sd, &texStaging);
-        uint8_t* m = static_cast<uint8_t*>(c.MapBuffer(texStaging, 0, kImgBytes * kTexCount));
-        for (uint32_t i = 0; i < kTexCount; ++i) FillSolid(i, m + i * kImgBytes);
-        c.UnmapBuffer(texStaging);
-    }
     else
     {
         arrayTex = makeTex(kTexCount);
         VriTextureViewDesc vd{}; vd.texture = arrayTex; vd.viewType = VriTextureViewType_2DArray; vd.format = VriFormat_Unknown; vd.aspect = VriImageAspect_Color; vd.layerNum = kTexCount;
         c.CreateTextureView(app.dev, &vd, &arrayView);
-        VriBufferDesc sd{}; sd.size = kImgBytes * kTexCount; sd.usage = VriBufferUsage_TransferSrc; sd.memoryLocation = VriMemoryLocation_HostUpload;
-        c.CreateBuffer(app.dev, &sd, &texStaging);
-        uint8_t* m = static_cast<uint8_t*>(c.MapBuffer(texStaging, 0, kImgBytes * kTexCount));
-        for (uint32_t i = 0; i < kTexCount; ++i) FillSolid(i, m + i * kImgBytes);
-        c.UnmapBuffer(texStaging);
     }
 
     // ---- pipeline layout: CB@0 (vertex), Sampler@1 (frag), Texture(array)@2 (frag) ----
@@ -156,27 +135,15 @@ int main(int, char**)
     VriShaderDesc sh[2]{};
     sh[0].stage = VriShaderStage_Vertex;   sh[0].entryPointName = "vertexMain";
     sh[1].stage = VriShaderStage_Fragment; sh[1].entryPointName = "fragmentMain";
-    if (app.useDxbc)
-    {
-        // D3D12 always has bindless here (hasBindless gated the path); use the indexing shader.
-        sh[0].bytecode = g_descriptorindexingDxbcVS; sh[0].bytecodeSize = sizeof(g_descriptorindexingDxbcVS);
-        sh[1].bytecode = g_descriptorindexingDxbcPS; sh[1].bytecodeSize = sizeof(g_descriptorindexingDxbcPS);
-    }
-    else if (bindless) // Vulkan
-    {
-        sh[0].bytecode = sh[1].bytecode = g_descriptorindexingSpv;
-        sh[0].bytecodeSize = sh[1].bytecodeSize = sizeof(g_descriptorindexingSpv);
-    }
-    else // OpenGL (SPIR-V) or WebGPU/WebGL2 (WGSL) fallback
-    {
-        sh[0].bytecode = sh[1].bytecode = app.useWgsl ? static_cast<const void*>(g_arraytexWgsl) : static_cast<const void*>(g_arraytexSpv);
-        sh[0].bytecodeSize = sh[1].bytecodeSize = app.useWgsl ? sizeof(g_arraytexWgsl) : sizeof(g_arraytexSpv);
-    }
+    if (app.useDxbc) { sh[0].bytecode = g_descriptorindexingDxbcVS; sh[0].bytecodeSize = sizeof(g_descriptorindexingDxbcVS); sh[1].bytecode = g_descriptorindexingDxbcPS; sh[1].bytecodeSize = sizeof(g_descriptorindexingDxbcPS); }
+    else if (bindless) { sh[0].bytecode = sh[1].bytecode = g_descriptorindexingSpv; sh[0].bytecodeSize = sh[1].bytecodeSize = sizeof(g_descriptorindexingSpv); }
+    else { sh[0].bytecode = sh[1].bytecode = app.useWgsl ? static_cast<const void*>(g_arraytexWgsl) : static_cast<const void*>(g_arraytexSpv);
+           sh[0].bytecodeSize = sh[1].bytecodeSize = app.useWgsl ? sizeof(g_arraytexWgsl) : sizeof(g_arraytexSpv); }
 
     VriVertexAttributeDesc attrs[3]{};
     attrs[0].format = VriFormat_RGB32_SFLOAT; attrs[0].offset = 0;  attrs[0].streamIndex = 0;
     attrs[1].format = VriFormat_RG32_SFLOAT;  attrs[1].offset = 12; attrs[1].streamIndex = 0;
-    attrs[2].format = VriFormat_R32_SFLOAT;   attrs[2].offset = 20; attrs[2].streamIndex = 0;
+    attrs[2].format = VriFormat_R32_SINT;     attrs[2].offset = 20; attrs[2].streamIndex = 0; // integer index, works on all backends
     VriVertexStreamDesc stream{}; stream.stride = sizeof(Vertex); stream.bindingSlot = 0; stream.stepRate = VriVertexStepRate_PerVertex;
 
     VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
@@ -203,50 +170,14 @@ int main(int, char**)
         c.UpdateDescriptorRanges(set, 0, 3, u);
     }
 
-    // ---- one-time upload (fence value 1) ----
-    {
-        VriCommandBuffer* cmd = app.cmd;
-        c.BeginCommandBuffer(cmd);
-        VriBufferCopyDesc vcp{}; vcp.size = vbSize; c.CmdCopyBuffer(cmd, vbuf, vstg, &vcp);
-        VriBufferCopyDesc icp{}; icp.size = ibSize; c.CmdCopyBuffer(cmd, ibuf, istg, &icp);
-        VriBufferCopyDesc ucp{}; ucp.size = sizeof(identity); c.CmdCopyBuffer(cmd, ubo, ustg, &ucp); // static MVP, uploaded once
-        VriBufferBarrierDesc gb[3]{};
-        gb[0].buffer = vbuf; gb[0].before.access = VriAccess_CopyDestinationWrite; gb[0].before.stages = VriPipelineStage_Transfer; gb[0].after.access = VriAccess_VertexBufferRead; gb[0].after.stages = VriPipelineStage_VertexInput;
-        gb[1].buffer = ibuf; gb[1].before.access = VriAccess_CopyDestinationWrite; gb[1].before.stages = VriPipelineStage_Transfer; gb[1].after.access = VriAccess_IndexBufferRead; gb[1].after.stages = VriPipelineStage_VertexInput;
-        gb[2].buffer = ubo;  gb[2].before.access = VriAccess_CopyDestinationWrite; gb[2].before.stages = VriPipelineStage_Transfer; gb[2].after.access = VriAccess_ConstantBufferRead; gb[2].after.stages = VriPipelineStage_VertexShader;
-        VriBarrierGroupDesc gbg{}; gbg.buffers = gb; gbg.bufferNum = 3; c.CmdBarrier(cmd, &gbg);
-
-        auto uploadTex = [&](VriTexture* t, uint32_t layerNum) {
-            VriTextureBarrierDesc tb{}; tb.texture = t; tb.before.layout = VriLayout_Undefined; tb.before.stages = VriPipelineStage_None;
-            tb.after.access = VriAccess_CopyDestinationWrite; tb.after.layout = VriLayout_CopyDestination; tb.after.stages = VriPipelineStage_Transfer; tb.aspect = VriImageAspect_Color; tb.layerNum = layerNum;
-            VriBarrierGroupDesc g{}; g.textures = &tb; g.textureNum = 1; c.CmdBarrier(cmd, &g);
-            for (uint32_t layer = 0; layer < layerNum; ++layer)
-            {
-                VriBufferTextureCopyDesc up{}; up.bufferOffset = uint64_t(layer) * kImgBytes;
-                up.texture.aspect = VriImageAspect_Color; up.texture.baseLayer = layer; up.texture.layerNum = 1; up.texture.width = kTexDim; up.texture.height = kTexDim;
-                c.CmdUploadBufferToTexture(cmd, t, texStaging, &up);
-            }
-            VriTextureBarrierDesc tb2{}; tb2.texture = t; tb2.before.access = VriAccess_CopyDestinationWrite; tb2.before.layout = VriLayout_CopyDestination; tb2.before.stages = VriPipelineStage_Transfer;
-            tb2.after.access = VriAccess_ShaderResourceRead; tb2.after.layout = VriLayout_ShaderResource; tb2.after.stages = VriPipelineStage_FragmentShader; tb2.aspect = VriImageAspect_Color; tb2.layerNum = layerNum;
-            VriBarrierGroupDesc g2{}; g2.textures = &tb2; g2.textureNum = 1; c.CmdBarrier(cmd, &g2);
-        };
-        if (bindless) for (uint32_t i = 0; i < kTexCount; ++i) { /* each tex: one image at offset i */
-            VriTextureBarrierDesc tb{}; tb.texture = texes[i]; tb.before.layout = VriLayout_Undefined; tb.before.stages = VriPipelineStage_None;
-            tb.after.access = VriAccess_CopyDestinationWrite; tb.after.layout = VriLayout_CopyDestination; tb.after.stages = VriPipelineStage_Transfer; tb.aspect = VriImageAspect_Color;
-            VriBarrierGroupDesc g{}; g.textures = &tb; g.textureNum = 1; c.CmdBarrier(cmd, &g);
-            VriBufferTextureCopyDesc up{}; up.bufferOffset = uint64_t(i) * kImgBytes; up.texture.aspect = VriImageAspect_Color; up.texture.layerNum = 1; up.texture.width = kTexDim; up.texture.height = kTexDim;
-            c.CmdUploadBufferToTexture(cmd, texes[i], texStaging, &up);
-            VriTextureBarrierDesc tb2{}; tb2.texture = texes[i]; tb2.before.access = VriAccess_CopyDestinationWrite; tb2.before.layout = VriLayout_CopyDestination; tb2.before.stages = VriPipelineStage_Transfer;
-            tb2.after.access = VriAccess_ShaderResourceRead; tb2.after.layout = VriLayout_ShaderResource; tb2.after.stages = VriPipelineStage_FragmentShader; tb2.aspect = VriImageAspect_Color;
-            VriBarrierGroupDesc g2{}; g2.textures = &tb2; g2.textureNum = 1; c.CmdBarrier(cmd, &g2);
-        }
-        else uploadTex(arrayTex, kTexCount);
-
-        c.EndCommandBuffer(cmd);
-        VriFenceSubmitDesc sig{}; sig.fence = app.fence; sig.value = 1;
-        VriQueueSubmitDesc sub{}; sub.commandBuffers = &cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
-        c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1);
-    }
+    // ---- one-shot upload via the shared helper (staging + barriers handled inside) ----
+    app.BeginUpload();
+    app.UploadBuffer(vbuf, verts.data(), vbSize, VriAccess_VertexBufferRead, VriPipelineStage_VertexInput);
+    app.UploadBuffer(ibuf, indices.data(), ibSize, VriAccess_IndexBufferRead, VriPipelineStage_VertexInput);
+    app.UploadBuffer(ubo, identity, sizeof(identity), VriAccess_ConstantBufferRead, VriPipelineStage_VertexShader);
+    if (bindless) for (uint32_t i = 0; i < kTexCount; ++i) app.UploadTexture(texes[i], pixels.data() + i * kImgBytes, kTexDim, kTexDim, 1, kImgBytes);
+    else app.UploadTexture(arrayTex, pixels.data(), kTexDim, kTexDim, kTexCount, kImgBytes);
+    app.EndUpload();
 
     app.onRecord = [pipeline, layout, set, vbuf, ibuf, indexCount](VriCommandBuffer* cmd) {
         app.c.CmdSetPipeline(cmd, pipeline);

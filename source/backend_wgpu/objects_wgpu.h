@@ -31,6 +31,9 @@ namespace vri::wgpu
         WGPUCommandBuffer      finished;    // produced by End, consumed by Submit
         VriPipelineLayout*     boundLayout;
         WGPURenderPipeline     boundPipeline;
+        // Bounce buffers created to satisfy copyBufferToTexture's 256-byte bytesPerRow; held
+        // until the GPU consumes them (released at the next BeginCommandBuffer).
+        std::vector<WGPUBuffer> tempUploads;
     };
 
     struct BufferWGPU

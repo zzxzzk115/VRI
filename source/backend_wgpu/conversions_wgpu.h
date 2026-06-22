@@ -127,6 +127,12 @@ namespace vri::wgpu
             case VriFormat_RGB32_SFLOAT:  return WGPUVertexFormat_Float32x3;
             case VriFormat_RGBA32_SFLOAT: return WGPUVertexFormat_Float32x4;
             case VriFormat_RGBA8_UNORM:   return WGPUVertexFormat_Unorm8x4;
+            case VriFormat_R32_UINT:      return WGPUVertexFormat_Uint32;
+            case VriFormat_R32_SINT:      return WGPUVertexFormat_Sint32;
+            case VriFormat_RG32_UINT:     return WGPUVertexFormat_Uint32x2;
+            case VriFormat_RG32_SINT:     return WGPUVertexFormat_Sint32x2;
+            case VriFormat_RGBA32_UINT:   return WGPUVertexFormat_Uint32x4;
+            case VriFormat_RGBA32_SINT:   return WGPUVertexFormat_Sint32x4;
             default:                      return WGPUVertexFormat_Float32x4;
         }
     }

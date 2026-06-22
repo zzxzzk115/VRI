@@ -249,6 +249,7 @@ namespace vri::d3d12
             CommandBufferD3D12* c = CB(cmd);
             if (FAILED(c->list->Reset(c->allocator->allocator.Get(), nullptr))) return VriResult_Failure;
             c->rtvCount = 0;
+            c->tempUploads.clear(); // prior frame's bounce buffers are done (caller waited on the fence)
             return VriResult_Success;
         }
         VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer* cmd) { return SUCCEEDED(CB(cmd)->list->Close()) ? VriResult_Success : VriResult_Failure; }
@@ -960,18 +961,46 @@ namespace vri::d3d12
             CommandBufferD3D12* c = CB(cmd);
             TextureD3D12* t = Tex(dst);
             BufferD3D12* b = Buf(src);
-            const UINT sub = region ? region->texture.mip : 0;
+            // Subresource = mip + arrayLayer * mipNum (baseLayer selects the array slice).
+            const UINT sub = (region ? region->texture.mip : 0) + (region ? region->texture.baseLayer : 0) * t->mipNum;
+            const UINT64 srcOffset = region ? region->bufferOffset : 0;
             D3D12_RESOURCE_DESC rd = t->resource->GetDesc();
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = {};
             UINT rows = 0; UINT64 rowBytes = 0, total = 0;
-            // The footprint's RowPitch is aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256);
-            // the staging buffer must supply rows at that pitch (true for widths that are a
-            // multiple of 64 for RGBA8, matching the readback path's assumption).
-            c->device->Device()->GetCopyableFootprints(&rd, sub, 1, region ? region->bufferOffset : 0, &fp, &rows, &rowBytes, &total);
+            c->device->Device()->GetCopyableFootprints(&rd, sub, 1, 0, &fp, &rows, &rowBytes, &total); // footprint at offset 0
             Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST);
+
             D3D12_TEXTURE_COPY_LOCATION dstLoc = {}; dstLoc.pResource = t->resource.Get(); dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dstLoc.SubresourceIndex = sub;
-            D3D12_TEXTURE_COPY_LOCATION srcLoc = {}; srcLoc.pResource = b->resource.Get(); srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; srcLoc.PlacedFootprint = fp;
-            c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+            D3D12_TEXTURE_COPY_LOCATION srcLoc = {}; srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+
+            // D3D12 buffer->texture copies need a 256-aligned row pitch and a 512-aligned source
+            // offset. If the app's tightly-packed staging already meets that (typical wide
+            // textures, offset 0) copy it directly; otherwise pack the rows into an aligned temp
+            // upload buffer (CPU memcpy from the mapped staging) so any texture size/offset works.
+            const bool aligned = rowBytes == fp.Footprint.RowPitch && (srcOffset % D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) == 0;
+            if (aligned || !b->mapped)
+            {
+                srcLoc.pResource = b->resource.Get();
+                srcLoc.PlacedFootprint = fp; srcLoc.PlacedFootprint.Offset = srcOffset;
+                c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+            }
+            else
+            {
+                ComPtr<ID3D12Resource> temp;
+                D3D12_HEAP_PROPERTIES hp = {}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+                D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = total; bd.Height = 1;
+                bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.Format = DXGI_FORMAT_UNKNOWN; bd.SampleDesc.Count = 1; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+                if (FAILED(c->device->Device()->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&temp))))
+                { c->device->ReportError("texture-upload bounce buffer alloc failed"); return; }
+                void* tmp = nullptr; D3D12_RANGE none = {0, 0}; temp->Map(0, &none, &tmp);
+                const uint8_t* srcBase = static_cast<const uint8_t*>(b->mapped) + srcOffset;
+                for (UINT r = 0; r < rows; ++r)
+                    std::memcpy(static_cast<uint8_t*>(tmp) + r * fp.Footprint.RowPitch, srcBase + r * rowBytes, static_cast<size_t>(rowBytes));
+                temp->Unmap(0, nullptr);
+                srcLoc.pResource = temp.Get(); srcLoc.PlacedFootprint = fp; // offset 0
+                c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+                c->tempUploads.push_back(std::move(temp));
+            }
         }
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
         void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}

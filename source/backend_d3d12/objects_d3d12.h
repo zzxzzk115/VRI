@@ -124,6 +124,10 @@ namespace vri::d3d12
         struct PendingResolve { TextureD3D12* src; TextureD3D12* dst; };
         PendingResolve                     resolves[8] = {};
         uint32_t                           resolveCount = 0;
+        // Bounce upload buffers created to satisfy D3D12's 256-byte row-pitch / 512-byte
+        // offset alignment for buffer->texture copies; kept alive until the GPU consumes them
+        // (cleared at the next BeginCommandBuffer, after the caller has waited on the fence).
+        std::vector<ComPtr<ID3D12Resource>> tempUploads;
     };
 
     struct FenceD3D12

@@ -148,6 +148,8 @@ namespace vri::wgpu
         {
             CommandBufferWGPU* c = CB(cmd);
             WGPUCommandEncoderDescriptor d = {};
+            for (WGPUBuffer t : c->tempUploads) wgpuBufferRelease(t); // prior frame's bounce buffers are done
+            c->tempUploads.clear();
             c->encoder = wgpuDeviceCreateCommandEncoder(c->device->Device(), &d);
             c->pass = nullptr;
             c->computePass = nullptr;
@@ -982,15 +984,10 @@ namespace vri::wgpu
 
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer* cmd, VriTexture* dst, VriBuffer* src, const VriBufferTextureCopyDesc* region)
         {
+            CommandBufferWGPU* c = CB(cmd);
             const TextureWGPU* t = reinterpret_cast<const TextureWGPU*>(dst);
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
-
-            WGPUTexelCopyBufferInfo srcInfo = {};
-            srcInfo.buffer = Buf(src)->buffer;
-            srcInfo.layout.offset = region->bufferOffset;
-            srcInfo.layout.bytesPerRow = region->bufferRowLength ? region->bufferRowLength * t->texelSize : w * t->texelSize;
-            srcInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
 
             // 2D array textures address the destination slice via baseLayer/layerNum; 3D
             // textures via z/depth. WebGPU uses origin.z + extent.depthOrArrayLayers for both.
@@ -1003,9 +1000,32 @@ namespace vri::wgpu
             dstInfo.mipLevel = region->texture.mip;
             dstInfo.origin = {static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), originZ};
             dstInfo.aspect = WGPUTextureAspect_All;
-
             WGPUExtent3D ext = {w, h, extDepth};
-            wgpuCommandEncoderCopyBufferToTexture(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
+
+            // copyBufferToTexture requires bytesPerRow to be a multiple of 256. If the app's
+            // staging is tightly packed and narrower than that, pack the rows into a temp buffer
+            // at the aligned pitch first (per-row buffer copy), so any texture size just works.
+            const uint32_t tightPitch = (region->bufferRowLength ? region->bufferRowLength : w) * t->texelSize;
+            const uint32_t alignedPitch = (tightPitch + 255u) & ~255u;
+            WGPUTexelCopyBufferInfo srcInfo = {};
+            srcInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
+            if (tightPitch == alignedPitch)
+            {
+                srcInfo.buffer = Buf(src)->buffer;
+                srcInfo.layout.offset = region->bufferOffset;
+                srcInfo.layout.bytesPerRow = tightPitch;
+                wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
+            }
+            else
+            {
+                WGPUBufferDescriptor bd = {}; bd.size = uint64_t(alignedPitch) * h; bd.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+                WGPUBuffer temp = wgpuDeviceCreateBuffer(c->device->Device(), &bd);
+                for (uint32_t r = 0; r < h; ++r)
+                    wgpuCommandEncoderCopyBufferToBuffer(c->encoder, Buf(src)->buffer, region->bufferOffset + uint64_t(r) * tightPitch, temp, uint64_t(r) * alignedPitch, tightPitch);
+                srcInfo.buffer = temp; srcInfo.layout.offset = 0; srcInfo.layout.bytesPerRow = alignedPitch; srcInfo.layout.rowsPerImage = h;
+                wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
+                c->tempUploads.push_back(temp); // keep alive until the GPU consumes it
+            }
         }
 
         void VRI_CALL CmdCopyTexture(VriCommandBuffer* cmd, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
