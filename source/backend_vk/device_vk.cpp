@@ -120,6 +120,14 @@ namespace vri::vk
 #elif defined(__linux__)
         extensions.push_back("VK_KHR_xlib_surface");
         extensions.push_back("VK_KHR_wayland_surface");
+#elif defined(__APPLE__)
+        // MoltenVK: the loader only enumerates the portability (Metal) device when the
+        // instance opts in, and VK_EXT_layer_settings lets us turn on Metal argument buffers
+        // (required for descriptor indexing). See the pNext chain below. [UNVERIFIED on macOS]
+        extensions.push_back("VK_EXT_metal_surface");
+        extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        extensions.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
 #endif
         for (uint32_t i = 0; i < desc.requiredInstanceExtensionNum; ++i)
             extensions.push_back(desc.requiredInstanceExtensions[i]);
@@ -141,6 +149,23 @@ namespace vri::vk
         ci.ppEnabledExtensionNames = extensions.data();
         ci.enabledLayerCount = static_cast<uint32_t>(layers.size());
         ci.ppEnabledLayerNames = layers.data();
+
+#if defined(__APPLE__)
+        // MoltenVK: enumerate the portability device, and pass MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS
+        // so descriptor indexing works (Metal argument buffers). [UNVERIFIED on macOS]
+        ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+        const VkBool32 mvkArgBuffers = VK_TRUE;
+        VkLayerSettingEXT mvkSetting{};
+        mvkSetting.pLayerName = "MoltenVK";
+        mvkSetting.pSettingName = "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS";
+        mvkSetting.type = VK_LAYER_SETTING_TYPE_BOOL32_EXT;
+        mvkSetting.valueCount = 1;
+        mvkSetting.pValues = &mvkArgBuffers;
+        VkLayerSettingsCreateInfoEXT mvkLayerSettings{VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT};
+        mvkLayerSettings.settingCount = 1;
+        mvkLayerSettings.pSettings = &mvkSetting;
+        ci.pNext = &mvkLayerSettings;
+#endif
 
         if (vkCreateInstance(&ci, nullptr, &m_instance) != VK_SUCCESS)
         {
@@ -355,7 +380,11 @@ namespace vri::vk
                 f12.runtimeDescriptorArray = VK_TRUE;
                 f12.descriptorBindingPartiallyBound = VK_TRUE;
                 // Variable-count (runtime-sized) bindless arrays + update-after-bind.
+                // MoltenVK can't do VARIABLE_DESCRIPTOR_COUNT with image arrays, so on macOS
+                // bindless is granted but limited to fixed-size arrays (see core_vk.cpp). [UNVERIFIED]
+#if !defined(__APPLE__)
                 f12.descriptorBindingVariableDescriptorCount = v12Sup.descriptorBindingVariableDescriptorCount;
+#endif
                 f12.descriptorBindingSampledImageUpdateAfterBind = v12Sup.descriptorBindingSampledImageUpdateAfterBind;
                 f12.descriptorBindingUpdateUnusedWhilePending = v12Sup.descriptorBindingUpdateUnusedWhilePending;
                 f12.shaderSampledImageArrayNonUniformIndexing = v12Sup.shaderSampledImageArrayNonUniformIndexing;

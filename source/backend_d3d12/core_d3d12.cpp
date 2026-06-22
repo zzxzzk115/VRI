@@ -787,41 +787,49 @@ namespace vri::d3d12
                 const uint32_t idx = baseRange + r;
                 if (idx >= setBindings.size() || updates[r].descriptorNum == 0) continue;
                 const LayoutBindingD3D12* lb = setBindings[idx];
-                const DescriptorD3D12* v = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]);
-                s->bound[lb->binding] = v; // constant buffers bind as root CBVs at draw
-                if (lb->type == VriDescriptorType_ConstantBuffer || !v) continue;
-                if (lb->type == VriDescriptorType_Sampler) // realize into the set's sampler heap slot
+                s->bound[lb->binding] = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]); // root CBVs bind [0] at draw
+                if (lb->type == VriDescriptorType_ConstantBuffer) continue;
+                // A range may carry an array of descriptors (descriptor indexing / bindless):
+                // write each into consecutive heap slots from heapOffset + baseDescriptor.
+                for (uint32_t k = 0; k < updates[r].descriptorNum; ++k)
                 {
-                    D3D12_SAMPLER_DESC sd = ToD3DSampler(v->sampler);
-                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->samplerCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->samplerSize;
-                    d->Device()->CreateSampler(&sd, h);
-                }
-                else if (lb->type == VriDescriptorType_AccelerationStructure) // TLAS SRV (no resource, by GPU VA)
-                {
-                    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
-                    srv.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
-                    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                    srv.RaytracingAccelerationStructure.Location = v->accelAddress;
-                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->srvSize;
-                    d->Device()->CreateShaderResourceView(nullptr, &srv, h);
-                }
-                else if (lb->type == VriDescriptorType_StorageTexture && v->texture) // UAV
-                {
-                    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-                    uav.Format = v->texture->format;
-                    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->srvSize;
-                    d->Device()->CreateUnorderedAccessView(v->texture->resource.Get(), nullptr, &uav, h);
-                }
-                else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
-                {
-                    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
-                    srv.Format = v->texture->format;
-                    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                    srv.Texture2D.MipLevels = v->texture->mipNum;
-                    D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += static_cast<SIZE_T>(lb->heapOffset) * s->pool->srvSize;
-                    d->Device()->CreateShaderResourceView(v->texture->resource.Get(), &srv, h);
+                    const DescriptorD3D12* v = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[k]);
+                    if (!v) continue;
+                    const SIZE_T slot = static_cast<SIZE_T>(lb->heapOffset) + updates[r].baseDescriptor + k;
+                    if (lb->type == VriDescriptorType_Sampler) // realize into the set's sampler heap slot
+                    {
+                        D3D12_SAMPLER_DESC sd = ToD3DSampler(v->sampler);
+                        D3D12_CPU_DESCRIPTOR_HANDLE h = s->samplerCpu; h.ptr += slot * s->pool->samplerSize;
+                        d->Device()->CreateSampler(&sd, h);
+                    }
+                    else if (lb->type == VriDescriptorType_AccelerationStructure) // TLAS SRV (no resource, by GPU VA)
+                    {
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+                        srv.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+                        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        srv.RaytracingAccelerationStructure.Location = v->accelAddress;
+                        D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += slot * s->pool->srvSize;
+                        d->Device()->CreateShaderResourceView(nullptr, &srv, h);
+                    }
+                    else if (lb->type == VriDescriptorType_StorageTexture && v->texture) // UAV
+                    {
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+                        uav.Format = v->texture->format;
+                        uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                        D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += slot * s->pool->srvSize;
+                        d->Device()->CreateUnorderedAccessView(v->texture->resource.Get(), nullptr, &uav, h);
+                    }
+                    else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
+                    {
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+                        srv.Format = v->texture->format;
+                        srv.ViewDimension = v->texture->layerNum > 1 ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
+                        srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        if (v->texture->layerNum > 1) { srv.Texture2DArray.MipLevels = v->texture->mipNum; srv.Texture2DArray.ArraySize = v->texture->layerNum; }
+                        else srv.Texture2D.MipLevels = v->texture->mipNum;
+                        D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += slot * s->pool->srvSize;
+                        d->Device()->CreateShaderResourceView(v->texture->resource.Get(), &srv, h);
+                    }
                 }
             }
         }

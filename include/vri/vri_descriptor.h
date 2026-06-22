@@ -33,6 +33,10 @@ typedef struct VriDescriptorRangeDesc
     VriDescriptorType       descriptorType;
     VriShaderStageFlags     shaderStages;
     VriDescriptorRangeFlags flags;
+    /* For Texture ranges: the sampled view dimension. WebGPU bakes the exact dimension
+       (2D / 2DArray / Cube) into the bind-group layout, so an array/cube texture must declare
+       it here. The zero value (== 1D) is treated as 2D; other backends ignore this field. */
+    VriTextureViewType      viewType;
 } VriDescriptorRangeDesc;
 
 /* A descriptor-set layout = a register space + its ranges. */

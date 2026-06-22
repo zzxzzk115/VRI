@@ -543,8 +543,12 @@ namespace vri::vk
                     if (range.flags & VriDescriptorRange_PartiallyBound) bf |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
                     if (range.flags & VriDescriptorRange_VariableSized)
                     {
+                        // MoltenVK can't do VARIABLE_DESCRIPTOR_COUNT with image arrays; on macOS
+                        // keep the array its declared fixed size (still partially-bound). [UNVERIFIED]
+#if !defined(__APPLE__)
                         bf |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
                         variableCount = range.descriptorNum; // VK requires this be the last binding
+#endif
                     }
                     if (bf) { bf |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT; usesUpdateAfterBind = true; }
                     bindingFlags.push_back(bf);

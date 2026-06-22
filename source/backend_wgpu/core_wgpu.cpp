@@ -407,7 +407,9 @@ namespace vri::wgpu
                         case VriDescriptorType_StructuredBuffer: e.buffer.type = WGPUBufferBindingType_ReadOnlyStorage; break;
                         case VriDescriptorType_Texture:
                             e.texture.sampleType = WGPUTextureSampleType_Float;
-                            e.texture.viewDimension = WGPUTextureViewDimension_2D;
+                            e.texture.viewDimension = range.viewType == VriTextureViewType_2DArray ? WGPUTextureViewDimension_2DArray
+                                                    : range.viewType == VriTextureViewType_Cube ? WGPUTextureViewDimension_Cube
+                                                    : WGPUTextureViewDimension_2D; // 0/1D/2D -> 2D
                             break;
                         case VriDescriptorType_StorageTexture:
                             e.storageTexture.access = WGPUStorageTextureAccess_WriteOnly;

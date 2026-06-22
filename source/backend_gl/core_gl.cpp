@@ -448,7 +448,9 @@ namespace vri::gl
             const GLsizei mips = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
             const GLsizei w = static_cast<GLsizei>(desc->width);
             const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
+            const GLsizei layers = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
             const bool ms = desc->sampleNum > 1;
+            const bool isArray = !ms && desc->type != VriTextureType_3D && layers > 1; // 2D array texture
 
 #if !defined(__EMSCRIPTEN__) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
             const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
@@ -485,6 +487,16 @@ namespace vri::gl
                 }
 #endif
             }
+            else if (isArray)
+            {
+                // 2D array texture (GLES3/WebGL2 + desktop): glTexStorage3D, depth = layer count.
+                target = GL_TEXTURE_2D_ARRAY;
+#if !defined(__EMSCRIPTEN__)
+                if (dsa) { glCreateTextures(target, 1, &id); glTextureStorage3D(id, mips, gf.internalFormat, w, h, layers); }
+                else
+#endif
+                { glGenTextures(1, &id); glBindTexture(target, id); glTexStorage3D(target, mips, gf.internalFormat, w, h, layers); glBindTexture(target, 0); }
+            }
 #if !defined(__EMSCRIPTEN__)
             else if (dsa)
             {
@@ -512,7 +524,7 @@ namespace vri::gl
             t->height = desc->height ? desc->height : 1u;
             t->depth = 1;
             t->mipNum = static_cast<uint32_t>(mips);
-            t->layerNum = 1;
+            t->layerNum = static_cast<uint32_t>(layers);
             t->texelSize = gf.texelSize;
             *out = ToHandle(t);
             return VriResult_Success;
@@ -1486,17 +1498,23 @@ namespace vri::gl
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
             const void* off = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
+            const bool array = t->target == GL_TEXTURE_2D_ARRAY; // 2D array texture -> 3D sub-image, z = layer
+            const GLint mip = static_cast<GLint>(region->texture.mip);
+            const GLint z = static_cast<GLint>(region->texture.baseLayer);
+            const GLsizei d = static_cast<GLsizei>(region->texture.layerNum ? region->texture.layerNum : 1u);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
 #if !defined(__EMSCRIPTEN__)
             if (t->device->Features().dsa) // GL 4.5: upload without binding the texture
-                glTextureSubImage2D(t->id, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
-                                    static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
+            {
+                if (array) glTextureSubImage3D(t->id, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);
+                else glTextureSubImage2D(t->id, mip, region->texture.x, region->texture.y, static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
+            }
             else
 #endif
             {
                 glBindTexture(t->target, t->id);
-                glTexSubImage2D(t->target, static_cast<GLint>(region->texture.mip), region->texture.x, region->texture.y,
-                                static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
+                if (array) glTexSubImage3D(t->target, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);
+                else glTexSubImage2D(t->target, mip, region->texture.x, region->texture.y, static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
                 glBindTexture(t->target, 0);
             }
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);

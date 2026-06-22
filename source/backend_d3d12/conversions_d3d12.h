@@ -28,6 +28,12 @@ namespace vri::d3d12
             case VriFormat_RG32_SFLOAT:  return {DXGI_FORMAT_R32G32_FLOAT, 8};
             case VriFormat_RGB32_SFLOAT: return {DXGI_FORMAT_R32G32B32_FLOAT, 12};
             case VriFormat_R32_SFLOAT:   return {DXGI_FORMAT_R32_FLOAT, 4};
+            case VriFormat_R32_UINT:     return {DXGI_FORMAT_R32_UINT, 4};
+            case VriFormat_R32_SINT:     return {DXGI_FORMAT_R32_SINT, 4};
+            case VriFormat_RG32_UINT:    return {DXGI_FORMAT_R32G32_UINT, 8};
+            case VriFormat_RG32_SINT:    return {DXGI_FORMAT_R32G32_SINT, 8};
+            case VriFormat_RGBA32_UINT:  return {DXGI_FORMAT_R32G32B32A32_UINT, 16};
+            case VriFormat_RGBA32_SINT:  return {DXGI_FORMAT_R32G32B32A32_SINT, 16};
             case VriFormat_D32_SFLOAT:   return {DXGI_FORMAT_D32_FLOAT, 4};
             case VriFormat_D24_UNORM_S8_UINT: return {DXGI_FORMAT_D24_UNORM_S8_UINT, 4};
             default:                     return {DXGI_FORMAT_R8G8B8A8_UNORM, 4};

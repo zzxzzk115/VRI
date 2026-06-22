@@ -87,6 +87,7 @@ namespace vriex
         VriFormat swapFormat = VriFormat_BGRA8_UNORM;
         VriFormat depthFormat = VriFormat_D32_SFLOAT;
         bool hasDepth = false;
+        uint64_t requestFeatures = 0; // VriFeatureBits to request at device creation (bestEffort)
         float clearColor[4] = {0.08f, 0.10f, 0.14f, 1.0f};
 
         // ---- valid after Init() ----
@@ -133,6 +134,7 @@ namespace vriex
             if (!SDL_Init(SDL_INIT_VIDEO)) Fail("SDL_Init failed");
 #endif
             VriDeviceCreationDesc dd{}; dd.graphicsAPI = api; dd.enableValidation = VRI_TRUE; dd.bestEffort = VRI_TRUE;
+            dd.enabledFeatures = requestFeatures; // bestEffort: ungranted features just leave the matching hasX false
             static VriCallbackInterface cb{}; cb.MessageCallback = DefaultMessageCallback; dd.callbackInterface = &cb;
             if (vriCreateDevice(&dd, &dev) != VriResult_Success) Fail("vriCreateDevice failed");
             if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success ||

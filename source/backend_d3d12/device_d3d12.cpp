@@ -225,8 +225,17 @@ namespace vri::d3d12
             else if (fail("opacity micromap not supported (needs ray tracing + Raytracing Tier 1.2 / DXR 1.2 runtime)"))
                 return VriResult_Unsupported;
         }
-        if ((requested & VriFeature_Bindless) && fail("bindless not implemented on D3D12"))
-            return VriResult_Unsupported;
+        if (requested & VriFeature_Bindless)
+        {
+            // Descriptor indexing = dynamic (incl. non-uniform) indexing into descriptor
+            // tables; Resource Binding Tier 2 guarantees it for SRV/sampler tables.
+            D3D12_FEATURE_DATA_D3D12_OPTIONS o = {};
+            const bool ok = SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &o, sizeof(o))) &&
+                            o.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_2;
+            if (ok) granted |= VriFeature_Bindless;
+            else if (fail("bindless (descriptor indexing) not supported (needs Resource Binding Tier 2)"))
+                return VriResult_Unsupported;
+        }
         if ((requested & VriFeature_LowLatency) && fail("low-latency not implemented on D3D12"))
             return VriResult_Unsupported;
 
@@ -293,6 +302,7 @@ namespace vri::d3d12
         m_desc.hasRayTracing = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasBindless = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).
