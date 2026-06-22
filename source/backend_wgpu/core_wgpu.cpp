@@ -992,13 +992,19 @@ namespace vri::wgpu
             srcInfo.layout.bytesPerRow = region->bufferRowLength ? region->bufferRowLength * t->texelSize : w * t->texelSize;
             srcInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
 
+            // 2D array textures address the destination slice via baseLayer/layerNum; 3D
+            // textures via z/depth. WebGPU uses origin.z + extent.depthOrArrayLayers for both.
+            const bool isArray = t->layerNum > 1;
+            const uint32_t originZ = isArray ? region->texture.baseLayer : static_cast<uint32_t>(region->texture.z);
+            const uint32_t extDepth = isArray ? (region->texture.layerNum ? region->texture.layerNum : 1u)
+                                              : (region->texture.depth ? region->texture.depth : 1u);
             WGPUTexelCopyTextureInfo dstInfo = {};
             dstInfo.texture = t->texture;
             dstInfo.mipLevel = region->texture.mip;
-            dstInfo.origin = {static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), static_cast<uint32_t>(region->texture.z)};
+            dstInfo.origin = {static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), originZ};
             dstInfo.aspect = WGPUTextureAspect_All;
 
-            WGPUExtent3D ext = {w, h, region->texture.depth ? region->texture.depth : 1u};
+            WGPUExtent3D ext = {w, h, extDepth};
             wgpuCommandEncoderCopyBufferToTexture(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
         }
 

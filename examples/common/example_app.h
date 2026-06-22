@@ -286,9 +286,18 @@ namespace vriex
                 const uint8_t* cor = px + (size_t(8) * width + 8) * 4;
                 const uint8_t* ctr = px + (size_t(height / 2) * width + width / 2) * 4;
                 int drawn = 0; const int x0 = width / 4, x1 = 3 * width / 4, y0 = height / 4, y1 = 3 * height / 4;
+                // Also count DISTINCT colors over a coarse grid (quantized to 5 bits/channel):
+                // "differs from bg" alone can't tell a correct multi-color image from one that
+                // is mostly black (black differs from the bg too) - distinct-color count can.
+                bool seen[32768] = {}; int distinct = 0;
                 for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x)
-                { const uint8_t* p = px + (size_t(y) * width + x) * 4; int d0 = p[0] - cor[0], d1 = p[1] - cor[1], d2 = p[2] - cor[2]; if (d0 * d0 + d1 * d1 + d2 * d2 > 900) ++drawn; }
-                std::printf("[%s] %s: %d/%d center px differ from bg; center=%u,%u,%u corner=%u,%u,%u\n", name, apiName, drawn, (x1 - x0) * (y1 - y0), ctr[0], ctr[1], ctr[2], cor[0], cor[1], cor[2]); std::fflush(stdout);
+                {
+                    const uint8_t* p = px + (size_t(y) * width + x) * 4;
+                    int d0 = p[0] - cor[0], d1 = p[1] - cor[1], d2 = p[2] - cor[2]; if (d0 * d0 + d1 * d1 + d2 * d2 > 900) ++drawn;
+                    int key = ((p[0] >> 3) << 10) | ((p[1] >> 3) << 5) | (p[2] >> 3);
+                    if (!seen[key]) { seen[key] = true; ++distinct; }
+                }
+                std::printf("[%s] %s: %d/%d center px differ from bg; %d distinct colors; center=%u,%u,%u corner=%u,%u,%u\n", name, apiName, drawn, (x1 - x0) * (y1 - y0), distinct, ctr[0], ctr[1], ctr[2], cor[0], cor[1], cor[2]); std::fflush(stdout);
 #else
                 if (capturePath && WriteBmpBGRA(capturePath, px, width, height)) std::printf("[%s] %s: wrote %s\n", name, apiName, capturePath);
 #endif
