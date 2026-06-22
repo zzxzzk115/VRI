@@ -192,6 +192,7 @@ namespace vri::gl
 #if !defined(__EMSCRIPTEN__)
         if (m_features.clipControl)
             glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
+        glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS); // filter across cube faces (always on in WebGL2/core ES3)
 #endif
 
         FillRegistry();

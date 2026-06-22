@@ -194,7 +194,7 @@ namespace vri::d3d12
         {
             DeviceD3D12* d = Dev(device);
             DescriptorD3D12* v = new DescriptorD3D12{};
-            v->device = d; v->texture = reinterpret_cast<const TextureD3D12*>(desc->texture); v->mip = desc->baseMip;
+            v->device = d; v->texture = reinterpret_cast<const TextureD3D12*>(desc->texture); v->mip = desc->baseMip; v->viewType = desc->viewType;
             // The view records the texture; it serves as an RTV (color attachment) and/or an
             // SRV source (sampling - the SRV is created into a descriptor set's heap slot at
             // UpdateDescriptorRanges). Pre-create the RTV only for RT-capable textures.
@@ -272,6 +272,9 @@ namespace vri::d3d12
             CommandBufferD3D12* c = CB(cmd);
             if (FAILED(c->list->Reset(c->allocator->allocator.Get(), nullptr))) return VriResult_Failure;
             c->rtvCount = 0;
+            c->boundPipeline = nullptr; c->boundLayout = nullptr;
+            for (auto& vb : c->pendingVBs) vb = {}; // stale bindings/strides must not leak across recordings
+            c->vbDirty = false;
             c->tempUploads.clear(); // prior frame's bounce buffers are done (caller waited on the fence)
             return VriResult_Success;
         }
@@ -847,10 +850,19 @@ namespace vri::d3d12
                     {
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
                         srv.Format = v->texture->srvFormat; // typed sampleable format (R32_FLOAT for a sampled D32 depth)
-                        srv.ViewDimension = v->texture->layerNum > 1 ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
                         srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        if (v->texture->layerNum > 1) { srv.Texture2DArray.MipLevels = v->texture->mipNum; srv.Texture2DArray.ArraySize = v->texture->layerNum; }
-                        else srv.Texture2D.MipLevels = v->texture->mipNum;
+                        const bool isCube = v->viewType == VriTextureViewType_Cube || v->viewType == VriTextureViewType_CubeArray;
+                        if (isCube) // a TextureCube SRV samples a 6-layer resource by direction
+                        {
+                            srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                            srv.TextureCube.MipLevels = v->texture->mipNum;
+                        }
+                        else if (v->texture->layerNum > 1)
+                        {
+                            srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                            srv.Texture2DArray.MipLevels = v->texture->mipNum; srv.Texture2DArray.ArraySize = v->texture->layerNum;
+                        }
+                        else { srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Texture2D.MipLevels = v->texture->mipNum; }
                         D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu; h.ptr += slot * s->pool->srvSize;
                         d->Device()->CreateShaderResourceView(v->texture->resource.Get(), &srv, h);
                     }
@@ -869,6 +881,7 @@ namespace vri::d3d12
         {
             CommandBufferD3D12* c = CB(cmd);
             PipelineD3D12* p = Pipe(pipeline);
+            if (c->boundPipeline != p) c->vbDirty = true; // re-bind vertex buffers: the new pipeline's stride may differ
             c->boundPipeline = p;
             if (p->isRt) // DXR state object: bound via SetPipelineState1, compute root binding
             {
@@ -932,23 +945,40 @@ namespace vri::d3d12
                 return;
             c->list->SetGraphicsRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
         }
+        // Record the bindings only; the actual IASetVertexBuffers happens at draw time (FlushVertexBuffers),
+        // because the per-stream stride comes from the pipeline and the app may bind buffers before it.
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
         {
             CommandBufferD3D12* c = CB(cmd);
             if (!num) return;
-            std::vector<D3D12_VERTEX_BUFFER_VIEW> views(num);
             for (uint32_t i = 0; i < num; ++i)
             {
+                const uint32_t slot = baseSlot + i;
+                if (slot >= 8) continue;
                 BufferD3D12* b = Buf(bindings[i].buffer);
+                c->pendingVBs[slot].address = b->resource->GetGPUVirtualAddress() + bindings[i].offset;
+                c->pendingVBs[slot].size = static_cast<UINT>(b->size - bindings[i].offset);
+                c->pendingVBs[slot].set = true;
+            }
+            c->vbDirty = true;
+        }
+        static void FlushVertexBuffers(CommandBufferD3D12* c)
+        {
+            if (!c->vbDirty) return;
+            for (uint32_t slot = 0; slot < 8; ++slot)
+            {
+                if (!c->pendingVBs[slot].set) continue;
                 uint32_t stride = 0;
                 if (c->boundPipeline)
                     for (const PipelineGraphicsVB& vb : c->boundPipeline->vbStrides)
-                        if (vb.slot == baseSlot + i) { stride = vb.stride; break; }
-                views[i].BufferLocation = b->resource->GetGPUVirtualAddress() + bindings[i].offset;
-                views[i].SizeInBytes = static_cast<UINT>(b->size - bindings[i].offset);
-                views[i].StrideInBytes = stride;
+                        if (vb.slot == slot) { stride = vb.stride; break; }
+                D3D12_VERTEX_BUFFER_VIEW v = {};
+                v.BufferLocation = c->pendingVBs[slot].address;
+                v.SizeInBytes = c->pendingVBs[slot].size;
+                v.StrideInBytes = stride;
+                c->list->IASetVertexBuffers(slot, 1, &v);
             }
-            c->list->IASetVertexBuffers(baseSlot, num, views.data());
+            c->vbDirty = false;
         }
         void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriIndexType type)
         {
@@ -961,10 +991,12 @@ namespace vri::d3d12
         }
         void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
         {
+            FlushVertexBuffers(CB(cmd));
             CB(cmd)->list->DrawInstanced(d->vertexNum, d->instanceNum ? d->instanceNum : 1, d->baseVertex, d->baseInstance);
         }
         void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
         {
+            FlushVertexBuffers(CB(cmd));
             CB(cmd)->list->DrawIndexedInstanced(d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
         }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}

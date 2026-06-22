@@ -22,7 +22,7 @@ VRI is a cross-API **Render Hardware Interface** — "[NRI](https://github.com/N
 | --- | --- | --- |
 | Vulkan | desktop (Windows/Linux) | ✅ resources, explicit memory, descriptor sets, graphics + compute pipelines, command recording, swapchain (Win32), interop, feature query+enable |
 | WebGPU (`webgpu-sdk`) | desktop **+ Web** (Emscripten) | ✅ resources, bind groups, graphics + compute pipelines, command recording, swapchain (Win32). Same backend runs native (wgpu-native) and **in-browser** (emdawnwebgpu) |
-| OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL via SPIRV-Cross), storage-image compute (image load/store + memory barriers), 2D array textures (`glTexStorage3D`), modern-GL fast paths (DSA, separate-format VAOs, base-vertex/instance, indirect draw/dispatch, immutable+persistent buffers — version/feature-gated), headless rendering + windowed swapchain present (Win32) |
+| OpenGL (desktop, 4.x) | desktop (Windows/Linux) | ✅ resources, descriptor sets (flattened), graphics + compute pipelines (SPIR-V→GLSL via SPIRV-Cross), storage-image compute (image load/store + memory barriers), 2D array + cubemap textures (`glTexStorage3D` / `GL_TEXTURE_CUBE_MAP`), modern-GL fast paths (DSA, separate-format VAOs, base-vertex/instance, indirect draw/dispatch, immutable+persistent buffers — version/feature-gated), headless rendering + windowed swapchain present (Win32) |
 | WebGL 2 (OpenGL ES 3.0) | Web (Emscripten) | ✅ the same GL backend on the GLES3/WebGL2 subset; runs in-browser, incl. canvas swapchain present. No compute (ES 3.0) — reported via `hasComputeShader` |
 | Direct3D 12 | desktop (Windows) | ✅ resources, descriptor sets (root CBV/UAV + SRV/sampler tables), graphics + compute pipelines (Slang→DXBC, reflection-built input layout), depth-stencil, 4x MSAA + resolve, command recording, swapchain (Win32). Tests run on the WARP software adapter in CI |
 | OpenGL ES (native) / Metal | — | ⏳ planned |
@@ -87,6 +87,8 @@ xmake run example-shadowmapping # directional-light shadow map: a depth-only pas
                                 # then PCF shadows via a comparison sampler (per-object push constants)
 xmake run example-msaa          # 4x multisampled pinwheel resolved to a single-sample texture
                                 # (toggle MSAA off to see the edges go jagged)
+xmake run example-cubemap       # cubemap skybox + a reflective chrome sphere sampling it by
+                                # the reflection vector (procedural 6-face cube texture)
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders

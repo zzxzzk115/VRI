@@ -69,6 +69,7 @@ namespace vri::d3d12
         uint64_t                    bufferSize = 0;
         D3D12_CPU_DESCRIPTOR_HANDLE cpu = {}; // for RTV/DSV
         uint32_t                    mip = 0;
+        VriTextureViewType          viewType = VriTextureViewType_2D; // SRV dimension (cube vs 2d/2darray)
         VriSamplerDesc              sampler = {}; // for Kind::Sampler (built into the sampler heap at update)
         D3D12_GPU_VIRTUAL_ADDRESS   accelAddress = 0; // for an acceleration-structure SRV (TLAS)
     };
@@ -122,6 +123,14 @@ namespace vri::d3d12
         uint32_t                           rtvCount = 0;
         const PipelineD3D12*               boundPipeline = nullptr; // for vertex-buffer strides at draw
         const PipelineLayoutD3D12*         boundLayout = nullptr;   // for push constants (root 32-bit constants)
+        // Vertex buffers are recorded here and flushed to IASetVertexBuffers at draw time: a D3D12
+        // vertex-buffer view needs the per-stream stride, which lives in the pipeline, so binding must
+        // wait until the pipeline is current - regardless of whether the app sets buffers or pipeline
+        // first (other backends accept either order). A pipeline change also re-flushes (stride may
+        // differ). Without this the stride would come from whatever pipeline happened to be bound.
+        struct PendingVB { D3D12_GPU_VIRTUAL_ADDRESS address = 0; UINT size = 0; bool set = false; };
+        PendingVB                          pendingVBs[8] = {};
+        bool                               vbDirty = false;
         // MSAA color attachments to resolve at EndRendering (src multisample -> dst single).
         struct PendingResolve { TextureD3D12* src; TextureD3D12* dst; };
         PendingResolve                     resolves[8] = {};

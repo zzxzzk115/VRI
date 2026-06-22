@@ -450,7 +450,8 @@ namespace vri::gl
             const GLsizei h = static_cast<GLsizei>(desc->height ? desc->height : 1u);
             const GLsizei layers = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
             const bool ms = desc->sampleNum > 1;
-            const bool isArray = !ms && desc->type != VriTextureType_3D && layers > 1; // 2D array texture
+            const bool isCube = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
+            const bool isArray = !ms && !isCube && desc->type != VriTextureType_3D && layers > 1; // 2D array texture
 
 #if !defined(__EMSCRIPTEN__) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
             const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
@@ -486,6 +487,16 @@ namespace vri::gl
                     glBindTexture(target, 0);
                 }
 #endif
+            }
+            else if (isCube)
+            {
+                // Cubemap: glTexStorage2D on GL_TEXTURE_CUBE_MAP allocates all 6 square faces.
+                target = GL_TEXTURE_CUBE_MAP;
+#if !defined(__EMSCRIPTEN__)
+                if (dsa) { glCreateTextures(target, 1, &id); glTextureStorage2D(id, mips, gf.internalFormat, w, h); }
+                else
+#endif
+                { glGenTextures(1, &id); glBindTexture(target, id); glTexStorage2D(target, mips, gf.internalFormat, w, h); glBindTexture(target, 0); }
             }
             else if (isArray)
             {
@@ -1510,21 +1521,23 @@ namespace vri::gl
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
             const void* off = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
             const bool array = t->target == GL_TEXTURE_2D_ARRAY; // 2D array texture -> 3D sub-image, z = layer
+            const bool cube = t->target == GL_TEXTURE_CUBE_MAP;  // cube -> per-face 2D sub-image (z = face)
             const GLint mip = static_cast<GLint>(region->texture.mip);
             const GLint z = static_cast<GLint>(region->texture.baseLayer);
             const GLsizei d = static_cast<GLsizei>(region->texture.layerNum ? region->texture.layerNum : 1u);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
 #if !defined(__EMSCRIPTEN__)
-            if (t->device->Features().dsa) // GL 4.5: upload without binding the texture
+            if (t->device->Features().dsa) // GL 4.5: upload without binding the texture (cube uses the layered 3D path, z = face)
             {
-                if (array) glTextureSubImage3D(t->id, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);
+                if (array || cube) glTextureSubImage3D(t->id, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);
                 else glTextureSubImage2D(t->id, mip, region->texture.x, region->texture.y, static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
             }
             else
 #endif
             {
                 glBindTexture(t->target, t->id);
-                if (array) glTexSubImage3D(t->target, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);
+                if (cube) glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + z, mip, region->texture.x, region->texture.y, static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
+                else if (array) glTexSubImage3D(t->target, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);
                 else glTexSubImage2D(t->target, mip, region->texture.x, region->texture.y, static_cast<GLsizei>(w), static_cast<GLsizei>(h), t->glFormat, t->glType, off);
                 glBindTexture(t->target, 0);
             }
