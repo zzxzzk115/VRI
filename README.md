@@ -69,6 +69,7 @@ xmake run vri-tests
 xmake run example-triangle
 xmake run example-cube        # textured, depth-tested, animated-MVP rotating cube
 xmake run example-instancing  # a field of textured cubes via per-instance matrices
+xmake run example-pbrbasic    # PBR metallic-roughness sphere grid lit by 4 point lights
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders

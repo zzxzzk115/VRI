@@ -1,4 +1,6 @@
--- VRI examples. All web-capable: SDL3 windowing on desktop, GLFW (Emscripten port) on wasm.
+-- VRI examples. All web-capable: SDL3 windowing on desktop, the page canvas on wasm; the
+-- shared host scaffolding lives in examples/common/example_app.h.
 includes("triangle")
 includes("cube")
 includes("instancing")
+includes("pbrbasic")
