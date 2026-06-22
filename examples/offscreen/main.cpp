@@ -220,8 +220,9 @@ int main(int, char**)
         c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1);
     }
 
-    app.onUpdate = [ustg](uint64_t frame) {
-        const float angle = static_cast<float>(frame) * 0.02f;
+    static float spin = 1.0f, angle = 0.0f; static bool paused = false; // ImGui-controlled
+    app.onUpdate = [ustg](uint64_t) {
+        if (!paused) angle += 0.02f * spin;
         const float eye[3] = {0, 0, 3.0f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Mat4 model = Mul(RotateY(angle), RotateX(angle * 0.5f));
         Mat4 view = LookAt(eye, ctr, up);
@@ -229,6 +230,7 @@ int main(int, char**)
         Mat4 mvp = Transpose(Mul(proj, Mul(view, model)));
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Mat4)), &mvp, sizeof(Mat4)); app.c.UnmapBuffer(ustg);
     };
+    app.onGui = [] { ImGui::SliderFloat("spin", &spin, 0.0f, 5.0f); ImGui::Checkbox("paused", &paused); };
 
     // onPreRender records the ENTIRE offscreen MRT pass (it runs after BeginCommandBuffer but
     // before the swapchain render pass opens) and leaves both color targets sampleable.

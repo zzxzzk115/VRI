@@ -40,10 +40,13 @@ int main(int, char**)
     VriBufferViewDesc ubv{}; ubv.buffer = ubo; ubv.viewType = VriDescriptorType_ConstantBuffer; ubv.offset = 0; ubv.size = sizeof(Params);
     VriDescriptor* uboView = nullptr; c.CreateBufferView(app.dev, &ubv, &uboView);
 
-    app.onUpdate = [ustg](uint64_t frame) {
-        Params p{}; p.time = static_cast<float>(frame) * 0.04f; p.width = kWidth; p.height = kHeight;
+    static float speed = 1.0f, t = 0.0f; // ImGui-controlled plasma time scale
+    app.onUpdate = [ustg](uint64_t) {
+        t += 0.04f * speed;
+        Params p{}; p.time = t; p.width = kWidth; p.height = kHeight;
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Params)), &p, sizeof(Params)); app.c.UnmapBuffer(ustg);
     };
+    app.onGui = [] { ImGui::SliderFloat("speed", &speed, 0.0f, 4.0f); };
 
     if (hasCompute)
     {

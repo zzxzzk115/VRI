@@ -44,12 +44,15 @@ int main(int, char**)
     VriPipeline* pipeline = nullptr;
     if (c.CreateGraphicsPipeline(app.dev, &pd, &pipeline) != VriResult_Success) app.Fail("CreateGraphicsPipeline failed");
 
+    static bool animate = true;
     app.onUpdate = [](uint64_t frame) {
+        if (!animate) return;
         const float t = static_cast<float>(frame) * 0.03f;
         g_color[0] = 0.5f + 0.5f * std::sin(t);
         g_color[1] = 0.5f + 0.5f * std::sin(t + 2.094f);
         g_color[2] = 0.5f + 0.5f * std::sin(t + 4.188f);
     };
+    app.onGui = [] { ImGui::Checkbox("animate", &animate); ImGui::BeginDisabled(animate); ImGui::ColorEdit3("color", g_color); ImGui::EndDisabled(); };
     app.onRecord = [layout, pipeline](VriCommandBuffer* cmd) {
         app.c.CmdSetPipeline(cmd, pipeline);
         app.c.CmdSetPipelineLayout(cmd, layout);                 // must precede CmdSetConstants

@@ -15,12 +15,15 @@
 
 #if defined(__EMSCRIPTEN__)
 #    include <emscripten/emscripten.h>
+#    include <emscripten/html5.h>
 #else
 #    include <SDL3/SDL.h>
 #    include <vri/integration/vri_sdl3.h>
+#    include <imgui_impl_sdl3.h> // desktop input; on web we feed ImGuiIO via Emscripten
 #endif
 
 #include <vri/vri.h>
+#include <imgui.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +33,7 @@
 #include <vector>
 
 #include "capture.h"
+#include "imgui_vri.h"
 
 namespace vriex
 {
@@ -113,11 +117,15 @@ namespace vriex
         std::function<void(uint64_t)> onUpdate;
         std::function<void(VriCommandBuffer*)> onPreRender;
         std::function<void(VriCommandBuffer*)> onRecord;
+        // onGui: build the ImGui UI for the frame (between NewFrame and Render). The example
+        // adds widgets that drive its variables; a backend/FPS overlay is always shown.
+        std::function<void()> onGui;
 
         // ---- internal ----
         VriBuffer* captureBuf = nullptr; const char* capturePath = nullptr;
         std::vector<VriBuffer*> uploadStaging; // staging buffers held until EndUpload() frees them
         uint64_t frameValue = 1; uint64_t maxFrames = 0; bool depthInit = false; bool running = true;
+        ImguiVri gui; ImDrawData* guiDraw = nullptr; bool guiReady = false; // ImGui renderer + this frame's draw data
 #if !defined(__EMSCRIPTEN__)
         SDL_Window* window = nullptr;
 #endif
@@ -186,6 +194,17 @@ namespace vriex
             c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
             c.CreateCommandBuffer(alloc, &cmd);
             c.CreateFence(dev, 0, &fence);
+
+            // ---- Dear ImGui: context + VRI renderer + per-platform input ----
+            ImGui::CreateContext();
+            ImGui::StyleColorsDark();
+            ImGui::GetIO().IniFilename = nullptr; // don't write imgui.ini next to the examples
+#if defined(__EMSCRIPTEN__)
+            InstallWebInput();
+#else
+            ImGui_ImplSDL3_InitForOther(window);
+#endif
+            gui.Init(c, dev, queue, swapFormat, hasDepth ? depthFormat : VriFormat_Unknown, useWgsl, useDxbc);
         }
 
         // ---- one-shot upload helper (kills the staging boilerplate examples kept repeating) --
@@ -266,8 +285,49 @@ namespace vriex
 #endif
         }
 
+#if defined(__EMSCRIPTEN__)
+        // Feed the canvas's mouse events to ImGui (no SDL3 on the web). Keyboard is omitted -
+        // the example controls are mouse-driven sliders/checkboxes.
+        void InstallWebInput()
+        {
+            emscripten_set_mousemove_callback("#canvas", nullptr, EM_FALSE,
+                [](int, const EmscriptenMouseEvent* e, void*) -> EM_BOOL { ImGui::GetIO().AddMousePosEvent(float(e->targetX), float(e->targetY)); return EM_FALSE; });
+            emscripten_set_mousedown_callback("#canvas", nullptr, EM_FALSE,
+                [](int, const EmscriptenMouseEvent* e, void*) -> EM_BOOL { ImGui::GetIO().AddMouseButtonEvent(e->button == 1 ? 2 : e->button == 2 ? 1 : 0, true); return EM_FALSE; });
+            emscripten_set_mouseup_callback("#canvas", nullptr, EM_FALSE,
+                [](int, const EmscriptenMouseEvent* e, void*) -> EM_BOOL { ImGui::GetIO().AddMouseButtonEvent(e->button == 1 ? 2 : e->button == 2 ? 1 : 0, false); return EM_FALSE; });
+            emscripten_set_wheel_callback("#canvas", nullptr, EM_FALSE,
+                [](int, const EmscriptenWheelEvent* e, void*) -> EM_BOOL { ImGui::GetIO().AddMouseWheelEvent(0.0f, float(-e->deltaY) * 0.01f); return EM_FALSE; });
+        }
+#endif
+
+        // Run ImGui new-frame + build the UI for this frame; leaves guiDraw ready for the renderer.
+        void BeginGui()
+        {
+            ImGuiIO& io = ImGui::GetIO();
+#if defined(__EMSCRIPTEN__)
+            io.DisplaySize = ImVec2(float(width), float(height));
+            io.DeltaTime = 1.0f / 60.0f;
+#else
+            ImGui_ImplSDL3_NewFrame(); // pulls window size + accumulated input
+#endif
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowBgAlpha(0.7f);
+            if (ImGui::Begin(name, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+            {
+                ImGui::Text("%s  -  %.1f FPS", apiName, io.Framerate);
+                if (onGui) { ImGui::Separator(); onGui(); }
+            }
+            ImGui::End();
+            ImGui::Render();
+            guiDraw = ImGui::GetDrawData();
+            gui.WriteFrame(guiDraw); // map+memcpy here (before acquire): the map may yield on WebGPU
+        }
+
         void Frame()
         {
+            BeginGui(); // build the UI first so a control change applies to this same frame
             if (onUpdate) onUpdate(frameValue); // CPU work (may yield on WebGPU) before acquire
 
             uint32_t index = 0;
@@ -279,6 +339,7 @@ namespace vriex
 
             c.BeginCommandBuffer(cmd);
             if (onPreRender) onPreRender(cmd);
+            gui.RecordCopy(cmd); // copy ImGui verts/indices (written pre-acquire) before the render pass
 
             VriTextureBarrierDesc bgr[2]{};
             bgr[0].texture = backbuffer; bgr[0].before.layout = VriLayout_Undefined; bgr[0].before.stages = VriPipelineStage_None;
@@ -302,6 +363,7 @@ namespace vriex
             VriViewport vp{0, 0, float(width), float(height), 0, 1}; c.CmdSetViewports(cmd, &vp, 1);
             VriRect scis{0, 0, width, height}; c.CmdSetScissors(cmd, &scis, 1);
             if (onRecord) onRecord(cmd);
+            gui.Render(guiDraw, cmd, width, height); // UI on top of the example
             c.CmdEndRendering(cmd);
 
             const bool capturing = captureBuf && maxFrames != 0 && frameValue >= maxFrames;
@@ -368,7 +430,12 @@ namespace vriex
 #else
             while (running)
             {
-                SDL_Event e; while (SDL_PollEvent(&e)) if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) running = false;
+                SDL_Event e;
+                while (SDL_PollEvent(&e))
+                {
+                    ImGui_ImplSDL3_ProcessEvent(&e); // feed mouse/keyboard to ImGui
+                    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) running = false;
+                }
                 if (!running) break;
                 Frame();
             }
@@ -381,6 +448,11 @@ namespace vriex
         // example destroys its own resources before calling this.
         void Shutdown()
         {
+            gui.Shutdown();
+#if !defined(__EMSCRIPTEN__)
+            ImGui_ImplSDL3_Shutdown();
+#endif
+            ImGui::DestroyContext();
             if (fence) c.DestroyFence(fence);
             if (alloc) c.DestroyCommandAllocator(alloc);
             if (captureBuf) c.DestroyBuffer(captureBuf);

@@ -167,8 +167,9 @@ int main(int, char**)
         c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1);
     }
 
-    app.onUpdate = [ustg](uint64_t frame) {
-        const float t = static_cast<float>(frame) * 0.006f;
+    static float spin = 1.0f, t = 0.0f; // ImGui-controlled camera orbit (metallic/roughness vary per sphere)
+    app.onUpdate = [ustg](uint64_t) {
+        t += 0.006f * spin;
         const float R = kGrid * kSpacing;
         const float eye[3] = {std::sin(t) * R, R * 0.25f, std::cos(t) * R}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Ubo u{};
@@ -179,6 +180,7 @@ int main(int, char**)
         for (int i = 0; i < 4; ++i) { u.lights[i][0] = lp[i][0]; u.lights[i][1] = lp[i][1]; u.lights[i][2] = lp[i][2]; }
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Ubo)), &u, sizeof(Ubo)); app.c.UnmapBuffer(ustg);
     };
+    app.onGui = [] { ImGui::SliderFloat("orbit", &spin, 0.0f, 5.0f); ImGui::Text("X: metallic   Y: roughness"); };
     app.onPreRender = [ubo, ustg](VriCommandBuffer* cmd) {
         VriBufferCopyDesc ucp{}; ucp.size = sizeof(Ubo); app.c.CmdCopyBuffer(cmd, ubo, ustg, &ucp);
         VriBufferBarrierDesc ub{}; ub.buffer = ubo; ub.before.access = VriAccess_CopyDestinationWrite; ub.before.stages = VriPipelineStage_Transfer;

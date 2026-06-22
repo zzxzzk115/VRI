@@ -68,6 +68,9 @@ xmake
 xmake run vri-tests
 
 # windowed examples (backend auto-picked; override with VRI_API=vulkan|webgpu|opengl|d3d12)
+# every example has a Dear ImGui panel (backend + FPS, plus per-example controls: spin speed,
+# colors, light, time scale, ...) - rendered through VRI itself (examples/common/imgui_vri.h),
+# one renderer for all backends + web (SDL3 input on desktop, Emscripten input on the web).
 xmake run example-triangle
 xmake run example-cube        # textured, depth-tested, animated-MVP rotating cube
 xmake run example-instancing  # a field of textured cubes via per-instance matrices

@@ -189,14 +189,16 @@ int main(int, char**)
     }
 
     // per-frame: orbit the camera, refresh the shared view-projection, draw all instances
-    app.onUpdate = [ustg](uint64_t frame) {
-        const float t = static_cast<float>(frame) * 0.01f;
+    static float spin = 1.0f, t = 0.0f; // ImGui-controlled camera orbit
+    app.onUpdate = [ustg](uint64_t) {
+        t += 0.01f * spin;
         const float r = kGrid * kSpacing + 6.0f;
         const float eye[3] = {std::cos(t) * r, 4.0f, std::sin(t) * r}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         // transpose for Slang's mul(viewProj, world); the per-instance columns stay column-major
         Mat4 viewProj = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 200.0f), LookAt(eye, ctr, up)));
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Mat4)), &viewProj, sizeof(Mat4)); app.c.UnmapBuffer(ustg);
     };
+    app.onGui = [] { ImGui::SliderFloat("orbit", &spin, 0.0f, 5.0f); };
     app.onPreRender = [ubo, ustg](VriCommandBuffer* cmd) {
         VriBufferCopyDesc ucp{}; ucp.size = sizeof(Mat4); app.c.CmdCopyBuffer(cmd, ubo, ustg, &ucp);
         VriBufferBarrierDesc ub{}; ub.buffer = ubo; ub.before.access = VriAccess_CopyDestinationWrite; ub.before.stages = VriPipelineStage_Transfer;

@@ -173,15 +173,17 @@ int main(int, char**)
         c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1);
     }
 
-    app.onUpdate = [ustg](uint64_t frame) {
-        const float t = static_cast<float>(frame) * 0.02f;
+    static float lightSpeed = 1.0f, t = 0.0f; static float lightZ = 1.3f; // ImGui-controlled light orbit
+    app.onUpdate = [ustg](uint64_t) {
+        t += 0.02f * lightSpeed;
         const float eye[3] = {0, 0, 2.8f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Ubo u{};
         u.mvp = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 100.0f), LookAt(eye, ctr, up)));
-        u.lightPos[0] = std::cos(t) * 1.6f; u.lightPos[1] = std::sin(t) * 1.6f; u.lightPos[2] = 1.3f;
+        u.lightPos[0] = std::cos(t) * 1.6f; u.lightPos[1] = std::sin(t) * 1.6f; u.lightPos[2] = lightZ;
         u.camPos[0] = eye[0]; u.camPos[1] = eye[1]; u.camPos[2] = eye[2];
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Ubo)), &u, sizeof(Ubo)); app.c.UnmapBuffer(ustg);
     };
+    app.onGui = [] { ImGui::SliderFloat("light speed", &lightSpeed, 0.0f, 5.0f); ImGui::SliderFloat("light Z", &lightZ, 0.2f, 3.0f); };
     app.onPreRender = [ubo, ustg](VriCommandBuffer* cmd) {
         VriBufferCopyDesc ucp{}; ucp.size = sizeof(Ubo); app.c.CmdCopyBuffer(cmd, ubo, ustg, &ucp);
         VriBufferBarrierDesc ub{}; ub.buffer = ubo; ub.before.access = VriAccess_CopyDestinationWrite; ub.before.stages = VriPipelineStage_Transfer;

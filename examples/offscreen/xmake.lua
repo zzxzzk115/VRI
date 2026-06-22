@@ -9,6 +9,7 @@ target("example-offscreen")
     add_includedirs("$(projectdir)")
 
     add_files("main.cpp")
+    add_packages("imgui") -- ImGui UI (drawn through VRI by examples/common/imgui_vri.h)
 
     if is_plat("wasm") then
         -- Web build: GLFW windowing, ASYNCIFY (WebGPU), -fexceptions (spirv-cross), and the

@@ -9,6 +9,7 @@ target("example-cube")
     add_includedirs("$(projectdir)")
 
     add_files("main.cpp")
+    add_packages("imgui") -- ImGui UI (drawn through VRI by examples/common/imgui_vri.h)
 
     if is_plat("wasm") then
         -- Web build: GLFW (Emscripten port) for windowing, ASYNCIFY for WebGPU's async

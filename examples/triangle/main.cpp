@@ -48,6 +48,7 @@ int main(int, char**)
         app.c.CmdSetPipeline(cmd, pipeline);
         VriDrawDesc draw{}; draw.vertexNum = 3; draw.instanceNum = 1; app.c.CmdDraw(cmd, &draw);
     };
+    app.onGui = [] { ImGui::ColorEdit3("clear color", app.clearColor); };
 
     app.SetupCapture();
     app.Run();

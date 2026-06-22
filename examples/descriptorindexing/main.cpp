@@ -187,6 +187,10 @@ int main(int, char**)
         app.c.CmdSetIndexBuffer(cmd, ibuf, 0, VriIndexType_UInt16);
         VriDrawIndexedDesc di{}; di.indexNum = indexCount; di.instanceNum = 1; app.c.CmdDrawIndexed(cmd, &di);
     };
+    app.onGui = [bindless] {
+        ImGui::Text("%u textures, indexed per-quad", kTexCount);
+        ImGui::Text("path: %s", bindless ? "bindless descriptor array" : "2D-array-texture fallback");
+    };
 
     app.SetupCapture();
     app.Run();
