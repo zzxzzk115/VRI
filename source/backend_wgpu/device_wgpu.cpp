@@ -54,6 +54,16 @@ namespace vri::wgpu
             if (status == WGPURequestDeviceStatus_Success)
                 r->device = device;
         }
+
+        // WebGPU validation errors are otherwise silent (they go to the browser devtools
+        // console, which emrun does not forward). Surface them on stderr so they show up in
+        // headless runs and CI - matching VRI's "explicit, never silent" stance.
+        void OnUncapturedError(const WGPUDevice*, WGPUErrorType type, WGPUStringView message, void*, void*)
+        {
+            std::fprintf(stderr, "[VRI/WGPU] uncaptured error (type %d): %.*s\n",
+                         static_cast<int>(type), static_cast<int>(message.length), message.data ? message.data : "");
+            std::fflush(stderr);
+        }
     } // namespace
 
     DeviceWGPU::~DeviceWGPU()
@@ -115,6 +125,7 @@ namespace vri::wgpu
         // request device
         DeviceRequest dreq;
         WGPUDeviceDescriptor deviceDesc = {};
+        deviceDesc.uncapturedErrorCallbackInfo.callback = OnUncapturedError;
         WGPURequestDeviceCallbackInfo dcb = {};
         dcb.mode = kCallbackMode;
         dcb.callback = OnDevice;

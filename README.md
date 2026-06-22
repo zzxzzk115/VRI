@@ -74,6 +74,8 @@ xmake run example-pushconstants # push constants across backends (VK/D3D12 nativ
 xmake run example-normalmapping # tangent-space normal mapping (color + normal map, orbiting light)
 xmake run example-computeshader # compute writes a plasma to a storage image, then samples it
                                 # (WebGL2 has no compute -> explicit fragment-shader fallback)
+xmake run example-offscreen     # render-to-texture + MRT: a cube drawn into two offscreen color
+                                # targets (albedo + face normals), then composited side by side
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
