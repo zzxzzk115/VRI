@@ -80,6 +80,13 @@ namespace vri::wgpu
         WGPUPipelineLayout                     layout;
         std::vector<WGPUBindGroupLayout>       bindGroupLayouts;
         std::vector<std::vector<RangeInfoWGPU>> setRanges; // [set][range]
+        // Push constants are emulated as a uniform in a reserved bind group (group ==
+        // descriptorSetNum). The buffer + bind group are created lazily in CmdSetConstants.
+        bool          hasPush = false;
+        uint32_t      pushGroup = 0;
+        uint32_t      pushSize = 0;
+        WGPUBuffer    pushBuffer = nullptr;
+        WGPUBindGroup pushBindGroup = nullptr;
     };
 
     struct DescriptorSetWGPU

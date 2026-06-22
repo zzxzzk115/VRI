@@ -120,6 +120,20 @@ namespace vri::gl
         uint32_t          glUnit;
     };
 
+    // Push constants on GL: SPIRV-Cross (vulkan_semantics=false) lowers a push_constant
+    // block to a default-block struct uniform (`uniform T vriPush;`), so each member is set
+    // individually via glUniform. One entry per leaf member, captured at pipeline build.
+    struct PushMemberGL
+    {
+        std::string name;     // GLSL uniform name, e.g. "vriPush.color"
+        uint32_t    offset;   // byte offset within the push-constant blob
+        uint32_t    basetype; // 0 = float, 1 = int, 2 = uint
+        uint32_t    vecsize;  // 1..4
+        uint32_t    columns;  // 1 = vector, >1 = matrix (NxN)
+        uint32_t    count;    // array length (1 if not an array)
+        int         location = -1; // glGetUniformLocation after link
+    };
+
     struct PipelineLayoutGL
     {
         DeviceGL*                    device;
@@ -218,6 +232,7 @@ namespace vri::gl
         struct StencilFaceGL { GLenum func, sfail, dpfail, dppass; GLuint compareMask, writeMask; GLint ref; } stencilFront, stencilBack;
         std::vector<CombinedSamplerGL> combinedSamplers;
         std::vector<VertexAttribGL>    vertexAttribs;
+        std::vector<PushMemberGL>      pushMembers; // emulated push constants (set via glUniform)
     };
 
     struct FenceGL

@@ -126,6 +126,10 @@ namespace vri::vk
         // VARIABLE_DESCRIPTOR_COUNT binding, else that binding's max count (used to
         // chain VkDescriptorSetVariableDescriptorCountAllocateInfo at allocation).
         std::vector<uint32_t> setVariableCount;
+        // Combined push-constant stage flags + total size (0 = no push range). CmdSetConstants
+        // must pass exactly these stages to vkCmdPushConstants (not VK_SHADER_STAGE_ALL).
+        VkShaderStageFlags pushStages = 0;
+        uint32_t           pushSize = 0;
     };
 
     struct DescriptorPoolVK

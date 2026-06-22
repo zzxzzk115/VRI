@@ -14,6 +14,7 @@
 #include "wgpu_native.h" // webgpu.h + native-only poll helpers / callback mode
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace vri::wgpu
@@ -67,11 +68,42 @@ namespace vri::wgpu
             }
         }
 
-        WGPUShaderModule MakeWgslModule(WGPUDevice device, const void* bytecode)
+        // Slang emits a push-constant block as an *undecorated* `var<uniform>` (no @group/
+        // @binding), which is invalid WGSL. WebGPU has no push constants, so VRI binds the
+        // data as a uniform in a reserved bind group; inject that group/binding here onto the
+        // one undecorated uniform var.
+        std::string InjectPushBinding(const char* wgsl, uint32_t group)
         {
+            std::string s(wgsl);
+            const std::string needle = "var<uniform>";
+            for (size_t pos = s.find(needle); pos != std::string::npos; pos = s.find(needle, pos))
+            {
+                const size_t nl = s.rfind('\n', pos);
+                const size_t lineStart = (nl == std::string::npos) ? 0 : nl + 1;
+                if (s.find("@binding", lineStart) >= pos) // no @binding before it on this line -> push constant
+                {
+                    const std::string dec = "@group(" + std::to_string(group) + ") @binding(0) ";
+                    s.insert(pos, dec);
+                    pos += dec.size() + needle.size();
+                }
+                else
+                    pos += needle.size();
+            }
+            return s;
+        }
+
+        WGPUShaderModule MakeWgslModule(WGPUDevice device, const void* bytecode, int pushGroup = -1)
+        {
+            std::string patched;
+            const char* code = static_cast<const char*>(bytecode);
+            if (pushGroup >= 0)
+            {
+                patched = InjectPushBinding(code, static_cast<uint32_t>(pushGroup));
+                code = patched.c_str();
+            }
             WGPUShaderSourceWGSL src = {};
             src.chain.sType = WGPUSType_ShaderSourceWGSL;
-            src.code = SV(static_cast<const char*>(bytecode));
+            src.code = SV(code);
             WGPUShaderModuleDescriptor d = {};
             d.nextInChain = &src.chain;
             return wgpuDeviceCreateShaderModule(device, &d);
@@ -400,6 +432,22 @@ namespace vri::wgpu
                 layout->setRanges.push_back(std::move(rangeInfos));
             }
 
+            // Push constants -> a reserved bind group (one uniform buffer at binding 0) right
+            // after the descriptor-set groups. The WGSL injection points at this group index.
+            if (desc->pushConstantNum > 0)
+            {
+                WGPUBindGroupLayoutEntry e = {};
+                e.binding = 0;
+                e.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+                e.buffer.type = WGPUBufferBindingType_Uniform;
+                WGPUBindGroupLayoutDescriptor ld = {}; ld.entryCount = 1; ld.entries = &e;
+                layout->hasPush = true;
+                layout->pushGroup = static_cast<uint32_t>(layout->bindGroupLayouts.size());
+                layout->pushSize = desc->pushConstants[0].size;
+                layout->bindGroupLayouts.push_back(wgpuDeviceCreateBindGroupLayout(d->Device(), &ld));
+                layout->setRanges.push_back({});
+            }
+
             WGPUPipelineLayoutDescriptor pld = {};
             pld.bindGroupLayoutCount = static_cast<uint32_t>(layout->bindGroupLayouts.size());
             pld.bindGroupLayouts = layout->bindGroupLayouts.empty() ? nullptr : layout->bindGroupLayouts.data();
@@ -412,6 +460,8 @@ namespace vri::wgpu
         {
             if (!layout) return;
             PipelineLayoutWGPU* l = PL(layout);
+            if (l->pushBindGroup) wgpuBindGroupRelease(l->pushBindGroup);
+            if (l->pushBuffer) wgpuBufferRelease(l->pushBuffer);
             for (WGPUBindGroupLayout bgl : l->bindGroupLayouts)
                 wgpuBindGroupLayoutRelease(bgl);
             if (l->layout) wgpuPipelineLayoutRelease(l->layout);
@@ -428,6 +478,8 @@ namespace vri::wgpu
                 if (st == VriShaderStage_Geometry || st == VriShaderStage_TessControl || st == VriShaderStage_TessEval)
                     return VriResult_Unsupported;
             }
+            const PipelineLayoutWGPU* pl = desc->pipelineLayout ? PL(desc->pipelineLayout) : nullptr;
+            const int pushGroup = (pl && pl->hasPush) ? static_cast<int>(pl->pushGroup) : -1; // inject WGSL binding
             WGPUShaderModule vsMod = nullptr, fsMod = nullptr;
             const char* vsEntry = "main";
             const char* fsEntry = "main";
@@ -436,12 +488,12 @@ namespace vri::wgpu
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
                 {
-                    vsMod = MakeWgslModule(d->Device(), s.bytecode);
+                    vsMod = MakeWgslModule(d->Device(), s.bytecode, pushGroup);
                     vsEntry = s.entryPointName ? s.entryPointName : "main";
                 }
                 else if (s.stage == VriShaderStage_Fragment)
                 {
-                    fsMod = MakeWgslModule(d->Device(), s.bytecode);
+                    fsMod = MakeWgslModule(d->Device(), s.bytecode, pushGroup);
                     fsEntry = s.entryPointName ? s.entryPointName : "main";
                 }
             }
@@ -824,7 +876,36 @@ namespace vri::wgpu
             else if (c->pass)
                 wgpuRenderPassEncoderSetBindGroup(c->pass, setIndex, s->bindGroup, 0, nullptr);
         }
-        void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}        // WebGPU has no push constants (core)
+        // WebGPU has no push constants; emulate with a uniform buffer in the reserved bind
+        // group (see CreatePipelineLayout + the WGSL injection). The buffer + bind group are
+        // created lazily on the layout and reused; the data is uploaded via the queue.
+        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data, uint32_t size)
+        {
+            CommandBufferWGPU* c = CB(cmd);
+            if (!c->boundLayout || !data || !size)
+                return;
+            PipelineLayoutWGPU* l = PL(c->boundLayout);
+            if (!l->hasPush)
+                return;
+            DeviceWGPU* d = c->device;
+            if (!l->pushBuffer)
+            {
+                WGPUBufferDescriptor bd = {};
+                bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+                bd.size = (l->pushSize + 15u) & ~15u; // 16-byte aligned uniform buffer
+                if (!bd.size) bd.size = 16u;
+                l->pushBuffer = wgpuDeviceCreateBuffer(d->Device(), &bd);
+                WGPUBindGroupEntry e = {};
+                e.binding = 0; e.buffer = l->pushBuffer; e.offset = 0; e.size = bd.size;
+                WGPUBindGroupDescriptor bgd = {};
+                bgd.layout = l->bindGroupLayouts[l->pushGroup];
+                bgd.entryCount = 1; bgd.entries = &e;
+                l->pushBindGroup = wgpuDeviceCreateBindGroup(d->Device(), &bgd);
+            }
+            wgpuQueueWriteBuffer(d->Queue(), l->pushBuffer, 0, data, (size + 3u) & ~3u);
+            if (c->pass)
+                wgpuRenderPassEncoderSetBindGroup(c->pass, l->pushGroup, l->pushBindGroup, 0, nullptr);
+        }
 
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
         {

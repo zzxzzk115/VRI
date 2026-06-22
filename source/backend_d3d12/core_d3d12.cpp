@@ -505,6 +505,22 @@ namespace vri::d3d12
                 }
                 l->sets.push_back(setInfo);
             }
+            // Push constants -> a root 32-bit-constants parameter at the requested register.
+            // Slang lowers [[vk::push_constant]] to an HLSL cbuffer at that b# register.
+            if (desc->pushConstantNum > 0)
+            {
+                const VriPushConstantDesc& pc = desc->pushConstants[0];
+                D3D12_ROOT_PARAMETER p = {};
+                p.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+                p.Constants.ShaderRegister = pc.baseRegister;
+                p.Constants.RegisterSpace = 0;
+                p.Constants.Num32BitValues = (pc.size + 3u) / 4u;
+                p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+                l->hasPush = true;
+                l->pushRootParam = static_cast<uint32_t>(params.size());
+                l->push32Count = (pc.size + 3u) / 4u;
+                params.push_back(p);
+            }
             D3D12_ROOT_SIGNATURE_DESC rs = {};
             rs.NumParameters = static_cast<UINT>(params.size());
             rs.pParameters = params.empty() ? nullptr : params.data();
@@ -812,6 +828,7 @@ namespace vri::d3d12
         void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
         {
             CommandBufferD3D12* c = CB(cmd);
+            c->boundLayout = PL(layout);
             ID3D12RootSignature* rs = PL(layout)->rootSig.Get();
             if (c->boundPipeline && c->boundPipeline->isCompute) c->list->SetComputeRootSignature(rs);
             else c->list->SetGraphicsRootSignature(rs);
@@ -876,7 +893,13 @@ namespace vri::d3d12
                 else c->list->SetGraphicsRootDescriptorTable(static_cast<UINT>(si->samplerTableParam), s->samplerGpu);
             }
         }
-        void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
+        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data, uint32_t size)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            if (!c->boundLayout || !c->boundLayout->hasPush || !data || !size)
+                return;
+            c->list->SetGraphicsRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
+        }
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
         {
             CommandBufferD3D12* c = CB(cmd);

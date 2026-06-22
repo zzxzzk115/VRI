@@ -583,9 +583,11 @@ namespace vri::vk
                 const VriPushConstantDesc& pc = desc->pushConstants[i];
                 VkPushConstantRange r = {};
                 r.stageFlags = ToVkShaderStageFlags(pc.shaderStages);
-                r.offset = pc.baseRegister;
+                r.offset = 0; // byte offset into the push block (baseRegister is a register, not a byte offset)
                 r.size = pc.size;
                 pushRanges.push_back(r);
+                layout->pushStages |= r.stageFlags;
+                layout->pushSize = (pc.size > layout->pushSize) ? pc.size : layout->pushSize;
             }
 
             VkPipelineLayoutCreateInfo ci = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -1170,7 +1172,9 @@ namespace vri::vk
         {
             CommandBufferVK* c = CB(cmd);
             if (!c->boundLayout) return;
-            vkCmdPushConstants(c->cmd, PL(c->boundLayout)->layout, VK_SHADER_STAGE_ALL, 0, size, data);
+            const PipelineLayoutVK* pl = PL(c->boundLayout);
+            if (!pl->pushStages) return; // layout declares no push-constant range
+            vkCmdPushConstants(c->cmd, pl->layout, pl->pushStages, 0, size, data);
         }
 
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)

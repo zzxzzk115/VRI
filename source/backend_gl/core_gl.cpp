@@ -126,7 +126,8 @@ namespace vri::gl
         std::string UboBlockName(uint32_t glUnit) { return "VriUbo_" + std::to_string(glUnit); }
 
         std::string SpirvToGlsl(const DeviceGL* d, const PipelineLayoutGL* layout, const void* bytecode, size_t bytecodeSize,
-                                const char* entry, spv::ExecutionModel model, std::vector<CombinedSamplerGL>* outCombined)
+                                const char* entry, spv::ExecutionModel model, std::vector<CombinedSamplerGL>* outCombined,
+                                std::vector<PushMemberGL>* outPush = nullptr)
         {
             const uint32_t* words = static_cast<const uint32_t*>(bytecode);
             const size_t wordCount = bytecodeSize / 4;
@@ -222,6 +223,30 @@ namespace vri::gl
                             outCombined->push_back(CombinedSamplerGL{unit, texSet, texBind, smpSet, smpBind, name});
                     }
                 }
+                // Push constants: SPIRV-Cross (vulkan_semantics=false) lowers the block to a
+                // default-block struct uniform, so rename the instance to "vriPush" and record
+                // each leaf member for glUniform-by-name after link (see CmdSetConstants).
+                if (outPush)
+                    for (const spirv_cross::Resource& pc : res.push_constant_buffers)
+                    {
+                        comp.set_name(pc.id, "vriPush");
+                        const spirv_cross::SPIRType& st = comp.get_type(pc.base_type_id);
+                        for (uint32_t m = 0; m < static_cast<uint32_t>(st.member_types.size()); ++m)
+                        {
+                            const spirv_cross::SPIRType& mt = comp.get_type(st.member_types[m]);
+                            PushMemberGL pm{};
+                            pm.name = "vriPush." + comp.get_member_name(pc.base_type_id, m);
+                            pm.offset = comp.type_struct_member_offset(st, m);
+                            pm.basetype = mt.basetype == spirv_cross::SPIRType::Int ? 1u
+                                        : (mt.basetype == spirv_cross::SPIRType::UInt ? 2u : 0u);
+                            pm.vecsize = mt.vecsize;
+                            pm.columns = mt.columns;
+                            pm.count = mt.array.empty() ? 1u : mt.array[0];
+                            bool dup = false;
+                            for (const PushMemberGL& e : *outPush) if (e.name == pm.name) { dup = true; break; }
+                            if (!dup) outPush->push_back(pm);
+                        }
+                    }
                 std::string glsl = comp.compile();
                 // Tessellation-control outputs may only be indexed by gl_InvocationID;
                 // strict drivers (NVIDIA) reject SPIRV-Cross's uint(gl_InvocationID) cast
@@ -598,14 +623,15 @@ namespace vri::gl
             }
 
             std::vector<CombinedSamplerGL> combined;
+            std::vector<PushMemberGL> pushMembers;
             GLuint vs = 0, fs = 0, gs = 0, tcs = 0, tes = 0;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
-                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined));
+                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined, &pushMembers));
                 else if (s.stage == VriShaderStage_Fragment)
-                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined));
+                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined, &pushMembers));
 #if !defined(__EMSCRIPTEN__) // geometry/tessellation shaders are desktop-only (absent in GLES3/WebGL2 headers)
                 else if (s.stage == VriShaderStage_Geometry)
                     gs = CompileShader(d, GL_GEOMETRY_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelGeometry, &combined));
@@ -658,6 +684,7 @@ namespace vri::gl
             // Assign each uniform block its flattened binding point. Portable across
             // desktop GL and ESSL 300 / WebGL2 (which can't use layout(binding=)).
             if (layout)
+            {
                 for (const LayoutBindingGL& b : layout->bindings)
                     if (b.type == VriDescriptorType_ConstantBuffer)
                     {
@@ -665,6 +692,11 @@ namespace vri::gl
                         if (idx != GL_INVALID_INDEX)
                             glUniformBlockBinding(program, idx, b.glUnit);
                     }
+            }
+            // Resolve each emulated push-constant member to its default-block uniform
+            // location (set per draw in CmdSetConstants).
+            for (PushMemberGL& pm : pushMembers)
+                pm.location = glGetUniformLocation(program, pm.name.c_str());
             // Point each combined sampler uniform at its texture unit (glUniform1i is
             // the portable way; ESSL 300 / WebGL2 can't use layout(binding=) either).
             if (!combined.empty())
@@ -683,6 +715,7 @@ namespace vri::gl
             p->device = d;
             p->program = program;
             p->combinedSamplers = std::move(combined);
+            p->pushMembers = std::move(pushMembers);
             // Base-offset fallback uniforms (present only when the driver lacks
             // ARB_shader_draw_parameters; -1 means the gl_Base*ARB builtin path is used).
             p->baseVertexLoc = glGetUniformLocation(program, "SPIRV_Cross_BaseVertex");
@@ -1155,7 +1188,45 @@ namespace vri::gl
                     }
                 }
         }
-        void VRI_CALL CmdSetConstants(VriCommandBuffer*, uint32_t, const void*, uint32_t) {}
+        // Push constants are emulated as default-block uniforms (SPIRV-Cross flattens the
+        // push_constant block). Set each member by location on the bound program; CmdSetPipeline
+        // already glUseProgram'd it, and the example records CmdSetConstants after it.
+        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data, uint32_t size)
+        {
+            CommandBufferGL* c = CB(cmd);
+            if (!c->boundPipeline || !data)
+                return;
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            for (const PushMemberGL& pm : c->boundPipeline->pushMembers)
+            {
+                if (pm.location < 0 || pm.offset >= size)
+                    continue;
+                const void* p = bytes + pm.offset;
+                const GLint loc = pm.location;
+                const GLsizei n = static_cast<GLsizei>(pm.count);
+                const GLfloat* f = static_cast<const GLfloat*>(p);
+                if (pm.columns == 4)      glUniformMatrix4fv(loc, n, GL_FALSE, f);
+                else if (pm.columns == 3) glUniformMatrix3fv(loc, n, GL_FALSE, f);
+                else if (pm.columns == 2) glUniformMatrix2fv(loc, n, GL_FALSE, f);
+                else if (pm.basetype == 1) // int
+                {
+                    const GLint* v = static_cast<const GLint*>(p);
+                    if (pm.vecsize == 1) glUniform1iv(loc, n, v); else if (pm.vecsize == 2) glUniform2iv(loc, n, v);
+                    else if (pm.vecsize == 3) glUniform3iv(loc, n, v); else glUniform4iv(loc, n, v);
+                }
+                else if (pm.basetype == 2) // uint
+                {
+                    const GLuint* v = static_cast<const GLuint*>(p);
+                    if (pm.vecsize == 1) glUniform1uiv(loc, n, v); else if (pm.vecsize == 2) glUniform2uiv(loc, n, v);
+                    else if (pm.vecsize == 3) glUniform3uiv(loc, n, v); else glUniform4uiv(loc, n, v);
+                }
+                else // float
+                {
+                    if (pm.vecsize == 1) glUniform1fv(loc, n, f); else if (pm.vecsize == 2) glUniform2fv(loc, n, f);
+                    else if (pm.vecsize == 3) glUniform3fv(loc, n, f); else glUniform4fv(loc, n, f);
+                }
+            }
+        }
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
         {
             CommandBufferGL* c = CB(cmd);

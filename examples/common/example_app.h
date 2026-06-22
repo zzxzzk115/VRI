@@ -129,7 +129,13 @@ namespace vriex
             api = c.GetDeviceDesc(dev)->graphicsAPI; // Auto resolves to a concrete backend
             useWgsl = api == VriGraphicsAPI_WebGPU;  // GL consumes SPIR-V (transpiled), like Vulkan
             useDxbc = api == VriGraphicsAPI_D3D12;
-            apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : ((api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES) ? "OpenGL" : (api == VriGraphicsAPI_D3D12 ? "D3D12" : "Vulkan"));
+            // The GL backend is WebGL2 in the browser, plain OpenGL on desktop - label accordingly.
+#if defined(__EMSCRIPTEN__)
+            const char* glName = "WebGL";
+#else
+            const char* glName = "OpenGL";
+#endif
+            apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : ((api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES) ? glName : (api == VriGraphicsAPI_D3D12 ? "D3D12" : "Vulkan"));
 
             char title[64]; std::snprintf(title, sizeof(title), "VRI %s (%s)", name, apiName);
             VriWindowHandle wh{};

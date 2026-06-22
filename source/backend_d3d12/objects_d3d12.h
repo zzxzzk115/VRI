@@ -109,6 +109,7 @@ namespace vri::d3d12
     };
 
     struct PipelineD3D12;
+    struct PipelineLayoutD3D12;
 
     struct CommandBufferD3D12
     {
@@ -118,6 +119,7 @@ namespace vri::d3d12
         D3D12_CPU_DESCRIPTOR_HANDLE        rtvs[8] = {}; // bound color RTVs for the active pass
         uint32_t                           rtvCount = 0;
         const PipelineD3D12*               boundPipeline = nullptr; // for vertex-buffer strides at draw
+        const PipelineLayoutD3D12*         boundLayout = nullptr;   // for push constants (root 32-bit constants)
         // MSAA color attachments to resolve at EndRendering (src multisample -> dst single).
         struct PendingResolve { TextureD3D12* src; TextureD3D12* dst; };
         PendingResolve                     resolves[8] = {};
@@ -137,6 +139,10 @@ namespace vri::d3d12
         ComPtr<ID3D12RootSignature>     rootSig;
         std::vector<LayoutBindingD3D12> bindings;
         std::vector<LayoutSetD3D12>     sets;
+        // Push constants -> a root 32-bit-constants parameter (SetGraphicsRoot32BitConstants).
+        bool     hasPush = false;
+        uint32_t pushRootParam = 0;
+        uint32_t push32Count = 0;
 
         const LayoutBindingD3D12* Find(uint32_t set, uint32_t binding) const
         {

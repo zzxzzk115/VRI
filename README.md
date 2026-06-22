@@ -70,6 +70,7 @@ xmake run example-triangle
 xmake run example-cube        # textured, depth-tested, animated-MVP rotating cube
 xmake run example-instancing  # a field of textured cubes via per-instance matrices
 xmake run example-pbrbasic    # PBR metallic-roughness sphere grid lit by 4 point lights
+xmake run example-pushconstants # push constants across backends (VK/D3D12 native, GL/WebGPU emulated)
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
@@ -82,10 +83,28 @@ across **desktop (SDL3) and the web (Emscripten)** — backend selection, window
 present loop (while-loop on desktop, `emscripten_set_main_loop` in the browser), and headless
 capture all live there, so each example only builds its resources + records a draw.
 
-Build the web examples with `xmake f -p wasm` (WebGPU + WebGL2 are on by default there) then
-`xmake build example-cube`, and host the resulting `.html` (e.g. with `emrun`). The page uses
-a small themed shell ([examples/common/shell.html](examples/common/shell.html)) with a
-**WebGPU/WebGL switch** and an in-page console; you can also force a backend with the
-`?backend=webgpu` / `?backend=webgl` URL query (or `VRI_API=vulkan|webgpu|opengl|d3d12` on desktop).
+Building for the web (Emscripten):
+
+```bash
+xmake f -p wasm                  # WebGPU + WebGL2 are both default-on (no backend flags needed)
+                                 #   add --emsdk=<path> only if xmake can't locate emscripten
+xmake build example-cube         # or example-pbrbasic / example-pushconstants / ...
+xmake run example-cube           # emrun hosts the .html in your browser
+```
+
+The page uses a small themed shell ([examples/common/shell.html](examples/common/shell.html))
+with a **WebGPU/WebGL switch** and an in-page console; you can also force a backend with the
+`?backend=webgpu` / `?backend=webgl` URL query (or `VRI_API=vulkan|webgpu|opengl|d3d12` on
+desktop). Default (no query) is Auto — WebGPU first, WebGL2 fallback.
+
+Two caveats:
+
+- **After switching platform or backend flags** (e.g. `windows` → `wasm`, or toggling
+  `--vri_backend_*`), wipe the wasm build once before rebuilding — otherwise a stale
+  `vri_entry.cpp` (gated on `#if defined(VRI_BACKEND_*)`) can leave the lib with no backends
+  and `vriCreateDevice` fails: `rm -rf build/wasm` (PowerShell: `Remove-Item -Recurse -Force
+  build\wasm`), then reconfigure + build. Repeated builds without reconfiguring are fine.
+- **After editing `examples/common/shell.html`**, force a relink (the shell file isn't a
+  tracked dependency): `xmake build -r example-cube`.
 
 Dependencies are pulled via xmake from the `my-xmake-repo` repository (Vulkan headers + VMA, `webgpu-sdk`, libsdl3, doctest); the Vulkan SDK provides the Vulkan loader and the Slang compiler that `vri-shaderc` links.
