@@ -36,7 +36,7 @@ typedef struct VriWindowHandle
         struct { void*       hwnd; void* hinstance; }      win32;
         struct { void*       display; uint64_t window; }   xlib;
         struct { void*       display; void* surface; }     wayland;
-        struct { void*       layer; }                      cocoa;
+        struct { void*       layer; void* window; }        cocoa; /* layer = CAMetalLayer (Vulkan/Metal); window = NSWindow or NSView (OpenGL) */
         struct { void*       window; }                     android;
         struct { const char* selector; }                  web;
     } handle;

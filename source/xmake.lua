@@ -60,6 +60,11 @@ target("vri")
                 add_syslinks("gdi32", {public = true})
             elseif is_plat("linux") then
                 add_syslinks("GL", {public = true})
+            elseif is_plat("macosx") then
+                -- macOS GL present retargets the device's NSOpenGL context to the window
+                -- view (nsgl_present_gl.mm). Needs Cocoa + the (deprecated) OpenGL framework.
+                add_files("backend_gl/**.mm")
+                add_frameworks("Cocoa", "OpenGL", {public = true})
             end
         end
     end

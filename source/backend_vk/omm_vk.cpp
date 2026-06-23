@@ -143,7 +143,7 @@ namespace vri::vk
             VkDependencyInfo dep = {VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
             dep.memoryBarrierCount = 1;
             dep.pMemoryBarriers = &mb;
-            vkCmdPipelineBarrier2(c->cmd, &dep);
+            d->Ext().CmdPipelineBarrier2(c->cmd, &dep);
         }
 
         const VriOpacityMicromapInterface g_ommVK = {

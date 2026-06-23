@@ -1118,10 +1118,10 @@ namespace vri::vk
                 }
             }
 
-            vkCmdBeginRendering(c->cmd, &ri);
+            c->device->Ext().CmdBeginRendering(c->cmd, &ri);
         }
 
-        void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd) { vkCmdEndRendering(CB(cmd)->cmd); }
+        void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd) { CB(cmd)->device->Ext().CmdEndRendering(CB(cmd)->cmd); }
 
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)
         {
@@ -1273,7 +1273,7 @@ namespace vri::vk
             dep.pBufferMemoryBarriers = bufBarriers.data();
             dep.imageMemoryBarrierCount = static_cast<uint32_t>(imgBarriers.size());
             dep.pImageMemoryBarriers = imgBarriers.data();
-            vkCmdPipelineBarrier2(c->cmd, &dep);
+            c->device->Ext().CmdPipelineBarrier2(c->cmd, &dep);
         }
 
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* region)
@@ -1372,7 +1372,7 @@ namespace vri::vk
             si.signalSemaphoreInfoCount = static_cast<uint32_t>(signals.size());
             si.pSignalSemaphoreInfos = signals.data();
 
-            vkQueueSubmit2(q->queue, 1, &si, VK_NULL_HANDLE);
+            q->device->Ext().QueueSubmit2(q->queue, 1, &si, VK_NULL_HANDLE);
         }
 
         void VRI_CALL QueueWaitIdle(VriQueue* queue) { vkQueueWaitIdle(Q(queue)->queue); }

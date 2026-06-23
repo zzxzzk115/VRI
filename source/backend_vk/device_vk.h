@@ -34,6 +34,14 @@ namespace vri::vk
         // whatever feature set was granted). Zero-initialized; null == unavailable.
         struct ExtFunctions
         {
+            // Core 1.3 (synchronization2 + dynamic rendering). Loaded by entry point so a
+            // pre-1.3 driver (e.g. MoltenVK, which reports 1.2) resolves them to the KHR
+            // aliases instead of crashing on a null core dispatch slot.
+            PFN_vkCmdPipelineBarrier2 CmdPipelineBarrier2 = nullptr;
+            PFN_vkCmdBeginRendering   CmdBeginRendering = nullptr;
+            PFN_vkCmdEndRendering     CmdEndRendering = nullptr;
+            PFN_vkQueueSubmit2        QueueSubmit2 = nullptr;
+
             PFN_vkCmdSetFragmentShadingRateKHR  CmdSetFragmentShadingRate = nullptr;
             PFN_vkCmdDrawMeshTasksEXT           CmdDrawMeshTasks = nullptr;
             PFN_vkCmdDrawMeshTasksIndirectEXT   CmdDrawMeshTasksIndirect = nullptr;

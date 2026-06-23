@@ -11,6 +11,15 @@ target("vri-shaderc")
 
     add_files("main.cpp")
 
+    -- The Slang runtime is copied next to the exe (see after_build); its dylibs have
+    -- @rpath install names, so the exe needs an @executable_path rpath to find them.
+    -- (Without it dyld only searches the SDK/system paths baked in by the package.)
+    if is_plat("macosx") then
+        add_rpathdirs("@executable_path")
+    elseif is_plat("linux") then
+        add_rpathdirs("$ORIGIN")
+    end
+
     -- The shaders task runs this exe directly (not via `xmake run`), so the Slang
     -- runtime must sit next to it. Copy the package runtime into the target dir:
     -- bin/ (Windows DLLs + slangc + the standard-module dir) AND the shared libs in

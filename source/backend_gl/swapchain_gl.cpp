@@ -12,12 +12,21 @@ extern "C" void*         glXGetCurrentContext(void);
 extern "C" unsigned long glXGetCurrentDrawable(void);
 extern "C" int           glXMakeCurrent(void* dpy, unsigned long drawable, void* ctx);
 extern "C" void          glXSwapBuffers(void* dpy, unsigned long drawable);
+extern "C" void          (*glXGetProcAddressARB(const unsigned char* name))(void);
 #endif
 
 #include "swapchain_gl.h"
 
 #include "conversions_gl.h"
 #include "device_gl.h"
+
+#if defined(__APPLE__)
+// NSOpenGL present glue (nsgl_present_gl.mm). Retarget the device's GL context to the
+// window's view for the blit, then swap + restore. GLFWwindow is opaque here.
+struct GLFWwindow;
+extern "C" void vriNSGLBeginPresent(GLFWwindow* devWindow, void* targetNSWindow, int* outW, int* outH);
+extern "C" void vriNSGLEndPresent(GLFWwindow* devWindow, int vsync);
+#endif
 
 #if defined(__EMSCRIPTEN__)
 #    include <emscripten/html5.h> // emscripten_set_canvas_element_size
@@ -47,7 +56,13 @@ namespace vri::gl
             {
                 glGenTextures(1, &id);
                 glBindTexture(GL_TEXTURE_2D, id);
-                glTexStorage2D(GL_TEXTURE_2D, 1, gf.internalFormat, static_cast<GLsizei>(w), static_cast<GLsizei>(h));
+                if (d->Features().textureStorage)
+                    glTexStorage2D(GL_TEXTURE_2D, 1, gf.internalFormat, static_cast<GLsizei>(w), static_cast<GLsizei>(h));
+                else // GL 4.1 (macOS): no immutable storage -> mutable glTexImage2D, single level
+                {
+                    glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(gf.internalFormat), static_cast<GLsizei>(w), static_cast<GLsizei>(h), 0, gf.format, gf.type, nullptr);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // mip-complete for FBO use
+                }
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
             TextureGL* t = new TextureGL{};
@@ -148,6 +163,21 @@ namespace vri::gl
             glGenFramebuffers(1, &s->blitFbo);
             *out = ToHandle(s);
             return VriResult_Success;
+#elif defined(__APPLE__)
+            // macOS/NSOpenGL: present retargets the device's NSOpenGL context to the
+            // window's content view (see Present). Backbuffers are offscreen textures.
+            if (desc->window.type != VriWindowSystem_Cocoa || !desc->window.handle.cocoa.window)
+            {
+                d->ReportError("GL swapchain: expected a Cocoa window handle (NSWindow*)");
+                return VriResult_Unsupported;
+            }
+            SwapChainGL* s = new SwapChainGL{};
+            s->device = d; s->nsWindow = desc->window.handle.cocoa.window;
+            s->width = w; s->height = h; s->format = desc->format; s->vsync = desc->vsync != VRI_FALSE;
+            for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
+            glGenFramebuffers(1, &s->blitFbo);
+            *out = ToHandle(s);
+            return VriResult_Success;
 #else
             (void)d; (void)desc; (void)out; (void)n; (void)w; (void)h;
             Dev(device)->ReportError("GL swapchain: windowed present is only implemented on Win32 / Web so far");
@@ -211,6 +241,12 @@ namespace vri::gl
                 d->ReportError("GL swapchain: wglMakeCurrent(window) failed (pixel-format mismatch?)");
                 return VriResult_Failure;
             }
+            // WGL_EXT_swap_control: honor vsync on the window's swap chain (the interval is a
+            // current-drawable state, so set it here while the window DC is current).
+            typedef int(__stdcall * PFNWGLSWAPINTERVALEXTPROC)(int);
+            static PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT_ =
+                reinterpret_cast<PFNWGLSWAPINTERVALEXTPROC>(wglGetProcAddress("wglSwapIntervalEXT"));
+            if (wglSwapIntervalEXT_) wglSwapIntervalEXT_(s->vsync ? 1 : 0);
             // Blit the acquired backbuffer onto the window's default framebuffer. The
             // backbuffer is VRI top-left origin; FBO 0 is GL bottom-left, so flip Y.
             const TextureGL* bb = s->textures[s->currentIndex];
@@ -222,7 +258,7 @@ namespace vri::gl
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have left it on
             glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-            SwapBuffers(hdc); // vsync follows the window's swap interval (WGL_EXT_swap_control not wired)
+            SwapBuffers(hdc); // honors the WGL_EXT_swap_control interval set above
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             wglMakeCurrent(devDc, rc); // restore the device's drawable so later rendering is unaffected
             return VriResult_Success;
@@ -237,6 +273,11 @@ namespace vri::gl
                 d->ReportError("GL swapchain: glXMakeCurrent(window) failed (visual/FBConfig mismatch?)");
                 return VriResult_Failure;
             }
+            // GLX_EXT_swap_control: honor vsync on the window drawable (per-drawable interval).
+            typedef void (*PFNGLXSWAPINTERVALEXTPROC)(void*, unsigned long, int);
+            static PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT_ =
+                reinterpret_cast<PFNGLXSWAPINTERVALEXTPROC>(glXGetProcAddressARB(reinterpret_cast<const unsigned char*>("glXSwapIntervalEXT")));
+            if (glXSwapIntervalEXT_) glXSwapIntervalEXT_(s->xdisplay, s->xwindow, s->vsync ? 1 : 0);
             const TextureGL* bb = s->textures[s->currentIndex];
             glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
             glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
@@ -262,6 +303,28 @@ namespace vri::gl
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have left it on
             glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            return VriResult_Success;
+#elif defined(__APPLE__)
+            // macOS/NSOpenGL: retarget the device context to the window's view, blit the
+            // acquired backbuffer onto its default framebuffer (scaled to the Retina backing
+            // size), flushBuffer, then restore the device's own drawable.
+            SwapChainGL* s = Swap(swapChain);
+            DeviceGL* d = s->device;
+            int vw = 0, vh = 0;
+            vriNSGLBeginPresent(d->Window(), s->nsWindow, &vw, &vh);
+            if (vw <= 0 || vh <= 0) { vw = static_cast<int>(s->width); vh = static_cast<int>(s->height); }
+            const TextureGL* bb = s->textures[s->currentIndex];
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glDrawBuffer(GL_BACK);
+            glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have left it on
+            // src is VRI top-left origin, dst (FBO 0) is GL bottom-left -> flip Y; scale to the backing size.
+            glBlitFramebuffer(0, 0, static_cast<GLint>(s->width), static_cast<GLint>(s->height),
+                              0, vh, vw, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            vriNSGLEndPresent(d->Window(), s->vsync ? 1 : 0);
             return VriResult_Success;
 #else
             (void)swapChain;

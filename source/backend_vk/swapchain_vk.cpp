@@ -9,6 +9,8 @@
 #    define WIN32_LEAN_AND_MEAN
 #    define NOMINMAX
 #    include <windows.h>
+#elif defined(__APPLE__)
+#    define VK_USE_PLATFORM_METAL_EXT
 #endif
 
 #include <vulkan/vulkan.h>
@@ -39,6 +41,15 @@ namespace vri::vk
                                : GetModuleHandleW(nullptr);
             ci.hwnd = static_cast<HWND>(window.handle.win32.hwnd);
             if (vkCreateWin32SurfaceKHR(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
+                return VK_NULL_HANDLE;
+#elif defined(__APPLE__)
+            // MoltenVK: cocoa.layer is a CAMetalLayer* (the SDL3/GLFW integration headers
+            // derive it from the window). vkCreateMetalSurfaceEXT wraps it as a surface.
+            if (window.type != VriWindowSystem_Cocoa || window.handle.cocoa.layer == nullptr)
+                return VK_NULL_HANDLE;
+            VkMetalSurfaceCreateInfoEXT ci = {VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT};
+            ci.pLayer = static_cast<const CAMetalLayer*>(window.handle.cocoa.layer);
+            if (vkCreateMetalSurfaceEXT(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
                 return VK_NULL_HANDLE;
 #else
             (void)d;

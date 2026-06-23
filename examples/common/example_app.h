@@ -165,6 +165,22 @@ namespace vriex
                 vriGetInterface(dev, VRI_INTERFACE_SWAPCHAIN, sizeof(swap), &swap) != VriResult_Success)
                 Fail("vriGetInterface failed");
 
+            // Depth format fallback: the requested format may be unsupported on this device
+            // (e.g. Apple/MoltenVK has no D24_UNORM_S8_UINT). Substitute a supported format
+            // with the same aspects so the depth target, its view, and pipelines all agree.
+            if (hasDepth && !(c.GetFormatSupport(dev, depthFormat) & VriFormatSupport_DepthStencil))
+            {
+                const bool needStencil = DepthFormatHasStencil(depthFormat);
+                const VriFormat candidates[] = {
+                    needStencil ? VriFormat_D32_SFLOAT_S8_UINT : VriFormat_D32_SFLOAT,
+                    needStencil ? VriFormat_D24_UNORM_S8_UINT : VriFormat_D16_UNORM,
+                };
+                for (VriFormat cand : candidates)
+                {
+                    if (c.GetFormatSupport(dev, cand) & VriFormatSupport_DepthStencil) { depthFormat = cand; break; }
+                }
+            }
+
             api = c.GetDeviceDesc(dev)->graphicsAPI; // Auto resolves to a concrete backend
             useWgsl = api == VriGraphicsAPI_WebGPU;  // GL consumes SPIR-V (transpiled), like Vulkan
             useDxbc = api == VriGraphicsAPI_D3D12;
@@ -190,6 +206,10 @@ namespace vriex
             window = SDL_CreateWindow(title, static_cast<int>(width), static_cast<int>(height), 0);
             if (!window) Fail("SDL_CreateWindow failed");
             wh = vriWindowHandleFromSDL3(window);
+            // The GL backend brought up GLFW for its context before this point, and on macOS
+            // GLFW grabs NSApp activation - so the SDL window opens unfocused/behind. Raise it
+            // to claim key + focus (harmless no-op for the other backends, which already focus).
+            SDL_RaiseWindow(window);
 #endif
             c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
             VriSwapChainDesc scd{}; scd.window = wh; scd.queue = queue; scd.format = swapFormat;

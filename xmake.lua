@@ -54,8 +54,9 @@ option("vri_backend_wgpu")
 option_end()
 
 option("vri_backend_gl")
-    -- default on for wasm so `xmake f -p wasm` has the WebGL2 fallback out of the box
-    set_default(is_plat("wasm"))
+    -- default on everywhere: GL (desktop GL / GLES / WebGL2) is near-universally available,
+    -- so like Vulkan it ships by default (on wasm it is the WebGL2 fallback behind WebGPU).
+    set_default(true)
     set_showmenu(true)
     set_description("Enable the OpenGL / OpenGL ES / WebGL backend")
 option_end()

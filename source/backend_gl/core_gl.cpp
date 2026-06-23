@@ -144,6 +144,10 @@ namespace vri::gl
                 o.version = d->ShaderVersion();
                 o.es = d->IsES();
                 o.vulkan_semantics = false;
+                // Don't emit layout(binding=) via GL_ARB_shading_language_420pack: it's
+                // unavailable below GLSL 420 (macOS GL 4.1 / GLSL 410 rejects it), and this
+                // backend assigns binding points through the GL API regardless (see below).
+                o.enable_420pack_extension = false;
                 // Y orientation: with glClipControl (GL 4.5+) the context already uses the
                 // VRI top-left convention, so NO in-shader flip. Otherwise (ES/WebGL2,
                 // pre-4.5 desktop) flip clip-space Y in-shader - but never on the
@@ -442,6 +446,30 @@ namespace vri::gl
         }
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
+#if !defined(__EMSCRIPTEN__)
+        // GL 4.1 (macOS) lacks immutable storage (glTexStorage*, GL 4.2+). Emulate it with
+        // mutable glTexImage* over every mip level (NULL data just allocates). The texture
+        // must already be bound to `target`. is3D covers 2D-array (depth = layer count, which
+        // does not shrink with mips); isCube allocates all 6 faces per level.
+        void TexImageAllocate(GLenum target, const GLFormat& gf, GLsizei mips, GLsizei w, GLsizei h,
+                              GLsizei depth, bool is3D, bool isCube)
+        {
+            for (GLsizei level = 0; level < mips; ++level)
+            {
+                const GLsizei lw = (w >> level) > 0 ? (w >> level) : 1;
+                const GLsizei lh = (h >> level) > 0 ? (h >> level) : 1;
+                if (is3D)
+                    glTexImage3D(target, level, static_cast<GLint>(gf.internalFormat), lw, lh, depth, 0, gf.format, gf.type, nullptr);
+                else if (isCube)
+                    for (GLenum f = 0; f < 6; ++f)
+                        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, level, static_cast<GLint>(gf.internalFormat), lw, lh, 0, gf.format, gf.type, nullptr);
+                else
+                    glTexImage2D(target, level, static_cast<GLint>(gf.internalFormat), lw, lh, 0, gf.format, gf.type, nullptr);
+            }
+            glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, mips - 1); // mip-complete (immutable does this implicitly)
+        }
+#endif
+
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
             const GLFormat gf = ToGLFormat(desc->format);
@@ -455,6 +483,7 @@ namespace vri::gl
 
 #if !defined(__EMSCRIPTEN__) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
             const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
+            const bool texStorage = Dev(device)->Features().textureStorage; // GL 4.2+; false on macOS GL 4.1
 #endif
             GLuint id = 0;
             GLenum target = GL_TEXTURE_2D;
@@ -483,7 +512,10 @@ namespace vri::gl
                 {
                     glGenTextures(1, &id);
                     glBindTexture(target, id);
-                    glTexStorage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
+                    if (texStorage)
+                        glTexStorage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
+                    else // GL 4.1: glTexImage2DMultisample (3.2 core) instead of immutable storage
+                        glTexImage2DMultisample(target, static_cast<GLsizei>(desc->sampleNum), gf.internalFormat, w, h, GL_TRUE);
                     glBindTexture(target, 0);
                 }
 #endif
@@ -496,7 +528,12 @@ namespace vri::gl
                 if (dsa) { glCreateTextures(target, 1, &id); glTextureStorage2D(id, mips, gf.internalFormat, w, h); }
                 else
 #endif
-                { glGenTextures(1, &id); glBindTexture(target, id); glTexStorage2D(target, mips, gf.internalFormat, w, h); glBindTexture(target, 0); }
+                {
+                    glGenTextures(1, &id); glBindTexture(target, id);
+                    if (texStorage) glTexStorage2D(target, mips, gf.internalFormat, w, h);
+                    else TexImageAllocate(target, gf, mips, w, h, 0, /*is3D*/false, /*isCube*/true);
+                    glBindTexture(target, 0);
+                }
             }
             else if (isArray)
             {
@@ -506,7 +543,12 @@ namespace vri::gl
                 if (dsa) { glCreateTextures(target, 1, &id); glTextureStorage3D(id, mips, gf.internalFormat, w, h, layers); }
                 else
 #endif
-                { glGenTextures(1, &id); glBindTexture(target, id); glTexStorage3D(target, mips, gf.internalFormat, w, h, layers); glBindTexture(target, 0); }
+                {
+                    glGenTextures(1, &id); glBindTexture(target, id);
+                    if (texStorage) glTexStorage3D(target, mips, gf.internalFormat, w, h, layers);
+                    else TexImageAllocate(target, gf, mips, w, h, layers, /*is3D*/true, /*isCube*/false);
+                    glBindTexture(target, 0);
+                }
             }
 #if !defined(__EMSCRIPTEN__)
             else if (dsa)
@@ -519,7 +561,8 @@ namespace vri::gl
             {
                 glGenTextures(1, &id);
                 glBindTexture(GL_TEXTURE_2D, id);
-                glTexStorage2D(GL_TEXTURE_2D, mips, gf.internalFormat, w, h);
+                if (texStorage) glTexStorage2D(GL_TEXTURE_2D, mips, gf.internalFormat, w, h);
+                else TexImageAllocate(GL_TEXTURE_2D, gf, mips, w, h, 0, /*is3D*/false, /*isCube*/false);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
 
@@ -1483,14 +1526,22 @@ namespace vri::gl
                 return;
             }
 #endif
-            // WebGL2/GLES reject glCopyBufferSubData between an element-array buffer and a
-            // non-element one ("cannot copy into an element buffer destination from a
-            // non-element buffer source"), no matter the targets used. The common case is a
-            // staging upload into an index buffer; bounce it through CPU, each buffer bound
-            // only to its own (locked) target so neither gets tainted.
+            // Two cases need the CPU bounce (read back with glGetBufferSubData, write with
+            // glBufferSubData; each buffer bound only to its own target so neither gets tainted):
+            //  1. WebGL2/GLES reject glCopyBufferSubData between an element-array buffer and a
+            //     non-element one ("cannot copy into an element buffer destination from a
+            //     non-element buffer source"). The common case is a staging upload into an index buffer.
+            //  2. Apple's desktop-GL driver leaves glCopyBufferSubData unimplemented (it logs
+            //     "gldCopyBufferSubData: NEEDS IMPLEMENTATION" and silently does nothing), and DSA
+            //     (glCopyNamedBufferSubData) isn't available either on GL 4.1, so always bounce.
             const bool srcEl = s->target == GL_ELEMENT_ARRAY_BUFFER;
             const bool dstEl = d->target == GL_ELEMENT_ARRAY_BUFFER;
-            if (s->device->IsES() && srcEl != dstEl)
+#if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+            const bool cpuBounce = true;
+#else
+            const bool cpuBounce = s->device->IsES() && srcEl != dstEl;
+#endif
+            if (cpuBounce)
             {
                 void* tmp = std::malloc(static_cast<size_t>(r->size));
                 glBindBuffer(s->target, s->id);

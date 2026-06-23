@@ -63,6 +63,9 @@ namespace vri::gl
         bool     baseInstance   = false; // GL 4.2: *BaseInstance draws
         bool     drawIndirect   = false; // GL 4.3: multi-draw-indirect
         bool     bufferStorage  = false; // GL 4.4: persistent-mapped buffers
+        // Immutable texture storage (glTexStorage*) is GL 4.2+ AND core in GLES3/WebGL2;
+        // the lone gap is desktop GL 4.1 (macOS), which falls back to glTexImage*.
+        bool     textureStorage = true;  // default true: ES/WebGL2 baseline always has it
     };
 
     class DeviceGL final : public core::DeviceBase
@@ -81,6 +84,7 @@ namespace vri::gl
         bool                 IsES() const { return m_es; }
         uint32_t             ShaderVersion() const { return m_shaderVersion; }
         const GlFeatures&    Features() const { return m_features; }
+        GLFWwindow*          Window() const { return m_window; } // hidden context-owning window (macOS present)
         void                 ReportError(const char* message) const;
         // Route a backend diagnostic (GL KHR_debug message) to the app's callback.
         void                 Diagnostic(VriMessageSeverity severity, const char* message) const;

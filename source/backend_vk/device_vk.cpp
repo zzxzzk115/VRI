@@ -269,6 +269,15 @@ namespace vri::vk
             avail.insert(e.extensionName);
         auto hasExt = [&](const char* n) { return avail.find(n) != avail.end(); };
 
+        // dynamicRendering + synchronization2 are core in Vulkan 1.3, but MoltenVK (and
+        // other 1.2 drivers) report apiVersion 1.2 and expose them only via the KHR
+        // extensions. Calling the core vkCmd*2 entry points then dereferences a null
+        // dispatch slot, so on a <1.3 device we enable the extensions + KHR feature structs
+        // (the loader aliases the core entry points to the extension implementations).
+        VkPhysicalDeviceProperties physProps = {};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &physProps);
+        const bool useVk13Core = physProps.apiVersion >= VK_API_VERSION_1_3;
+
         // ---- query supported optional features ----
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtSup = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
@@ -297,14 +306,38 @@ namespace vri::vk
         }
 
         // ---- base enabled features (always on) ----
+        // dynamicRendering + synchronization2: core 1.3 struct on a 1.3 device, otherwise
+        // the equivalent KHR feature structs (chained below in place of f13).
         VkPhysicalDeviceVulkan13Features f13 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-        f13.dynamicRendering = VK_TRUE;
-        f13.synchronization2 = VK_TRUE;
+        VkPhysicalDeviceDynamicRenderingFeaturesKHR dynRenderKhr = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
+        VkPhysicalDeviceSynchronization2FeaturesKHR sync2Khr = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES};
+        if (useVk13Core)
+        {
+            f13.dynamicRendering = VK_TRUE;
+            f13.synchronization2 = VK_TRUE;
+        }
+        else
+        {
+            dynRenderKhr.dynamicRendering = VK_TRUE;
+            sync2Khr.synchronization2 = VK_TRUE;
+        }
 
         VkPhysicalDeviceVulkan12Features f12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         f12.timelineSemaphore = VK_TRUE;
         f12.bufferDeviceAddress = VK_TRUE;
-        f12.pNext = &f13;
+        // Chain f12 -> (f13) or (dynRenderKhr -> sync2Khr); record where optional features append.
+        void** baseTail = nullptr;
+        if (useVk13Core)
+        {
+            f12.pNext = &f13;
+            baseTail = &f13.pNext;
+        }
+        else
+        {
+            f12.pNext = &dynRenderKhr;
+            dynRenderKhr.pNext = &sync2Khr;
+            baseTail = &sync2Khr.pNext;
+        }
 
         // shaderDrawParameters: Slang emits the DrawParameters capability for
         // SV_VertexID/SV_InstanceID (base-vertex aware), so enable it by default.
@@ -323,6 +356,25 @@ namespace vri::vk
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
         for (uint32_t i = 0; i < desc.requiredDeviceExtensionNum; ++i)
             extensions.push_back(desc.requiredDeviceExtensions[i]);
+
+        // MoltenVK: a portability device (e.g. Metal via VK_KHR_portability_enumeration) that
+        // advertises VK_KHR_portability_subset MUST enable it in vkCreateDevice, or device
+        // creation fails with VUID-VkDeviceCreateInfo-pProperties-04451.
+        // (literal name: the macro lives in vulkan_beta.h behind VK_ENABLE_BETA_EXTENSIONS)
+        if (hasExt("VK_KHR_portability_subset"))
+            extensions.push_back("VK_KHR_portability_subset");
+
+        // Pre-1.3 device: pull in the extensions that back the core 1.3 features we use.
+        if (!useVk13Core)
+        {
+            if (!hasExt(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) || !hasExt(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME))
+            {
+                ReportError("device is pre-1.3 and lacks VK_KHR_dynamic_rendering / VK_KHR_synchronization2");
+                return VriResult_Unsupported;
+            }
+            extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+            extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+        }
 
         // Always-on-if-available pipeline-state capability extensions (no opt-in feature;
         // exposed via VriDeviceDesc::hasXxx, used by per-pipeline state when supported).
@@ -359,7 +411,7 @@ namespace vri::vk
         VkPhysicalDeviceOpacityMicromapFeaturesEXT ommEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
         VkPhysicalDeviceRayQueryFeaturesKHR rqEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
 
-        void** chainTail = &f13.pNext; // append optional feature structs here
+        void** chainTail = baseTail; // append optional feature structs here
         const uint64_t requested = desc.enabledFeatures;
         uint64_t granted = 0;
         auto unsupported = [&](const char* what) -> bool {
@@ -616,6 +668,21 @@ namespace vri::vk
     // Resolve extension entry points for the feature set granted at creation.
     void DeviceVK::LoadExtensionFunctions()
     {
+        // Core 1.3 entry points, loaded core-name-first with a KHR-alias fallback for
+        // pre-1.3 drivers (MoltenVK reports 1.2 and only exposes the KHR variants).
+        auto LoadCoreOrKhr = [&](const char* core, const char* khr) {
+            PFN_vkVoidFunction p = vkGetDeviceProcAddr(m_device, core);
+            return p ? p : vkGetDeviceProcAddr(m_device, khr);
+        };
+        m_ext.CmdPipelineBarrier2 = reinterpret_cast<PFN_vkCmdPipelineBarrier2>(
+            LoadCoreOrKhr("vkCmdPipelineBarrier2", "vkCmdPipelineBarrier2KHR"));
+        m_ext.CmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(
+            LoadCoreOrKhr("vkCmdBeginRendering", "vkCmdBeginRenderingKHR"));
+        m_ext.CmdEndRendering = reinterpret_cast<PFN_vkCmdEndRendering>(
+            LoadCoreOrKhr("vkCmdEndRendering", "vkCmdEndRenderingKHR"));
+        m_ext.QueueSubmit2 = reinterpret_cast<PFN_vkQueueSubmit2>(
+            LoadCoreOrKhr("vkQueueSubmit2", "vkQueueSubmit2KHR"));
+
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_ext.CmdSetFragmentShadingRate = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
                 vkGetDeviceProcAddr(m_device, "vkCmdSetFragmentShadingRateKHR"));

@@ -50,7 +50,10 @@ static inline VriWindowHandle vriWindowHandleFromGLFW(GLFWwindow* window)
     h.handle.win32.hinstance = (void*)0; /* backend resolves via GetModuleHandle(NULL) */
 #elif defined(__APPLE__)
     h.type = VriWindowSystem_Cocoa;
-    h.handle.cocoa.layer = (void*)glfwGetCocoaWindow(window); /* NSWindow*; backend derives CAMetalLayer */
+    /* NSWindow* for the GL/NSOpenGL backend. The Vulkan/Metal backend needs a CAMetalLayer;
+     * GLFW doesn't expose one, so VK+GLFW on macOS isn't wired yet (use SDL3, which does). */
+    h.handle.cocoa.window = (void*)glfwGetCocoaWindow(window);
+    h.handle.cocoa.layer = (void*)0;
 #elif defined(__linux__)
     {
 #    if defined(GLFW_VERSION_MAJOR) && (GLFW_VERSION_MAJOR > 3 || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 4))

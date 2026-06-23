@@ -142,15 +142,24 @@ namespace vri::gl
         }
         else
         {
+#if defined(__APPLE__)
+            // Apple froze OpenGL at 4.1 (core profile), and macOS only grants a core
+            // profile >= 3.2 when GLFW_OPENGL_FORWARD_COMPAT is set. DetectFeatures then
+            // derives the (lower) capability tiers from the actual 4.1 context.
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+            glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#else
             glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+#endif
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         }
 
         m_window = glfwCreateWindow(1, 1, "vri-gl", nullptr, nullptr);
         if (!m_window)
         {
-            ReportError(m_es ? "glfwCreateWindow (GLES 3.1) failed" : "glfwCreateWindow (GL 4.6 core) failed");
+            ReportError(m_es ? "glfwCreateWindow (GLES 3.1) failed" : "glfwCreateWindow (GL core) failed");
             return VriResult_Failure;
         }
         glfwMakeContextCurrent(m_window);
@@ -217,6 +226,14 @@ namespace vri::gl
         glGetIntegerv(GL_MINOR_VERSION, &v);
         m_desc.apiVersionMinor = static_cast<uint32_t>(v);
 
+        // Match the GLSL version to the actual context: for GL >= 3.3 the GLSL #version
+        // equals the GL version (4.1 -> 410, 4.6 -> 460). The 430 default assumed a >= 4.3
+        // context; on macOS GL 4.1 (max GLSL 410) that #version is rejected. SPIR-V-Cross
+        // emits binding-less GLSL here (bindings set via the GL API), so 410 is fine for
+        // graphics; compute/SSBO (needs 430) stay gated off by hasComputeShader.
+        if (!m_es && m_desc.apiVersionMajor >= 3)
+            m_shaderVersion = m_desc.apiVersionMajor * 100u + m_desc.apiVersionMinor * 10u;
+
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &v);
         m_desc.texture2DMaxDim = static_cast<uint32_t>(v);
         glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &v);
@@ -225,8 +242,9 @@ namespace vri::gl
         m_desc.textureArrayLayerMaxNum = static_cast<uint32_t>(v);
         glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &v);
         m_desc.attachmentColorMaxNum = static_cast<uint32_t>(v);
-        glGetIntegerv(GL_MAX_VIEWPORT_DIMS, &v);
-        m_desc.attachmentMaxDim = static_cast<uint32_t>(v);
+        GLint viewportDims[2] = {0, 0}; // GL_MAX_VIEWPORT_DIMS returns TWO ints (w, h) - a
+        glGetIntegerv(GL_MAX_VIEWPORT_DIMS, viewportDims); // single &v would overflow the stack
+        m_desc.attachmentMaxDim = static_cast<uint32_t>(viewportDims[0]);
         m_desc.viewportMaxNum = 1;
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_desc.queueCount[t] = 1;
@@ -259,6 +277,7 @@ namespace vri::gl
             f.clipControl    = atLeast(4, 5);
             f.dsa            = atLeast(4, 5);
             f.spirvIngest    = atLeast(4, 6); // ARB_gl_spirv is core in 4.6
+            f.textureStorage = atLeast(4, 2); // glTexStorage*; macOS GL 4.1 lacks it -> glTexImage*
         }
         m_features = f;
     }

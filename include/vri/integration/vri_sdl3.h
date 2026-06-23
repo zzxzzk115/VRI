@@ -27,8 +27,18 @@ static inline VriWindowHandle vriWindowHandleFromSDL3(SDL_Window* window)
     h.handle.win32.hwnd = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
     h.handle.win32.hinstance = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, NULL);
 #elif defined(SDL_PLATFORM_MACOS) || defined(__APPLE__)
+    /* The Vulkan (MoltenVK) backend needs a CAMetalLayer for vkCreateMetalSurfaceEXT.
+     * Let SDL do the Objective-C: SDL_Metal_CreateView attaches a metal-backed view to
+     * the window (even one not created with SDL_WINDOW_METAL) and SDL_Metal_GetLayer
+     * returns its CAMetalLayer*. The view lives with the window. */
     h.type = VriWindowSystem_Cocoa;
-    h.handle.cocoa.layer = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
+    /* window (NSWindow*) is the generic handle (used by the GL/NSOpenGL backend); the
+     * Vulkan/Metal backend wants a CAMetalLayer, which SDL builds for us via a metal view. */
+    h.handle.cocoa.window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
+    {
+        SDL_MetalView view = SDL_Metal_CreateView(window);
+        h.handle.cocoa.layer = view ? SDL_Metal_GetLayer(view) : NULL;
+    }
 #elif defined(SDL_PLATFORM_ANDROID) || defined(__ANDROID__)
     h.type = VriWindowSystem_Android;
     h.handle.android.window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
