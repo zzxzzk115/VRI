@@ -172,7 +172,7 @@ int main(int, char**)
     // constant buffer (onPreRender) is recorded before the render pass.
     static float spin = 1.0f, angle = 0.0f; static bool paused = false; // ImGui-controlled
     app.onUpdate = [ustg](uint64_t) {
-        if (!paused) angle += 0.02f * spin;
+        if (!paused) angle += 1.2f * spin * app.dt; // 1.2 rad/s (= 0.02/frame at 60fps)
         const float eye[3] = {0, 0, 3.0f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Mat4 model = Mul(RotateY(angle), RotateX(angle * 0.5f));
         Mat4 view = LookAt(eye, ctr, up);

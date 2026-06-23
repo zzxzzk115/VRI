@@ -229,7 +229,7 @@ int main(int, char**)
     static float t = 0.0f;
 
     app.onUpdate = [=](uint64_t) {
-        t += 1.0f / 60.0f;
+        t += app.dt;
         const float up[3] = {0, 1, 0}, ctr[3] = {0, 0, 0};
         const float ang = t * orbitSpeed;
         const float eye[3] = {std::cos(ang) * 4.0f, 1.6f, std::sin(ang) * 4.0f};

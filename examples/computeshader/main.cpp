@@ -42,7 +42,7 @@ int main(int, char**)
 
     static float speed = 1.0f, t = 0.0f; // ImGui-controlled plasma time scale
     app.onUpdate = [ustg](uint64_t) {
-        t += 0.04f * speed;
+        t += 2.4f * speed * app.dt; // 2.4/s (= 0.04/frame at 60fps)
         Params p{}; p.time = t; p.width = kWidth; p.height = kHeight;
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Params)), &p, sizeof(Params)); app.c.UnmapBuffer(ustg);
     };

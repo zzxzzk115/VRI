@@ -169,7 +169,7 @@ int main(int, char**)
 
     static float spin = 1.0f, t = 0.0f; // ImGui-controlled camera orbit (metallic/roughness vary per sphere)
     app.onUpdate = [ustg](uint64_t) {
-        t += 0.006f * spin;
+        t += 0.36f * spin * app.dt; // 0.36/s (= 0.006/frame at 60fps)
         const float R = kGrid * kSpacing;
         const float eye[3] = {std::sin(t) * R, R * 0.25f, std::cos(t) * R}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Ubo u{};

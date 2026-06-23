@@ -191,7 +191,7 @@ int main(int, char**)
     // per-frame: orbit the camera, refresh the shared view-projection, draw all instances
     static float spin = 1.0f, t = 0.0f; // ImGui-controlled camera orbit
     app.onUpdate = [ustg](uint64_t) {
-        t += 0.01f * spin;
+        t += 0.6f * spin * app.dt; // 0.6/s (= 0.01/frame at 60fps)
         const float r = kGrid * kSpacing + 6.0f;
         const float eye[3] = {std::cos(t) * r, 4.0f, std::sin(t) * r}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         // transpose for Slang's mul(viewProj, world); the per-instance columns stay column-major

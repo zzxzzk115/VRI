@@ -153,7 +153,7 @@ int main(int, char**)
     };
 
     app.onUpdate = [=](uint64_t) {
-        t += 1.0f / 60.0f;
+        t += app.dt;
         SceneUbo s{};
         const float eye[3] = {0.0f, 2.2f, 7.5f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Mat4 view = LookAt(eye, ctr, up);

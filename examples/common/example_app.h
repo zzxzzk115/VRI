@@ -25,6 +25,7 @@
 #include <vri/vri.h>
 #include <imgui.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -95,6 +96,13 @@ namespace vriex
         uint64_t requestFeatures = 0; // VriFeatureBits to request at device creation (bestEffort)
         float clearColor[4] = {0.08f, 0.10f, 0.14f, 1.0f};
 
+        // Real seconds elapsed since the previous frame (measured per platform). Examples scale their
+        // animation by this so motion is frame-rate independent - identical wall-clock speed whether a
+        // backend runs at 60, 45, or 144 fps. In headless capture (maxFrames != 0) it is pinned to
+        // 1/60 so frame N is deterministic (reproducible pixel self-check / BMP). Also fed to ImGui as
+        // io.DeltaTime, so the on-screen FPS is the real rate (not a hardcoded 60).
+        float dt = 1.0f / 60.0f;
+
         // ---- valid after Init() ----
         VriDevice* dev = nullptr;
         VriCoreInterface c{};
@@ -125,6 +133,7 @@ namespace vriex
         VriBuffer* captureBuf = nullptr; const char* capturePath = nullptr;
         std::vector<VriBuffer*> uploadStaging; // staging buffers held until EndUpload() frees them
         uint64_t frameValue = 1; uint64_t maxFrames = 0; bool depthInit = false; bool running = true;
+        std::chrono::steady_clock::time_point lastFrameTime{}; bool haveFrameTime = false; // for real dt
         ImguiVri gui; ImDrawData* guiDraw = nullptr; bool guiReady = false; // ImGui renderer + this frame's draw data
 #if !defined(__EMSCRIPTEN__)
         SDL_Window* window = nullptr;
@@ -306,16 +315,30 @@ namespace vriex
         }
 #endif
 
+        // Measure real seconds since the previous frame into `dt`. Pinned to 1/60 in headless capture
+        // (maxFrames != 0) so frame N is deterministic; clamped otherwise to absorb startup/stall spikes
+        // (e.g. a tab switch) and to keep ImGui's required DeltaTime > 0.
+        void UpdateDeltaTime()
+        {
+            const auto now = std::chrono::steady_clock::now();
+            float real = 1.0f / 60.0f;
+            if (haveFrameTime) real = std::chrono::duration<float>(now - lastFrameTime).count();
+            lastFrameTime = now; haveFrameTime = true;
+            if (maxFrames != 0) { dt = 1.0f / 60.0f; return; }   // headless: fixed step for reproducible frames
+            if (real < 1.0e-5f) real = 1.0e-5f; if (real > 0.1f) real = 0.1f;
+            dt = real;
+        }
+
         // Run ImGui new-frame + build the UI for this frame; leaves guiDraw ready for the renderer.
         void BeginGui()
         {
             ImGuiIO& io = ImGui::GetIO();
 #if defined(__EMSCRIPTEN__)
             io.DisplaySize = ImVec2(float(width), float(height));
-            io.DeltaTime = 1.0f / 60.0f;
 #else
             ImGui_ImplSDL3_NewFrame(); // pulls window size + accumulated input
 #endif
+            io.DeltaTime = dt; // real frame time (fixed 1/60 in headless) -> truthful on-screen FPS
             ImGui::NewFrame();
             ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowBgAlpha(0.7f);
@@ -332,6 +355,7 @@ namespace vriex
 
         void Frame()
         {
+            UpdateDeltaTime(); // refresh dt before the UI + onUpdate use it
             BeginGui(); // build the UI first so a control change applies to this same frame
             if (onUpdate) onUpdate(frameValue); // CPU work (may yield on WebGPU) before acquire
 

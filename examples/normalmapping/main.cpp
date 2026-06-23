@@ -175,7 +175,7 @@ int main(int, char**)
 
     static float lightSpeed = 1.0f, t = 0.0f; static float lightZ = 1.3f; // ImGui-controlled light orbit
     app.onUpdate = [ustg](uint64_t) {
-        t += 0.02f * lightSpeed;
+        t += 1.2f * lightSpeed * app.dt; // 1.2/s (= 0.02/frame at 60fps)
         const float eye[3] = {0, 0, 2.8f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Ubo u{};
         u.mvp = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 100.0f), LookAt(eye, ctr, up)));

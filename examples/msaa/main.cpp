@@ -144,7 +144,7 @@ int main(int, char**)
     app.EndUpload();
 
     static float spin = 1.0f, angle = 0.0f; static bool msaaOn = true; // ImGui-controlled
-    app.onUpdate = [](uint64_t) { angle += 0.01f * spin; };
+    app.onUpdate = [](uint64_t) { angle += 0.6f * spin * app.dt; }; // 0.6 rad/s (= 0.01/frame at 60fps)
     app.onGui = [] {
         ImGui::Checkbox("4x MSAA", &msaaOn);
         ImGui::SliderFloat("spin", &spin, 0.0f, 5.0f);

@@ -45,9 +45,10 @@ int main(int, char**)
     if (c.CreateGraphicsPipeline(app.dev, &pd, &pipeline) != VriResult_Success) app.Fail("CreateGraphicsPipeline failed");
 
     static bool animate = true;
-    app.onUpdate = [](uint64_t frame) {
+    static float t = 0.0f;
+    app.onUpdate = [](uint64_t) {
         if (!animate) return;
-        const float t = static_cast<float>(frame) * 0.03f;
+        t += 1.8f * app.dt; // 1.8/s (= 0.03/frame at 60fps)
         g_color[0] = 0.5f + 0.5f * std::sin(t);
         g_color[1] = 0.5f + 0.5f * std::sin(t + 2.094f);
         g_color[2] = 0.5f + 0.5f * std::sin(t + 4.188f);
