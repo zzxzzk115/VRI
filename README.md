@@ -91,6 +91,9 @@ xmake run example-cubemap       # cubemap skybox + a reflective chrome sphere sa
                                 # the reflection vector (procedural 6-face cube texture)
 xmake run example-stenciloutline # two-pass stencil silhouette: fill stamps stencil=1, an
                                 # enlarged pass draws a flat-color border only where stencil!=1
+xmake run example-raytracing    # ray-traced hard shadows: a compute shader traces the scene into
+                                # a storage image (HW ray query on VK/D3D12 [pending], SW brute-force
+                                # on WebGPU/desktop-GL); WebGL2/GLES has no compute -> explicit skip
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
