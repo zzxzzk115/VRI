@@ -42,6 +42,13 @@ namespace vri::wgpu
         WGPUBuffer  buffer;
         uint64_t    size;
         WGPUMapMode mapMode; // None / Read / Write (for MapBuffer)
+        // Host-upload (write) buffers keep a CPU shadow and flush via wgpuQueueWriteBuffer on Unmap,
+        // instead of wgpuBufferMapAsync. On the browser mapAsync forces an ASYNCIFY yield
+        // (emscripten_sleep) every frame; queueWriteBuffer is synchronous, so a normal frame no longer
+        // unwinds the wasm stack to await a map (also skips the async round-trip on native).
+        uint8_t*    shadow = nullptr; // non-null => use the shadow + queueWriteBuffer path
+        uint64_t    mapOffset = 0;    // current MapBuffer range, flushed on Unmap
+        uint64_t    mapLen = 0;
     };
 
     struct TextureWGPU

@@ -179,24 +179,28 @@ namespace vri::wgpu
             DeviceWGPU* d = Dev(device);
             WGPUBufferUsage usage = ToWgpuBufferUsage(desc->usage);
             WGPUMapMode mapMode = WGPUMapMode_None;
+            bool shadowWrite = false;
             if (desc->memoryLocation == VriMemoryLocation_HostReadback)
             {
-                usage |= WGPUBufferUsage_MapRead;
+                usage |= WGPUBufferUsage_MapRead; // readback must map to read GPU results
                 mapMode = WGPUMapMode_Read;
             }
             else if (desc->memoryLocation == VriMemoryLocation_HostUpload)
             {
-                usage |= WGPUBufferUsage_MapWrite;
-                mapMode = WGPUMapMode_Write;
+                // Write via a CPU shadow + queueWriteBuffer (synchronous) rather than MapWrite (async).
+                usage |= WGPUBufferUsage_CopyDst; // queueWriteBuffer's destination
+                shadowWrite = true;
             }
 
             WGPUBufferDescriptor bd = {};
             bd.usage = usage;
-            bd.size = desc->size;
+            bd.size = (desc->size + 3u) & ~uint64_t(3u); // queueWriteBuffer needs a 4-byte-multiple size
             WGPUBuffer buffer = wgpuDeviceCreateBuffer(d->Device(), &bd);
             if (!buffer)
                 return VriResult_OutOfMemory;
-            *out = ToHandle(new BufferWGPU{d, buffer, desc->size, mapMode});
+            BufferWGPU* b = new BufferWGPU{d, buffer, desc->size, mapMode};
+            if (shadowWrite) b->shadow = new uint8_t[bd.size]();
+            *out = ToHandle(b);
             return VriResult_Success;
         }
 
@@ -204,6 +208,7 @@ namespace vri::wgpu
         {
             if (!buffer) return;
             BufferWGPU* b = Buf(buffer);
+            delete[] b->shadow;
             wgpuBufferRelease(b->buffer);
             delete b;
         }
@@ -219,6 +224,12 @@ namespace vri::wgpu
         void* VRI_CALL MapBuffer(VriBuffer* buffer, uint64_t offset, uint64_t size)
         {
             BufferWGPU* b = Buf(buffer);
+            if (b->shadow) // host-upload: hand back the CPU shadow; Unmap pushes it via queueWriteBuffer
+            {
+                b->mapOffset = offset;
+                b->mapLen = size ? size : (b->size - offset);
+                return b->shadow + offset;
+            }
             const WGPUMapMode mode = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
             MapState st = {};
             WGPUBufferMapCallbackInfo cb = {};
@@ -238,7 +249,19 @@ namespace vri::wgpu
             return wgpuBufferGetMappedRange(b->buffer, offset, range);
         }
 
-        void VRI_CALL UnmapBuffer(VriBuffer* buffer) { wgpuBufferUnmap(Buf(buffer)->buffer); }
+        void VRI_CALL UnmapBuffer(VriBuffer* buffer)
+        {
+            BufferWGPU* b = Buf(buffer);
+            if (b->shadow) // flush the written range to the GPU buffer (no map, no ASYNCIFY yield)
+            {
+                uint64_t len = (b->mapLen + 3u) & ~uint64_t(3u); // queueWriteBuffer size must be a 4-byte multiple
+                const uint64_t cap = ((b->size + 3u) & ~uint64_t(3u)) - b->mapOffset; // shadow/GPU are 4-aligned
+                if (len > cap) len = cap;
+                wgpuQueueWriteBuffer(b->device->Queue(), b->buffer, b->mapOffset, b->shadow + b->mapOffset, len);
+                return;
+            }
+            wgpuBufferUnmap(b->buffer);
+        }
 
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; } // not exposed by WebGPU
 
