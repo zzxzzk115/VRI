@@ -782,9 +782,16 @@ namespace vri::wgpu
         void VRI_CALL Wait(VriFence* fence, uint64_t value)
         {
             FenceWGPU* f = Fen(fence);
-            // Native blocks here; on the browser the real readback sync happens at
-            // buffer mapAsync, so this is a light yield.
-            PollDevice(f->device->Device());
+#if !defined(__EMSCRIPTEN__)
+            // Native has no rAF pacing: poll the device so the CPU can't race far ahead of the GPU
+            // (backpressure). It's a cheap blocking poll, not a stack-unwinding yield.
+            wgpuDevicePoll(f->device->Device(), /*wait*/ true, nullptr);
+#endif
+            // Browser: do NOT emscripten_sleep here. requestAnimationFrame already paces frames, and
+            // WebGPU's serial queue orders this frame's work before the next frame's writes/submits,
+            // so the per-frame fence wait protects nothing the queue doesn't already guarantee.
+            // Skipping it removes the last per-frame ASYNCIFY yield. Real readback still syncs at the
+            // capture buffer's mapAsync, and resources used by in-flight submits stay alive until done.
             if (value > f->value)
                 f->value = value;
         }
