@@ -68,6 +68,20 @@ target("vri")
             end
         end
     end
+    if has_config("vri_backend_metal") and is_plat("macosx") then
+        add_defines("VRI_BACKEND_METAL")
+        -- SPIR-V is VRI's portable shader IR; SPIRV-Cross transpiles it to MSL at pipeline
+        -- creation (same package the GL backend uses for SPIRV->GLSL).
+        add_packages("spirv-cross", {public = true})
+        -- The backend manages MTL object lifetimes by hand (retain/release): VRI hands
+        -- back opaque handles via reinterpret_cast over new/delete, which ARC can't track.
+        -- mxflags is the Objective-C++ flag category (applies to every .mm in the target).
+        add_mxflags("-fno-objc-arc", {force = true})
+        add_files("backend_metal/**.mm")
+        add_includedirs("backend_metal", {public = false})
+        -- Metal + CAMetalLayer (QuartzCore) + the SDL3 metal view's NSWindow/AppKit chain.
+        add_frameworks("Metal", "QuartzCore", "Foundation", "Cocoa", {public = true})
+    end
     if has_config("vri_backend_d3d11") and is_plat("windows") then
         add_defines("VRI_BACKEND_D3D11")
     end

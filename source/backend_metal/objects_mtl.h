@@ -1,0 +1,186 @@
+// objects_mtl.h - concrete Metal objects behind the opaque VRI handles.
+//
+// Objective-C++ header (imports <Metal/Metal.h>); only the backend's .mm files
+// include it. Mirrors objects_wgpu.h / objects_d3d12.h. Manual retain/release
+// (no ARC) matches the project's other .mm files: newXxx returns +1 (released in
+// Destroy*), autoreleased returns are retained when stored past their pool.
+#pragma once
+
+#import <Metal/Metal.h>
+
+#include <vector>
+
+#include <vri/vri.h>
+
+namespace vri::mtl
+{
+    class DeviceMTL;
+
+    // Metal exposes 31 buffer argument slots per stage. Descriptor buffers + push
+    // constants grow up from 0; vertex stream buffers grow down from 30 so the two
+    // pools can't collide for any realistic layout (see CreatePipelineLayout /
+    // CreateGraphicsPipeline / CmdSetVertexBuffers).
+    static constexpr uint32_t kMaxMtlBuffers = 31;
+    inline uint32_t VertexBufferIndex(uint32_t streamSlot) { return kMaxMtlBuffers - 1 - streamSlot; }
+
+    struct QueueMTL
+    {
+        DeviceMTL*           device;
+        id<MTLCommandQueue>  queue;
+    };
+
+    struct CommandAllocatorMTL
+    {
+        DeviceMTL*  device; // Metal has no command pool; command buffers come from the queue
+        VriQueueType type;
+    };
+
+    struct CommandBufferMTL
+    {
+        DeviceMTL*                  device;
+        id<MTLCommandBuffer>        cmd;        // retained for the Begin..Submit span
+        id<MTLRenderCommandEncoder> renderEnc;  // valid between BeginRendering/EndRendering
+        id<MTLComputeCommandEncoder> computeEnc; // lazily opened for dispatch
+        id<MTLBlitCommandEncoder>   blitEnc;     // lazily opened for copies
+        // bound state, applied at draw/dispatch
+        const struct PipelineLayoutMTL* boundLayout;
+        const struct PipelineMTL*       boundPipeline;
+        id<MTLBuffer>               indexBuffer;
+        uint64_t                    indexOffset;
+        MTLIndexType                indexType;
+    };
+
+    struct BufferMTL
+    {
+        DeviceMTL*       device;
+        id<MTLBuffer>    buffer;      // nil until BindBufferMemory for the explicit (Undefined) path
+        uint64_t         size;
+        MTLResourceOptions options;   // remembered for the deferred (heap-bound) path
+        bool             owned;       // created via newBufferWithLength (release on destroy)
+    };
+
+    struct TextureMTL
+    {
+        DeviceMTL*       device;
+        id<MTLTexture>   texture;
+        MTLTextureDescriptor* descriptor; // retained for the deferred (heap-bound) path; else nil
+        VriFormat        format;
+        MTLPixelFormat   mtlFormat;
+        VriTextureType   type;
+        uint32_t         width;
+        uint32_t         height;
+        uint32_t         depth;
+        uint32_t         mipNum;
+        uint32_t         layerNum;
+        uint32_t         sampleNum;
+        uint32_t         texelSize;
+        bool             owned;
+    };
+
+    struct DescriptorMTL
+    {
+        enum class Kind { Buffer, Texture, Sampler } kind;
+        DeviceMTL*           device;
+        id<MTLBuffer>        buffer;       // Kind::Buffer
+        uint64_t             bufferOffset;
+        uint64_t             bufferRange;
+        id<MTLTexture>       texture;      // Kind::Texture (a view; released on destroy if owned)
+        bool                 ownsTexture;
+        id<MTLSamplerState>  sampler;      // Kind::Sampler
+    };
+
+    // One descriptor range resolved to its Metal argument-table slot(s).
+    struct BindingMTL
+    {
+        uint32_t            baseRegister;
+        VriDescriptorType   type;
+        uint32_t            mslIndex; // buffer / texture / sampler slot, per type
+        uint32_t            count;
+        VriShaderStageFlags stages;
+    };
+
+    struct PipelineLayoutMTL
+    {
+        DeviceMTL*                            device;
+        std::vector<std::vector<BindingMTL>>  setBindings; // [set][range]
+        bool                                  hasPush = false;
+        uint32_t                              pushBufferIndex = 0;
+        uint32_t                              pushSize = 0;
+        VriShaderStageFlags                   pushStages = 0;
+
+        const BindingMTL* Find(uint32_t set, uint32_t binding) const
+        {
+            if (set >= setBindings.size())
+                return nullptr;
+            for (const BindingMTL& b : setBindings[set])
+                if (b.baseRegister == binding)
+                    return &b;
+            return nullptr;
+        }
+    };
+
+    struct DescriptorSetMTL
+    {
+        DeviceMTL*               device;
+        const PipelineLayoutMTL* layout;
+        uint32_t                 setIndex;
+        struct Bound
+        {
+            uint32_t            mslIndex;
+            VriDescriptorType   type;
+            VriShaderStageFlags stages;
+            const DescriptorMTL* desc;
+        };
+        std::vector<Bound>       bound; // resolved on UpdateDescriptorRanges
+    };
+
+    struct DescriptorPoolMTL
+    {
+        DeviceMTL*                     device; // Metal has no pool; owns the allocated sets
+        std::vector<DescriptorSetMTL*> sets;
+    };
+
+    struct PipelineMTL
+    {
+        DeviceMTL*                  device;
+        bool                        isCompute;
+        id<MTLRenderPipelineState>  render;
+        id<MTLDepthStencilState>    depthStencil;
+        id<MTLComputePipelineState> compute;
+        MTLPrimitiveType            primType;
+        MTLCullMode                 cull;
+        MTLWinding                  winding;
+        MTLTriangleFillMode         fill;
+        bool                        depthClampEnable;
+        bool                        stencilTest;
+        uint32_t                    stencilReference;
+        MTLSize                     threadsPerThreadgroup; // compute local size (from SPIR-V)
+    };
+
+    struct FenceMTL
+    {
+        DeviceMTL*          device;
+        id<MTLSharedEvent>  event; // native timeline
+    };
+
+    struct MemoryMTL
+    {
+        DeviceMTL*        device;
+        id<MTLHeap>       heap;
+        uint64_t          size;
+        VriMemoryLocation location;
+    };
+
+    inline VriQueue*            ToHandle(QueueMTL* q)            { return reinterpret_cast<VriQueue*>(q); }
+    inline VriCommandAllocator* ToHandle(CommandAllocatorMTL* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
+    inline VriCommandBuffer*    ToHandle(CommandBufferMTL* c)    { return reinterpret_cast<VriCommandBuffer*>(c); }
+    inline VriBuffer*           ToHandle(BufferMTL* b)           { return reinterpret_cast<VriBuffer*>(b); }
+    inline VriTexture*          ToHandle(TextureMTL* t)          { return reinterpret_cast<VriTexture*>(t); }
+    inline VriDescriptor*       ToHandle(DescriptorMTL* d)       { return reinterpret_cast<VriDescriptor*>(d); }
+    inline VriPipelineLayout*   ToHandle(PipelineLayoutMTL* p)   { return reinterpret_cast<VriPipelineLayout*>(p); }
+    inline VriPipeline*         ToHandle(PipelineMTL* p)         { return reinterpret_cast<VriPipeline*>(p); }
+    inline VriFence*            ToHandle(FenceMTL* f)            { return reinterpret_cast<VriFence*>(f); }
+    inline VriDescriptorPool*   ToHandle(DescriptorPoolMTL* p)   { return reinterpret_cast<VriDescriptorPool*>(p); }
+    inline VriDescriptorSet*    ToHandle(DescriptorSetMTL* s)    { return reinterpret_cast<VriDescriptorSet*>(s); }
+    inline VriMemory*           ToHandle(MemoryMTL* m)           { return reinterpret_cast<VriMemory*>(m); }
+} // namespace vri::mtl

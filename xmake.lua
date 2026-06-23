@@ -73,6 +73,14 @@ option("vri_backend_d3d12")
     set_description("Enable the Direct3D 12 backend (Windows only)")
 option_end()
 
+option("vri_backend_metal")
+    -- default on for macOS: the native, first-class Apple backend (Auto picks it first),
+    -- ahead of the MoltenVK/Vulkan and OpenGL fallbacks. Ignored off-Apple.
+    set_default(is_plat("macosx"))
+    set_showmenu(true)
+    set_description("Enable the native Metal backend (macOS only)")
+option_end()
+
 option("vri_validation")
     set_default(is_mode("debug"))
     set_showmenu(true)

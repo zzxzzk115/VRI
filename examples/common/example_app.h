@@ -48,6 +48,7 @@ namespace vriex
         else if (env && (std::strcmp(env, "opengl") == 0 || std::strcmp(env, "gl") == 0)) api = VriGraphicsAPI_OpenGL;
         else if (env && (std::strcmp(env, "d3d12") == 0 || std::strcmp(env, "dx12") == 0)) api = VriGraphicsAPI_D3D12;
         else if (env && std::strcmp(env, "vulkan") == 0) api = VriGraphicsAPI_Vulkan;
+        else if (env && (std::strcmp(env, "metal") == 0 || std::strcmp(env, "mtl") == 0)) api = VriGraphicsAPI_Metal;
 #if defined(__EMSCRIPTEN__)
         const int b = EM_ASM_INT({
             var s = location.search;
@@ -190,7 +191,7 @@ namespace vriex
 #else
             const char* glName = "OpenGL";
 #endif
-            apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : ((api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES) ? glName : (api == VriGraphicsAPI_D3D12 ? "D3D12" : "Vulkan"));
+            apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : ((api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES) ? glName : (api == VriGraphicsAPI_D3D12 ? "D3D12" : (api == VriGraphicsAPI_Metal ? "Metal" : "Vulkan")));
 
             char title[64]; std::snprintf(title, sizeof(title), "VRI %s (%s)", name, apiName);
             VriWindowHandle wh{};

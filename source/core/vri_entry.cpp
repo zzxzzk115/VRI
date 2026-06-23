@@ -20,6 +20,11 @@
 #if defined(VRI_BACKEND_D3D12)
 #    include "device_d3d12.h"
 #endif
+#if defined(VRI_BACKEND_METAL)
+// ObjC-free factory decl: device_mtl.h imports <Metal/Metal.h>, which a plain
+// .cpp TU can't compile.
+#    include "factory_mtl.h"
+#endif
 
 using vri::core::DeviceBase;
 
@@ -60,6 +65,9 @@ namespace
 #endif
 #if defined(VRI_BACKEND_D3D12)
             case VriGraphicsAPI_D3D12: return vri::d3d12::CreateDevice(desc, result);
+#endif
+#if defined(VRI_BACKEND_METAL)
+            case VriGraphicsAPI_Metal: return vri::mtl::CreateDevice(desc, result);
 #endif
             default: return nullptr;
         }
