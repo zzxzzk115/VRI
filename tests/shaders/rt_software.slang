@@ -68,9 +68,12 @@ void computeMain(uint3 tid : SV_DispatchThreadID)
     outImage.GetDimensions(w, h);
     if (tid.x >= w || tid.y >= h) return;
 
-    // pixel -> NDC in [-1,1]; flip Y so row 0 is the top of the image (VRI top-left convention)
+    // pixel -> NDC in [-1,1]. The fullscreen display (show_tex) samples image row 0 at the bottom of
+    // the screen (uv.y=0 <-> clip y=-1), so a compute writer must put the scene BOTTOM at row 0 to
+    // come out upright: ndc.y rises with the row, same as uv.y. (A raster pass gets this from VRI's
+    // Y-flip; a compute writer has to match it here.)
     float2 uv = (float2(tid.xy) + 0.5) / float2(w, h);
-    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float2 ndc = float2(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0);
 
     float3 ro = g.eye.xyz;
     float3 rd = normalize(g.camFwd.xyz + ndc.x * g.camRight.xyz + ndc.y * g.camUp.xyz);

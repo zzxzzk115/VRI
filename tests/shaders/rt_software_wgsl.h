@@ -170,7 +170,7 @@ fn computeMain(@builtin(global_invocation_id) tid_0 : vec3<u32>)
     var _S10 : vec2<u32> = tid_0.xy;
     var uv_0 : vec2<f32> = (vec2<f32>(_S10) + vec2<f32>(0.5f)) / vec2<f32>(f32(w_0), f32(h_0));
     var ro_3 : vec3<f32> = g_0.eye_0.xyz;
-    var rd_3 : vec3<f32> = normalize(g_0.camFwd_0.xyz + vec3<f32>((uv_0.x * 2.0f - 1.0f)) * g_0.camRight_0.xyz + vec3<f32>((1.0f - uv_0.y * 2.0f)) * g_0.camUp_0.xyz);
+    var rd_3 : vec3<f32> = normalize(g_0.camFwd_0.xyz + vec3<f32>((uv_0.x * 2.0f - 1.0f)) * g_0.camRight_0.xyz + vec3<f32>((uv_0.y * 2.0f - 1.0f)) * g_0.camUp_0.xyz);
     var n_1 : i32 = i32(g_0.params_0.x);
     var ambient_0 : f32 = g_0.params_0.y;
     var bestT_0 : f32 = 1.00000001504746622e+30f;

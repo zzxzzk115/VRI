@@ -52,8 +52,10 @@ void computeMain(uint3 tid : SV_DispatchThreadID)
     outImage.GetDimensions(w, h);
     if (tid.x >= w || tid.y >= h) return;
 
+    // show_tex samples image row 0 at the screen bottom, so put the scene bottom at row 0 (ndc.y rises
+    // with the row) to display upright - matching what a raster pass gets from VRI's Y-flip.
     float2 uv = (float2(tid.xy) + 0.5) / float2(w, h);
-    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0); // top-left origin
+    float2 ndc = float2(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0);
 
     float3 ro = g.eye.xyz;
     float3 rd = normalize(g.camFwd.xyz + ndc.x * g.camRight.xyz + ndc.y * g.camUp.xyz);
