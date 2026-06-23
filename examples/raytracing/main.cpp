@@ -6,7 +6,8 @@
 //     compute shader (rt_software.slang) - no acceleration structure.
 // WebGL2 / OpenGL ES have no compute, so the example degrades EXPLICITLY (a message, no silent
 // no-op). The whole scene rides in one constant buffer (camera basis + light + <=64 triangles with
-// per-triangle normal & albedo), shared by both shader paths. Shared scaffolding in examples/common.
+// per-triangle normal & albedo), shared by both shader paths; the hardware path reads the hit
+// triangle's normal/albedo from it by committed primitive index, so the two paths match pixel-wise.
 #include "../common/example_app.h"
 
 #include <cmath>
@@ -15,19 +16,21 @@
 #include <cstring>
 #include <vector>
 
-#include "tests/shaders/rt_software_spv.h"  // g_rtSoftwareSpv  (compute; WebGPU via WGSL, GL via SPIR-V)
-#include "tests/shaders/rt_software_wgsl.h" // g_rtSoftwareWgsl
+#include "tests/shaders/rt_software_spv.h"  // g_rtSoftwareSpv  (compute; desktop GL via SPIR-V)
+#include "tests/shaders/rt_software_wgsl.h" // g_rtSoftwareWgsl (WebGPU)
 #include "tests/shaders/show_tex_spv.h"     // g_showTexSpv     (display: sample the result)
 #include "tests/shaders/show_tex_wgsl.h"    // g_showTexWgsl
 #include "tests/shaders/show_tex_dxbc.h"    // g_showTexDxbcVS / PS
 #if !defined(__EMSCRIPTEN__)
-#    include "tests/shaders/rt_software_dxbc.h" // g_rtSoftwareDxbcCS (D3D12 software fallback; unused once HW lands)
+#    include "tests/shaders/rt_software_dxbc.h" // g_rtSoftwareDxbcCS (D3D12 software fallback)
+#    include "tests/shaders/rt_rayquery_spv.h"  // g_rtRayquerySpv    (Vulkan hardware ray query)
+#    include "tests/shaders/rt_rayquery_dxil.h" // g_rtRayqueryDxilCS (D3D12 hardware ray query)
 #endif
 
 namespace
 {
     constexpr uint32_t kWidth = 640, kHeight = 480;
-    constexpr int kMaxTris = 64; // must match rt_software.slang
+    constexpr int kMaxTris = 64; // must match rt_software.slang / rt_rayquery.slang
 
     struct Tri { float v0[4]; float v1[4]; float v2[4]; float nrm[4]; float albedo[4]; };
     struct Scene
@@ -41,7 +44,6 @@ namespace
         Tri   tris[kMaxTris];
     };
 
-    // ---- tiny float3 helpers (the example builds the scene + camera basis on the CPU) ----
     struct V3 { float x, y, z; };
     V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
     float dot3(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
@@ -51,7 +53,6 @@ namespace
 
     std::vector<Tri> g_tris;
 
-    // Add a triangle; its normal is the geometric normal flipped to point away from `inside`.
     void addTri(V3 a, V3 b, V3 c, V3 albedo, V3 inside)
     {
         V3 n = norm3(cross3(b - a, c - a));
@@ -61,11 +62,7 @@ namespace
         set4(t.v0, a); set4(t.v1, b); set4(t.v2, c); set4(t.nrm, n); set4(t.albedo, albedo);
         g_tris.push_back(t);
     }
-    void addQuad(V3 a, V3 b, V3 c, V3 d, V3 albedo, V3 inside)
-    {
-        addTri(a, b, c, albedo, inside); addTri(a, c, d, albedo, inside);
-    }
-    // Axis-aligned cube of half-extent h about center; per-face outward normals.
+    void addQuad(V3 a, V3 b, V3 c, V3 d, V3 albedo, V3 inside) { addTri(a, b, c, albedo, inside); addTri(a, c, d, albedo, inside); }
     void addCube(V3 ctr, float h, V3 albedo)
     {
         const V3 p[8] = {
@@ -74,12 +71,9 @@ namespace
             {ctr.x - h, ctr.y - h, ctr.z + h}, {ctr.x + h, ctr.y - h, ctr.z + h},
             {ctr.x + h, ctr.y + h, ctr.z + h}, {ctr.x - h, ctr.y + h, ctr.z + h},
         };
-        addQuad(p[0], p[1], p[2], p[3], albedo, ctr); // -Z
-        addQuad(p[4], p[5], p[6], p[7], albedo, ctr); // +Z
-        addQuad(p[0], p[4], p[7], p[3], albedo, ctr); // -X
-        addQuad(p[1], p[5], p[6], p[2], albedo, ctr); // +X
-        addQuad(p[3], p[2], p[6], p[7], albedo, ctr); // +Y
-        addQuad(p[0], p[1], p[5], p[4], albedo, ctr); // -Y
+        addQuad(p[0], p[1], p[2], p[3], albedo, ctr); addQuad(p[4], p[5], p[6], p[7], albedo, ctr);
+        addQuad(p[0], p[4], p[7], p[3], albedo, ctr); addQuad(p[1], p[5], p[6], p[2], albedo, ctr);
+        addQuad(p[3], p[2], p[6], p[7], albedo, ctr); addQuad(p[0], p[1], p[5], p[4], albedo, ctr);
     }
     void buildScene()
     {
@@ -95,10 +89,18 @@ int main(int, char**)
     buildScene();
 
     static vriex::ExampleApp app;
+    app.requestFeatures = VriFeature_RayTracing | VriFeature_RayQuery; // granted only where supported (best-effort)
     app.Init("raytracing", kWidth, kHeight, /*hasDepth*/ false);
     app.SetClearColor(0.20f, 0.04f, 0.05f); // shows through only on the unsupported path
     VriCoreInterface& c = app.c;
-    const bool hasCompute = c.GetDeviceDesc(app.dev)->hasComputeShader != VRI_FALSE;
+    const VriDeviceDesc* dd = c.GetDeviceDesc(app.dev);
+    const bool hasCompute = dd->hasComputeShader != VRI_FALSE;
+
+    bool useHw = false;
+#if !defined(__EMSCRIPTEN__)
+    VriRayTracingInterface rt{};
+    useHw = dd->hasRayQuery != VRI_FALSE && vriGetInterface(app.dev, VRI_INTERFACE_RAYTRACING, sizeof(rt), &rt) == VriResult_Success;
+#endif
 
     static float orbitSpeed = 0.25f, lightAzimuth = 0.9f, lightElev = 0.95f, ambient = 0.18f;
     static float t = 0.0f;
@@ -132,8 +134,9 @@ int main(int, char**)
         for (size_t i = 0; i < g_tris.size() && i < kMaxTris; ++i) s.tris[i] = g_tris[i];
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Scene)), &s, sizeof(Scene)); app.c.UnmapBuffer(ustg);
     };
-    app.onGui = [hasCompute] {
+    app.onGui = [hasCompute, useHw] {
         if (!hasCompute) { ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "no compute on this backend"); ImGui::Text("ray tracing unsupported (WebGL2/GLES)"); return; }
+        ImGui::Text("%s", useHw ? "hardware ray query (BLAS/TLAS)" : "software (compute brute-force)");
         ImGui::SliderFloat("orbit speed", &orbitSpeed, 0.0f, 1.5f);
         ImGui::SliderFloat("light azimuth", &lightAzimuth, 0.0f, 6.28f);
         ImGui::SliderFloat("light elevation", &lightElev, 0.2f, 1.5f);
@@ -142,15 +145,12 @@ int main(int, char**)
 
     if (!hasCompute)
     {
-        // WebGL2 / OpenGL ES: no compute -> ray tracing genuinely cannot run here. Degrade explicitly:
-        // the cleared frame + the ImGui message say so; nothing is silently skipped.
+        // WebGL2 / OpenGL ES: no compute -> ray tracing genuinely cannot run. Degrade explicitly.
         std::printf("[raytracing] compute unavailable (WebGL2/GLES) - ray tracing unsupported on this backend\n"); std::fflush(stdout);
         app.SetupCapture();
         app.Run();
         return 0;
     }
-
-    std::printf("[raytracing] software ray tracer (compute brute-force over %zu triangles)\n", g_tris.size()); std::fflush(stdout);
 
     // storage image: written by the ray-tracing compute pass, sampled by the display pass
     VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM; td.width = kWidth; td.height = kHeight; td.depth = 1;
@@ -162,24 +162,117 @@ int main(int, char**)
     smp.addressModeU = VriAddressMode_ClampToEdge; smp.addressModeV = VriAddressMode_ClampToEdge; smp.addressModeW = VriAddressMode_ClampToEdge; smp.maxLod = 1.0f;
     VriDescriptor* sampler = nullptr; c.CreateSampler(app.dev, &smp, &sampler);
 
-    // compute layout: scene CB @0, storage image @1
-    VriDescriptorRangeDesc cr[2]{};
-    cr[0].baseRegister = 0; cr[0].descriptorNum = 1; cr[0].descriptorType = VriDescriptorType_ConstantBuffer; cr[0].shaderStages = VriShaderStage_Compute;
-    cr[1].baseRegister = 1; cr[1].descriptorNum = 1; cr[1].descriptorType = VriDescriptorType_StorageTexture; cr[1].shaderStages = VriShaderStage_Compute;
-    VriDescriptorSetDesc csd{}; csd.registerSpace = 0; csd.ranges = cr; csd.rangeNum = 2;
-    VriPipelineLayoutDesc cld{}; cld.descriptorSets = &csd; cld.descriptorSetNum = 1;
-    VriPipelineLayout* computeLayout = nullptr; c.CreatePipelineLayout(app.dev, &cld, &computeLayout);
-
-    VriComputePipelineDesc cpd{}; cpd.pipelineLayout = computeLayout;
-    cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
-#if !defined(__EMSCRIPTEN__)
-    if (app.useDxbc) { cpd.shader.bytecode = g_rtSoftwareDxbcCS; cpd.shader.bytecodeSize = sizeof(g_rtSoftwareDxbcCS); }
-    else
-#endif
-    { cpd.shader.bytecode = app.useWgsl ? static_cast<const void*>(g_rtSoftwareWgsl) : static_cast<const void*>(g_rtSoftwareSpv);
-      cpd.shader.bytecodeSize = app.useWgsl ? sizeof(g_rtSoftwareWgsl) : sizeof(g_rtSoftwareSpv); }
+    // the compute path's pipeline/layout/descriptor set - filled by the hardware or software branch
+    VriPipelineLayout* computeLayout = nullptr;
     VriPipeline* computePipeline = nullptr;
-    if (c.CreateComputePipeline(app.dev, &cpd, &computePipeline) != VriResult_Success) app.Fail("CreateComputePipeline failed");
+    VriDescriptorSet* computeSet = nullptr;
+    VriDescriptorPool* pool = nullptr;
+
+#if !defined(__EMSCRIPTEN__)
+    VriAccelerationStructure* blas = nullptr;
+    VriAccelerationStructure* tlas = nullptr;
+    VriBuffer* asVbuf = nullptr;
+    VriBuffer* asIbuf = nullptr;
+    VriDescriptor* tlasDescriptor = nullptr;
+#endif
+
+    if (useHw)
+    {
+#if !defined(__EMSCRIPTEN__)
+        std::printf("[raytracing] hardware ray query over a BLAS/TLAS (%zu triangles)\n", g_tris.size()); std::fflush(stdout);
+
+        // BLAS vertex buffer: the scene triangles' vertices, tightly packed (3 verts x 3 floats / tri),
+        // in scene order so the committed primitive index equals the triangle index used for shading.
+        std::vector<float> vtx; vtx.reserve(g_tris.size() * 9);
+        for (const Tri& tr : g_tris) { for (int k = 0; k < 3; ++k) vtx.push_back(tr.v0[k]);
+                                       for (int k = 0; k < 3; ++k) vtx.push_back(tr.v1[k]);
+                                       for (int k = 0; k < 3; ++k) vtx.push_back(tr.v2[k]); }
+        VriBufferDesc vbd2{}; vbd2.size = vtx.size() * sizeof(float); vbd2.usage = VriBufferUsage_AccelerationBuildInput; vbd2.memoryLocation = VriMemoryLocation_HostUpload;
+        c.CreateBuffer(app.dev, &vbd2, &asVbuf);
+        std::memcpy(c.MapBuffer(asVbuf, 0, vbd2.size), vtx.data(), vbd2.size); c.UnmapBuffer(asVbuf);
+
+        VriAsGeometryDesc blasGeom{}; blasGeom.type = VriAsGeometryType_Triangles; blasGeom.flags = VriAsGeometry_Opaque;
+        blasGeom.triangles.vertexBuffer = asVbuf; blasGeom.triangles.vertexCount = uint32_t(g_tris.size()) * 3;
+        blasGeom.triangles.vertexStride = 3 * sizeof(float); blasGeom.triangles.vertexFormat = VriFormat_RGB32_SFLOAT;
+        VriAccelerationStructureDesc blasDesc{}; blasDesc.type = VriAccelerationStructureType_BottomLevel; blasDesc.flags = VriAccelerationStructureBuild_PreferFastTrace;
+        blasDesc.geometryCount = 1; blasDesc.geometries = &blasGeom;
+        if (rt.CreateAccelerationStructure(app.dev, &blasDesc, &blas) != VriResult_Success) app.Fail("CreateAccelerationStructure (BLAS) failed");
+
+        // one instance of the BLAS, identity transform (so world == local == the CB's stored normals)
+        struct AsInstance { float transform[12]; uint32_t instanceIdAndMask; uint32_t sbtOffsetAndFlags; uint64_t blasReference; };
+        AsInstance inst{}; inst.transform[0] = 1.0f; inst.transform[5] = 1.0f; inst.transform[10] = 1.0f;
+        inst.instanceIdAndMask = 0xFFu << 24; inst.sbtOffsetAndFlags = 0x1u << 24; // cull-disable
+        inst.blasReference = rt.GetAccelerationStructureDeviceAddress(blas);
+        VriBufferDesc ibd2{}; ibd2.size = sizeof(AsInstance); ibd2.usage = VriBufferUsage_AccelerationBuildInput; ibd2.memoryLocation = VriMemoryLocation_HostUpload;
+        c.CreateBuffer(app.dev, &ibd2, &asIbuf);
+        std::memcpy(c.MapBuffer(asIbuf, 0, sizeof(inst)), &inst, sizeof(inst)); c.UnmapBuffer(asIbuf);
+
+        VriAsGeometryDesc tlasGeom{}; tlasGeom.type = VriAsGeometryType_Instances; tlasGeom.instances.instanceBuffer = asIbuf; tlasGeom.instances.instanceCount = 1;
+        VriAccelerationStructureDesc tlasDesc{}; tlasDesc.type = VriAccelerationStructureType_TopLevel; tlasDesc.flags = VriAccelerationStructureBuild_PreferFastTrace;
+        tlasDesc.geometryCount = 1; tlasDesc.geometries = &tlasGeom;
+        if (rt.CreateAccelerationStructure(app.dev, &tlasDesc, &tlas) != VriResult_Success) app.Fail("CreateAccelerationStructure (TLAS) failed");
+
+        // build both once (the scene is static)
+        c.BeginCommandBuffer(app.cmd);
+        VriBuildAccelerationStructureDesc bb{}; bb.dst = blas; bb.geometry = &blasDesc; rt.CmdBuildAccelerationStructure(app.cmd, &bb);
+        VriBuildAccelerationStructureDesc tb{}; tb.dst = tlas; tb.geometry = &tlasDesc; rt.CmdBuildAccelerationStructure(app.cmd, &tb);
+        c.EndCommandBuffer(app.cmd);
+        VriFenceSubmitDesc sig{}; sig.fence = app.fence; sig.value = 1;
+        VriQueueSubmitDesc sub{}; sub.commandBuffers = &app.cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1;
+        c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1);
+
+        if (rt.CreateAccelerationStructureDescriptor(app.dev, tlas, &tlasDescriptor) != VriResult_Success) app.Fail("CreateAccelerationStructureDescriptor failed");
+
+        // compute layout: scene CB @0 (root CBV at b0), TLAS @1 (SRV t0), storage image @2 (UAV u0)
+        VriDescriptorRangeDesc cr[3]{};
+        cr[0].baseRegister = 0; cr[0].descriptorNum = 1; cr[0].descriptorType = VriDescriptorType_ConstantBuffer; cr[0].shaderStages = VriShaderStage_Compute;
+        cr[1].baseRegister = 1; cr[1].descriptorNum = 1; cr[1].descriptorType = VriDescriptorType_AccelerationStructure; cr[1].shaderStages = VriShaderStage_Compute;
+        cr[2].baseRegister = 2; cr[2].descriptorNum = 1; cr[2].descriptorType = VriDescriptorType_StorageTexture; cr[2].shaderStages = VriShaderStage_Compute;
+        VriDescriptorSetDesc csd{}; csd.registerSpace = 0; csd.ranges = cr; csd.rangeNum = 3;
+        VriPipelineLayoutDesc cld{}; cld.descriptorSets = &csd; cld.descriptorSetNum = 1;
+        c.CreatePipelineLayout(app.dev, &cld, &computeLayout);
+
+        VriComputePipelineDesc cpd{}; cpd.pipelineLayout = computeLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
+        if (app.useDxbc) { cpd.shader.bytecode = g_rtRayqueryDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtRayqueryDxilCS); }
+        else { cpd.shader.bytecode = g_rtRayquerySpv; cpd.shader.bytecodeSize = sizeof(g_rtRayquerySpv); }
+        if (c.CreateComputePipeline(app.dev, &cpd, &computePipeline) != VriResult_Success) app.Fail("CreateComputePipeline (rayquery) failed");
+
+        VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.accelerationStructureMaxNum = 1; pdsc.storageTextureMaxNum = 1; pdsc.constantBufferMaxNum = 1; pdsc.textureMaxNum = 1; pdsc.samplerMaxNum = 1;
+        c.CreateDescriptorPool(app.dev, &pdsc, &pool);
+        c.AllocateDescriptorSets(pool, computeLayout, 0, &computeSet, 1);
+        const VriDescriptor* a0[1] = {uboView}; const VriDescriptor* a1[1] = {tlasDescriptor}; const VriDescriptor* a2[1] = {imgView};
+        VriDescriptorRangeUpdateDesc u[3]{}; u[0].descriptors = a0; u[0].descriptorNum = 1; u[1].descriptors = a1; u[1].descriptorNum = 1; u[2].descriptors = a2; u[2].descriptorNum = 1;
+        c.UpdateDescriptorRanges(computeSet, 0, 3, u);
+#endif
+    }
+    else
+    {
+        std::printf("[raytracing] software ray tracer (compute brute-force over %zu triangles)\n", g_tris.size()); std::fflush(stdout);
+
+        // compute layout: scene CB @0, storage image @1
+        VriDescriptorRangeDesc cr[2]{};
+        cr[0].baseRegister = 0; cr[0].descriptorNum = 1; cr[0].descriptorType = VriDescriptorType_ConstantBuffer; cr[0].shaderStages = VriShaderStage_Compute;
+        cr[1].baseRegister = 1; cr[1].descriptorNum = 1; cr[1].descriptorType = VriDescriptorType_StorageTexture; cr[1].shaderStages = VriShaderStage_Compute;
+        VriDescriptorSetDesc csd{}; csd.registerSpace = 0; csd.ranges = cr; csd.rangeNum = 2;
+        VriPipelineLayoutDesc cld{}; cld.descriptorSets = &csd; cld.descriptorSetNum = 1;
+        c.CreatePipelineLayout(app.dev, &cld, &computeLayout);
+
+        VriComputePipelineDesc cpd{}; cpd.pipelineLayout = computeLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
+#if !defined(__EMSCRIPTEN__)
+        if (app.useDxbc) { cpd.shader.bytecode = g_rtSoftwareDxbcCS; cpd.shader.bytecodeSize = sizeof(g_rtSoftwareDxbcCS); }
+        else
+#endif
+        { cpd.shader.bytecode = app.useWgsl ? static_cast<const void*>(g_rtSoftwareWgsl) : static_cast<const void*>(g_rtSoftwareSpv);
+          cpd.shader.bytecodeSize = app.useWgsl ? sizeof(g_rtSoftwareWgsl) : sizeof(g_rtSoftwareSpv); }
+        if (c.CreateComputePipeline(app.dev, &cpd, &computePipeline) != VriResult_Success) app.Fail("CreateComputePipeline (software) failed");
+
+        VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.constantBufferMaxNum = 1; pdsc.storageTextureMaxNum = 1; pdsc.textureMaxNum = 1; pdsc.samplerMaxNum = 1;
+        c.CreateDescriptorPool(app.dev, &pdsc, &pool);
+        c.AllocateDescriptorSets(pool, computeLayout, 0, &computeSet, 1);
+        const VriDescriptor* a0[1] = {uboView}; const VriDescriptor* a1[1] = {imgView};
+        VriDescriptorRangeUpdateDesc u[2]{}; u[0].descriptors = a0; u[0].descriptorNum = 1; u[1].descriptors = a1; u[1].descriptorNum = 1;
+        c.UpdateDescriptorRanges(computeSet, 0, 2, u);
+    }
 
     // display layout: sampled texture @0, sampler @1
     VriDescriptorRangeDesc dr[2]{};
@@ -204,12 +297,7 @@ int main(int, char**)
     VriPipeline* displayPipeline = nullptr;
     if (c.CreateGraphicsPipeline(app.dev, &pd, &displayPipeline) != VriResult_Success) app.Fail("display CreateGraphicsPipeline failed");
 
-    VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.constantBufferMaxNum = 1; pdsc.storageTextureMaxNum = 1; pdsc.textureMaxNum = 1; pdsc.samplerMaxNum = 1;
-    VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(app.dev, &pdsc, &pool);
-    VriDescriptorSet* computeSet = nullptr; c.AllocateDescriptorSets(pool, computeLayout, 0, &computeSet, 1);
     VriDescriptorSet* displaySet = nullptr; c.AllocateDescriptorSets(pool, displayLayout, 0, &displaySet, 1);
-    { const VriDescriptor* a[1] = {uboView}; const VriDescriptor* b[1] = {imgView};
-      VriDescriptorRangeUpdateDesc u[2]{}; u[0].descriptors = a; u[0].descriptorNum = 1; u[1].descriptors = b; u[1].descriptorNum = 1; c.UpdateDescriptorRanges(computeSet, 0, 2, u); }
     { const VriDescriptor* a[1] = {imgView}; const VriDescriptor* b[1] = {sampler};
       VriDescriptorRangeUpdateDesc u[2]{}; u[0].descriptors = a; u[0].descriptorNum = 1; u[1].descriptors = b; u[1].descriptorNum = 1; c.UpdateDescriptorRanges(displaySet, 0, 2, u); }
 
@@ -248,6 +336,12 @@ int main(int, char**)
     c.DestroyDescriptorPool(pool);
     c.DestroyPipeline(displayPipeline); c.DestroyPipelineLayout(displayLayout);
     c.DestroyPipeline(computePipeline); c.DestroyPipelineLayout(computeLayout);
+    if (useHw)
+    {
+        c.DestroyDescriptor(tlasDescriptor);
+        rt.DestroyAccelerationStructure(tlas); rt.DestroyAccelerationStructure(blas);
+        c.DestroyBuffer(asIbuf); c.DestroyBuffer(asVbuf);
+    }
     c.DestroyDescriptor(sampler); c.DestroyDescriptor(imgView); c.DestroyTexture(img);
     c.DestroyDescriptor(uboView); c.DestroyBuffer(ustg); c.DestroyBuffer(ubo);
     app.Shutdown();
