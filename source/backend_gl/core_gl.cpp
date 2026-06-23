@@ -446,11 +446,12 @@ namespace vri::gl
         }
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
-#if !defined(__EMSCRIPTEN__)
-        // GL 4.1 (macOS) lacks immutable storage (glTexStorage*, GL 4.2+). Emulate it with
-        // mutable glTexImage* over every mip level (NULL data just allocates). The texture
-        // must already be bound to `target`. is3D covers 2D-array (depth = layer count, which
-        // does not shrink with mips); isCube allocates all 6 faces per level.
+        // GL 4.1 (macOS) lacks immutable storage (glTexStorage*, GL 4.2+; always present on
+        // GLES3/WebGL2). Emulate it with mutable glTexImage* over every mip level (NULL data
+        // just allocates). The texture must already be bound to `target`. is3D covers 2D-array
+        // (depth = layer count, which does not shrink with mips); isCube allocates all 6 faces.
+        // Uses only GLES3-safe entry points, so it compiles for the WebGL2 build too (where it
+        // is never reached - textureStorage is always available there).
         void TexImageAllocate(GLenum target, const GLFormat& gf, GLsizei mips, GLsizei w, GLsizei h,
                               GLsizei depth, bool is3D, bool isCube)
         {
@@ -468,7 +469,6 @@ namespace vri::gl
             }
             glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, mips - 1); // mip-complete (immutable does this implicitly)
         }
-#endif
 
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
@@ -481,9 +481,10 @@ namespace vri::gl
             const bool isCube = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
             const bool isArray = !ms && !isCube && desc->type != VriTextureType_3D && layers > 1; // 2D array texture
 
+            // Immutable storage: GL 4.2+ and always present on GLES3/WebGL2; false only on macOS GL 4.1.
+            const bool texStorage = Dev(device)->Features().textureStorage;
 #if !defined(__EMSCRIPTEN__) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
             const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
-            const bool texStorage = Dev(device)->Features().textureStorage; // GL 4.2+; false on macOS GL 4.1
 #endif
             GLuint id = 0;
             GLenum target = GL_TEXTURE_2D;
