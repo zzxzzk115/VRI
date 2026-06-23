@@ -328,7 +328,14 @@ namespace vri::d3d12
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
                     c->list->ClearRenderTargetView(c->rtvs[i], a->colors[i].clearValue.color.f32, 0, nullptr);
             if (hasDepth && a->depth->loadOp == VriAttachmentLoadOp_Clear)
-                c->list->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, a->depth->clearValue.depthStencil.depth, static_cast<UINT8>(a->depth->clearValue.depthStencil.stencil), 0, nullptr);
+            {
+                // Clear stencil too for combined depth+stencil targets (else the stencil plane keeps
+                // stale values across frames - a stencil test against a clear value then misbehaves).
+                const DXGI_FORMAT df = Desc(a->depth->view)->texture->dsvFormat;
+                D3D12_CLEAR_FLAGS flags = D3D12_CLEAR_FLAG_DEPTH;
+                if (df == DXGI_FORMAT_D24_UNORM_S8_UINT || df == DXGI_FORMAT_D32_FLOAT_S8X24_UINT) flags |= D3D12_CLEAR_FLAG_STENCIL;
+                c->list->ClearDepthStencilView(dsv, flags, a->depth->clearValue.depthStencil.depth, static_cast<UINT8>(a->depth->clearValue.depthStencil.stencil), 0, nullptr);
+            }
         }
         void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
         {
@@ -594,6 +601,12 @@ namespace vri::d3d12
             ds.DepthEnable = desc->depthStencil.depthTest ? TRUE : FALSE;
             ds.DepthWriteMask = desc->depthStencil.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
             ds.DepthFunc = ToD3DCompare(desc->depthStencil.depthCompareOp);
+            // D3D12 has one read/write mask for both faces (VRI carries per-face); use the front's.
+            ds.StencilEnable = desc->depthStencil.stencilTest ? TRUE : FALSE;
+            ds.StencilReadMask = static_cast<UINT8>(desc->depthStencil.front.compareMask);
+            ds.StencilWriteMask = static_cast<UINT8>(desc->depthStencil.front.writeMask);
+            ds.FrontFace = ToD3DStencilFace(desc->depthStencil.front);
+            ds.BackFace = ToD3DStencilFace(desc->depthStencil.back);
 
             D3D12_RT_FORMAT_ARRAY rtv = {};
             rtv.NumRenderTargets = desc->outputMerger.colorNum <= 8 ? desc->outputMerger.colorNum : 8;
@@ -629,6 +642,7 @@ namespace vri::d3d12
 
             PipelineD3D12* p = new PipelineD3D12{};
             p->device = d; p->rootSig = layout->rootSig.Get(); p->isMesh = true;
+            p->stencilEnabled = desc->depthStencil.stencilTest != VRI_FALSE; p->stencilRef = desc->depthStencil.front.reference;
             if (FAILED(dev2->CreatePipelineState(&sdesc, IID_PPV_ARGS(&p->pso))))
             { delete p; d->ReportError("CreatePipelineState (mesh) failed"); return VriResult_Failure; }
             *out = ToHandle(p);
@@ -726,6 +740,13 @@ namespace vri::d3d12
             pd.DepthStencilState.DepthEnable = desc->depthStencil.depthTest ? TRUE : FALSE;
             pd.DepthStencilState.DepthWriteMask = desc->depthStencil.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
             pd.DepthStencilState.DepthFunc = ToD3DCompare(desc->depthStencil.depthCompareOp);
+            // D3D12 has one read/write mask for both faces (VRI carries per-face); use the front's.
+            // The stencil reference is dynamic state in D3D12 (OMSetStencilRef), set when the pipeline binds.
+            pd.DepthStencilState.StencilEnable = desc->depthStencil.stencilTest ? TRUE : FALSE;
+            pd.DepthStencilState.StencilReadMask = static_cast<UINT8>(desc->depthStencil.front.compareMask);
+            pd.DepthStencilState.StencilWriteMask = static_cast<UINT8>(desc->depthStencil.front.writeMask);
+            pd.DepthStencilState.FrontFace = ToD3DStencilFace(desc->depthStencil.front);
+            pd.DepthStencilState.BackFace = ToD3DStencilFace(desc->depthStencil.back);
 
             pd.SampleMask = UINT_MAX;
             pd.PrimitiveTopologyType = ToD3DTopologyType(desc->inputAssembly.topology);
@@ -737,6 +758,7 @@ namespace vri::d3d12
             PipelineD3D12* p = new PipelineD3D12{};
             p->device = d; p->rootSig = layout->rootSig.Get(); p->vbStrides = std::move(vbStrides);
             p->topology = ToD3DTopology(desc->inputAssembly.topology, desc->tessellation.patchControlPoints);
+            p->stencilEnabled = desc->depthStencil.stencilTest != VRI_FALSE; p->stencilRef = desc->depthStencil.front.reference;
             if (FAILED(d->Device()->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&p->pso))))
             { delete p; d->ReportError("CreateGraphicsPipelineState failed"); return VriResult_Failure; }
             *out = ToHandle(p);
@@ -894,6 +916,8 @@ namespace vri::d3d12
             // Set the root signature here too so a no-descriptor pipeline works without CmdSetPipelineLayout.
             if (p->isCompute) { c->list->SetComputeRootSignature(p->rootSig); }
             else { c->list->SetGraphicsRootSignature(p->rootSig); if (!p->isMesh) c->list->IASetPrimitiveTopology(p->topology); }
+            // The stencil reference is dynamic state in D3D12 (not in the PSO); apply the pipeline's.
+            if (p->stencilEnabled) c->list->OMSetStencilRef(p->stencilRef);
         }
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
         {

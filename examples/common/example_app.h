@@ -132,6 +132,11 @@ namespace vriex
 
         [[noreturn]] void Fail(const char* msg) { std::fprintf(stderr, "[%s] %s\n", name, msg); std::exit(1); }
 
+        // The depth target's aspect: depth, plus stencil when depthFormat is a combined format (so an
+        // example can ask for a stencil buffer just by setting a D*S* depthFormat before Init).
+        static bool DepthFormatHasStencil(VriFormat f) { return f == VriFormat_D24_UNORM_S8_UINT || f == VriFormat_D32_SFLOAT_S8_UINT || f == VriFormat_S8_UINT; }
+        VriImageAspectFlags DepthAspect() const { return VriImageAspect_Depth | (DepthFormatHasStencil(depthFormat) ? VriImageAspect_Stencil : 0u); }
+
         void SetClearColor(float r, float g, float b, float a = 1.0f) { clearColor[0] = r; clearColor[1] = g; clearColor[2] = b; clearColor[3] = a; }
 
         // Bring up backend + window + device + swapchain (+ depth). The example creates its
@@ -187,7 +192,7 @@ namespace vriex
                 VriTextureDesc dtd{}; dtd.type = VriTextureType_2D; dtd.format = depthFormat; dtd.width = width; dtd.height = height; dtd.depth = 1;
                 dtd.mipNum = 1; dtd.layerNum = 1; dtd.sampleNum = 1; dtd.usage = VriTextureUsage_DepthStencilAttachment; dtd.memoryLocation = VriMemoryLocation_Device;
                 if (c.CreateTexture(dev, &dtd, &depth) != VriResult_Success) Fail("depth CreateTexture failed");
-                VriTextureViewDesc dvd{}; dvd.texture = depth; dvd.viewType = VriTextureViewType_2D; dvd.format = VriFormat_Unknown; dvd.aspect = VriImageAspect_Depth;
+                VriTextureViewDesc dvd{}; dvd.texture = depth; dvd.viewType = VriTextureViewType_2D; dvd.format = VriFormat_Unknown; dvd.aspect = DepthAspect();
                 if (c.CreateTextureView(dev, &dvd, &depthView) != VriResult_Success) Fail("depth view failed");
             }
 
@@ -348,7 +353,7 @@ namespace vriex
             if (hasDepth)
             {
                 bgr[1].texture = depth; bgr[1].before.layout = depthInit ? VriLayout_DepthStencilAttachment : VriLayout_Undefined; bgr[1].before.stages = VriPipelineStage_None;
-                bgr[1].after.access = VriAccess_DepthStencilAttachmentWrite; bgr[1].after.layout = VriLayout_DepthStencilAttachment; bgr[1].after.stages = VriPipelineStage_EarlyFragmentTests; bgr[1].aspect = VriImageAspect_Depth;
+                bgr[1].after.access = VriAccess_DepthStencilAttachmentWrite; bgr[1].after.layout = VriLayout_DepthStencilAttachment; bgr[1].after.stages = VriPipelineStage_EarlyFragmentTests; bgr[1].aspect = DepthAspect();
                 bn = 2;
             }
             VriBarrierGroupDesc g{}; g.textures = bgr; g.textureNum = bn; c.CmdBarrier(cmd, &g);

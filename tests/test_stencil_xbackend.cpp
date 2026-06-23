@@ -5,7 +5,8 @@
 //  - center (inside both): green  (stencil==1 -> pass 2 draws)
 //  - off-center (inside large only): black (stencil==0 -> pass 2 rejected)
 // This exercises front/back stencil ops, compare/write masks, and the reference -
-// all of which the backends previously ignored. Runs on Vulkan, WebGPU, OpenGL.
+// all of which the backends previously ignored. Runs on Vulkan, D3D12, WebGPU, OpenGL
+// (D3D12 stencil: PSO stencil state + dynamic OMSetStencilRef + a stencil-plane clear).
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -15,6 +16,7 @@
 
 #include "shaders/triangle_vbuf_spv.h"  // g_triangleVbufSpv  (position.xyz + color)
 #include "shaders/triangle_vbuf_wgsl.h" // g_triangleVbufWgsl
+#include "shaders/triangle_vbuf_dxbc.h" // g_triangleVbufDxbcVS / PS  (D3D12)
 
 namespace
 {
@@ -23,11 +25,11 @@ namespace
 
     // Pass 1 writes stencil=1; pass 2 tests stencil==1. front==back (cullMode None).
     VriPipeline* MakePipeline(const VriCoreInterface& c, VriDevice* dev, VriPipelineLayout* layout,
-                              const void* shader, size_t shaderSize, bool write)
+                              const void* vs, size_t vsSize, const void* ps, size_t psSize, bool write)
     {
         VriShaderDesc sh[2]{};
-        sh[0].stage = VriShaderStage_Vertex;   sh[0].bytecode = shader; sh[0].bytecodeSize = shaderSize; sh[0].entryPointName = "vertexMain";
-        sh[1].stage = VriShaderStage_Fragment; sh[1].bytecode = shader; sh[1].bytecodeSize = shaderSize; sh[1].entryPointName = "fragmentMain";
+        sh[0].stage = VriShaderStage_Vertex;   sh[0].bytecode = vs; sh[0].bytecodeSize = vsSize; sh[0].entryPointName = "vertexMain";
+        sh[1].stage = VriShaderStage_Fragment; sh[1].bytecode = ps; sh[1].bytecodeSize = psSize; sh[1].entryPointName = "fragmentMain";
         VriVertexStreamDesc stream{}; stream.stride = 6 * sizeof(float); stream.bindingSlot = 0; stream.stepRate = VriVertexStepRate_PerVertex;
         VriVertexAttributeDesc attrs[2]{};
         attrs[0].format = VriFormat_RGB32_SFLOAT; attrs[0].offset = 0;                 attrs[0].streamIndex = 0;
@@ -56,7 +58,7 @@ namespace
         return p;
     }
 
-    bool RunStencil(VriGraphicsAPI api, const void* shader, size_t shaderSize, bool& ran)
+    bool RunStencil(VriGraphicsAPI api, const void* vs, size_t vsSize, const void* ps, size_t psSize, bool& ran)
     {
         ran = false;
         VriDeviceCreationDesc dc{};
@@ -117,8 +119,8 @@ namespace
 
         VriPipelineLayoutDesc ld{}; VriPipelineLayout* layout = nullptr;
         REQUIRE(c.CreatePipelineLayout(dev, &ld, &layout) == VriResult_Success);
-        VriPipeline* writePipe = MakePipeline(c, dev, layout, shader, shaderSize, true);
-        VriPipeline* testPipe = MakePipeline(c, dev, layout, shader, shaderSize, false);
+        VriPipeline* writePipe = MakePipeline(c, dev, layout, vs, vsSize, ps, psSize, true);
+        VriPipeline* testPipe = MakePipeline(c, dev, layout, vs, vsSize, ps, psSize, false);
 
         VriCommandAllocator* alloc = nullptr; REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc) == VriResult_Success);
         VriCommandBuffer* cmd = nullptr; REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
@@ -128,6 +130,17 @@ namespace
         VriBufferCopyDesc cp{}; cp.size = 18 * sizeof(float);
         c.CmdCopyBuffer(cmd, vbSmall, stSmall, &cp);
         c.CmdCopyBuffer(cmd, vbLarge, stLarge, &cp);
+        {
+            // copy-dest -> vertex buffer (D3D12 validates this transition; the others are lenient)
+            VriBufferBarrierDesc bb[2]{};
+            for (int i = 0; i < 2; ++i)
+            {
+                bb[i].buffer = i == 0 ? vbSmall : vbLarge;
+                bb[i].before.access = VriAccess_CopyDestinationWrite; bb[i].before.stages = VriPipelineStage_Transfer;
+                bb[i].after.access = VriAccess_VertexBufferRead; bb[i].after.stages = VriPipelineStage_VertexInput;
+            }
+            VriBarrierGroupDesc gb{}; gb.buffers = bb; gb.bufferNum = 2; c.CmdBarrier(cmd, &gb);
+        }
         {
             VriTextureBarrierDesc tb[2]{};
             tb[0].texture = color; tb[0].before.layout = VriLayout_Undefined; tb[0].before.stages = VriPipelineStage_None;
@@ -187,12 +200,15 @@ namespace
 TEST_CASE("stencil parity: write stencil then test (center green, off-center stencil-rejected)")
 {
     bool ran = false;
-    const bool vk = RunStencil(VriGraphicsAPI_Vulkan, g_triangleVbufSpv, sizeof(g_triangleVbufSpv), ran);
+    const bool vk = RunStencil(VriGraphicsAPI_Vulkan, g_triangleVbufSpv, sizeof(g_triangleVbufSpv), g_triangleVbufSpv, sizeof(g_triangleVbufSpv), ran);
     if (ran) { CHECK(vk); } else { MESSAGE("Vulkan unavailable - skipped"); }
 
-    const bool wgpu = RunStencil(VriGraphicsAPI_WebGPU, g_triangleVbufWgsl, sizeof(g_triangleVbufWgsl), ran);
+    const bool d3d12 = RunStencil(VriGraphicsAPI_D3D12, g_triangleVbufDxbcVS, sizeof(g_triangleVbufDxbcVS), g_triangleVbufDxbcPS, sizeof(g_triangleVbufDxbcPS), ran);
+    if (ran) { CHECK(d3d12); } else { MESSAGE("D3D12 unavailable - skipped"); }
+
+    const bool wgpu = RunStencil(VriGraphicsAPI_WebGPU, g_triangleVbufWgsl, sizeof(g_triangleVbufWgsl), g_triangleVbufWgsl, sizeof(g_triangleVbufWgsl), ran);
     if (ran) { CHECK(wgpu); } else { MESSAGE("WebGPU unavailable - skipped"); }
 
-    const bool gl = RunStencil(VriGraphicsAPI_OpenGL, g_triangleVbufSpv, sizeof(g_triangleVbufSpv), ran);
+    const bool gl = RunStencil(VriGraphicsAPI_OpenGL, g_triangleVbufSpv, sizeof(g_triangleVbufSpv), g_triangleVbufSpv, sizeof(g_triangleVbufSpv), ran);
     if (ran) { CHECK(gl); } else { MESSAGE("OpenGL unavailable - skipped"); }
 }

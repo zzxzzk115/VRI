@@ -93,6 +93,31 @@ namespace vri::d3d12
         }
     }
 
+    inline D3D12_STENCIL_OP ToD3DStencilOp(VriStencilOp op)
+    {
+        switch (op)
+        {
+            case VriStencilOp_Zero:              return D3D12_STENCIL_OP_ZERO;
+            case VriStencilOp_Replace:           return D3D12_STENCIL_OP_REPLACE;
+            case VriStencilOp_IncrementAndClamp: return D3D12_STENCIL_OP_INCR_SAT;
+            case VriStencilOp_DecrementAndClamp: return D3D12_STENCIL_OP_DECR_SAT;
+            case VriStencilOp_Invert:            return D3D12_STENCIL_OP_INVERT;
+            case VriStencilOp_IncrementAndWrap:  return D3D12_STENCIL_OP_INCR;
+            case VriStencilOp_DecrementAndWrap:  return D3D12_STENCIL_OP_DECR;
+            default:                             return D3D12_STENCIL_OP_KEEP;
+        }
+    }
+
+    inline D3D12_DEPTH_STENCILOP_DESC ToD3DStencilFace(const VriStencilOpDesc& f)
+    {
+        D3D12_DEPTH_STENCILOP_DESC d = {};
+        d.StencilFailOp = ToD3DStencilOp(f.failOp);
+        d.StencilDepthFailOp = ToD3DStencilOp(f.depthFailOp);
+        d.StencilPassOp = ToD3DStencilOp(f.passOp);
+        d.StencilFunc = ToD3DCompare(f.compareOp);
+        return d;
+    }
+
     inline D3D12_BLEND ToD3DBlend(VriBlendFactor f)
     {
         switch (f)

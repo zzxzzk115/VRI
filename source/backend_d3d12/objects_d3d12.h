@@ -199,6 +199,8 @@ namespace vri::d3d12
         bool                            isCompute = false;
         bool                            isMesh = false; // mesh-shader pipeline (no IA topology)
         bool                            isRt = false;   // ray-tracing state object (DXR)
+        bool                            stencilEnabled = false; // OMSetStencilRef on bind
+        uint32_t                        stencilRef = 0;         // VRI carries the ref in stencil state; D3D12 sets it dynamically
         ComPtr<ID3D12StateObject>           stateObject; // DXR pipeline
         ComPtr<ID3D12StateObjectProperties> stateProps;  // for GetShaderIdentifier
         std::vector<std::wstring>           groupNames;  // per VRI group -> export/hit-group name
