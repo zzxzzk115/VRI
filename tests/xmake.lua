@@ -69,6 +69,11 @@ target("vri-tests")
         add_files("test_raytracing_d3d12.cpp")-- DXR ray tracing (state object + AS + DispatchRays)
         add_files("test_omm_d3d12.cpp")       -- opacity micromap: explicit "unsupported" contract
     end
+    if has_config("vri_backend_metal") then
+        add_files("test_meshshader_mtl.cpp")  -- mesh shaders (MTLMeshRenderPipeline, MSL via SPIRV-Cross)
+        add_files("test_vrs_mtl.cpp")         -- variable rate shading: explicit "unsupported" contract
+        add_files("test_omm_mtl.cpp")         -- opacity micromap: explicit "unsupported" contract
+    end
 
     add_tests("default")
 target_end()

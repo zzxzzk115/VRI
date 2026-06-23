@@ -19,9 +19,11 @@ TEST_CASE("vriCreateDevice rejects null arguments")
 TEST_CASE("unsupported backend -> Unsupported, no leak via RAII")
 {
     VriDeviceCreationDesc desc{};
-    // Metal is never compiled in on this platform, so it must report Unsupported
-    // regardless of which backends are enabled.
-    desc.graphicsAPI = VriGraphicsAPI_Metal;
+    // D3D11 has no backend implementation anywhere (the option only sets a define;
+    // there is no source/backend_d3d11 and no dispatch case), so it always reports
+    // Unsupported regardless of platform or which backends are enabled. (Metal can no
+    // longer serve as the "never compiled" probe now that the native backend exists.)
+    desc.graphicsAPI = VriGraphicsAPI_D3D11;
     desc.bestEffort  = VRI_TRUE;
 
     auto device = vri::Device::create(desc);

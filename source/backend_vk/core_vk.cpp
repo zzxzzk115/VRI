@@ -312,16 +312,21 @@ namespace vri::vk
             bci.usage = ToVkBufferUsage(desc->usage);
             bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            VkDeviceBufferMemoryRequirements q = {VK_STRUCTURE_TYPE_DEVICE_BUFFER_MEMORY_REQUIREMENTS};
-            q.pCreateInfo = &bci;
-            VkMemoryRequirements2 mr = {VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
-            vkGetDeviceBufferMemoryRequirements(Dev(device)->Device(), &q, &mr);
-
+            // Query via a throwaway VkBuffer + core-1.0 vkGetBufferMemoryRequirements rather than
+            // the 1.3 vkGetDeviceBufferMemoryRequirements: MoltenVK reports apiVersion 1.2, where
+            // that entry point is null and calling it segfaults. The temp buffer allocates no memory.
             *out = VriMemoryDesc{};
-            out->size = mr.memoryRequirements.size;
-            out->alignment = mr.memoryRequirements.alignment;
+            VkDevice dev = Dev(device)->Device();
+            VkBuffer tmp = VK_NULL_HANDLE;
+            if (vkCreateBuffer(dev, &bci, nullptr, &tmp) != VK_SUCCESS)
+                return;
+            VkMemoryRequirements mr = {};
+            vkGetBufferMemoryRequirements(dev, tmp, &mr);
+            vkDestroyBuffer(dev, tmp, nullptr);
+            out->size = mr.size;
+            out->alignment = mr.alignment;
             out->location = location;
-            out->memoryTypeMask = mr.memoryRequirements.memoryTypeBits;
+            out->memoryTypeMask = mr.memoryTypeBits;
         }
 
         void VRI_CALL GetTextureMemoryDesc(const VriDevice* device, const VriTextureDesc* desc, VriMemoryLocation location, VriMemoryDesc* out)
@@ -339,16 +344,21 @@ namespace vri::vk
             ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
             ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-            VkDeviceImageMemoryRequirements q = {VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS};
-            q.pCreateInfo = &ici;
-            VkMemoryRequirements2 mr = {VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
-            vkGetDeviceImageMemoryRequirements(Dev(device)->Device(), &q, &mr);
-
+            // Query via a throwaway VkImage + core-1.0 vkGetImageMemoryRequirements rather than
+            // the 1.3 vkGetDeviceImageMemoryRequirements: MoltenVK reports apiVersion 1.2, where
+            // that entry point is null and calling it segfaults. The temp image allocates no memory.
             *out = VriMemoryDesc{};
-            out->size = mr.memoryRequirements.size;
-            out->alignment = mr.memoryRequirements.alignment;
+            VkDevice dev = Dev(device)->Device();
+            VkImage tmp = VK_NULL_HANDLE;
+            if (vkCreateImage(dev, &ici, nullptr, &tmp) != VK_SUCCESS)
+                return;
+            VkMemoryRequirements mr = {};
+            vkGetImageMemoryRequirements(dev, tmp, &mr);
+            vkDestroyImage(dev, tmp, nullptr);
+            out->size = mr.size;
+            out->alignment = mr.alignment;
             out->location = location;
-            out->memoryTypeMask = mr.memoryRequirements.memoryTypeBits;
+            out->memoryTypeMask = mr.memoryTypeBits;
         }
 
         VriResult VRI_CALL AllocateMemory(VriDevice* device, const VriMemoryDesc* desc, VriMemory** out)

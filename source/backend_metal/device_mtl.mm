@@ -3,6 +3,8 @@
 #include "device_mtl.h"
 #include "core_mtl.h"
 #include "swapchain_mtl.h"
+#include "rt_mtl.h"
+#include "meshshader_mtl.h"
 
 #include <cstdio>
 #include <cstring>
@@ -95,12 +97,21 @@ namespace vri::mtl
         m_desc.hasGeometryShader = VRI_FALSE; // Metal has no geometry stage
         m_desc.hasTessellation = VRI_FALSE;   // Metal tessellation differs from VK; not in MVP
         m_desc.hasCustomBorderColor = VRI_TRUE;
+        // Inline ray query runs in a compute/fragment shader over MTLAccelerationStructure.
+        // (hasRayTracing stays FALSE: Metal has no DXR-style RT pipeline / SBT.)
+        m_desc.hasRayQuery = [m_device supportsRaytracing] ? VRI_TRUE : VRI_FALSE;
+        // Mesh/object shaders require the Metal 3 family.
+        m_desc.hasMeshShader = [m_device supportsFamily:MTLGPUFamilyMetal3] ? VRI_TRUE : VRI_FALSE;
     }
 
     void DeviceMTL::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceMTL(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceMTL(), sizeof(VriSwapChainInterface));
+        if (m_desc.hasRayQuery)
+            m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceMTL(), sizeof(VriRayTracingInterface));
+        if (m_desc.hasMeshShader)
+            m_registry.Register(VRI_INTERFACE_MESHSHADER, GetMeshShaderInterfaceMTL(), sizeof(VriMeshShaderInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

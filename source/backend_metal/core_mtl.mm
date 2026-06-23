@@ -68,6 +68,8 @@ namespace vri::mtl
                 case VriShaderStage_Vertex:   return spv::ExecutionModelVertex;
                 case VriShaderStage_Fragment: return spv::ExecutionModelFragment;
                 case VriShaderStage_Compute:  return spv::ExecutionModelGLCompute;
+                case VriShaderStage_Mesh:     return spv::ExecutionModelMeshEXT;
+                case VriShaderStage_Task:     return spv::ExecutionModelTaskEXT;
                 default:                      return spv::ExecutionModelVertex;
             }
         }
@@ -101,7 +103,9 @@ namespace vri::mtl
                 spirv_cross::CompilerMSL comp(words, wordCount);
                 spirv_cross::CompilerMSL::Options o = comp.get_msl_options();
                 o.platform = spirv_cross::CompilerMSL::Options::macOS;
-                o.set_msl_version(2, 1);
+                // MSL 3.0 (Metal 3): needed for ray query (>= 2.3) and mesh/object shaders (>= 3.0);
+                // backward-compatible for the plain graphics/compute shaders.
+                o.set_msl_version(3, 0);
                 o.argument_buffers = false; // MVP binds resources directly to the argument tables
                 comp.set_msl_options(o);
                 comp.set_entry_point(entry, model);
@@ -113,6 +117,8 @@ namespace vri::mtl
                     const VriShaderStageFlags stageBit =
                         model == spv::ExecutionModelVertex     ? VriShaderStage_Vertex :
                         model == spv::ExecutionModelFragment   ? VriShaderStage_Fragment :
+                        model == spv::ExecutionModelMeshEXT    ? VriShaderStage_Mesh :
+                        model == spv::ExecutionModelTaskEXT    ? VriShaderStage_Task :
                                                                  VriShaderStage_Compute;
                     for (uint32_t set = 0; set < layout->setBindings.size(); ++set)
                     {
@@ -125,7 +131,8 @@ namespace vri::mtl
                             rb.desc_set = set;
                             rb.binding = b.baseRegister;
                             rb.count = b.count;
-                            if (IsBufferType(b.type))   rb.msl_buffer = b.mslIndex;
+                            // Acceleration structures bind to the Metal buffer argument table.
+                            if (IsBufferType(b.type) || b.type == VriDescriptorType_AccelerationStructure) rb.msl_buffer = b.mslIndex;
                             else if (IsTextureType(b.type)) rb.msl_texture = b.mslIndex;
                             else                        rb.msl_sampler = b.mslIndex;
                             comp.add_msl_resource_binding(rb);
@@ -146,7 +153,9 @@ namespace vri::mtl
 
                 r.source = comp.compile();
                 r.entry = comp.get_cleansed_entry_point_name(entry, model);
-                if (model == spv::ExecutionModelGLCompute)
+                // Compute, mesh and task stages all carry a fixed threadgroup (LocalSize).
+                if (model == spv::ExecutionModelGLCompute || model == spv::ExecutionModelMeshEXT ||
+                    model == spv::ExecutionModelTaskEXT)
                 {
                     r.localSize.width  = comp.get_execution_mode_argument(spv::ExecutionModeLocalSize, 0);
                     r.localSize.height = comp.get_execution_mode_argument(spv::ExecutionModeLocalSize, 1);
@@ -571,7 +580,10 @@ namespace vri::mtl
                     b.type = range.descriptorType;
                     b.count = range.descriptorNum ? range.descriptorNum : 1;
                     b.stages = range.shaderStages;
-                    if (IsBufferType(range.descriptorType))      { b.mslIndex = bufferCounter;  bufferCounter  += b.count; }
+                    // Acceleration structures occupy a Metal buffer slot (setAccelerationStructure
+                    // shares the buffer argument table), so they count with the buffers.
+                    if (IsBufferType(range.descriptorType) || range.descriptorType == VriDescriptorType_AccelerationStructure)
+                                                                  { b.mslIndex = bufferCounter;  bufferCounter  += b.count; }
                     else if (IsTextureType(range.descriptorType)) { b.mslIndex = textureCounter; textureCounter += b.count; }
                     else                                          { b.mslIndex = samplerCounter; samplerCounter += b.count; }
                     dst.push_back(b);
@@ -597,7 +609,9 @@ namespace vri::mtl
             DeviceMTL* d = Dev(device);
             const PipelineLayoutMTL* pl = desc->pipelineLayout ? PLc(desc->pipelineLayout) : nullptr;
 
-            id<MTLFunction> vsFn = nil, fsFn = nil;
+            id<MTLFunction> vsFn = nil, fsFn = nil, objFn = nil, meshFn = nil;
+            MTLSize objTG = MTLSizeMake(1, 1, 1), meshTG = MTLSizeMake(1, 1, 1);
+            bool hasMesh = false;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
                 const VriShaderDesc& s = desc->shaders[i];
@@ -605,72 +619,101 @@ namespace vri::mtl
                     vsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelVertex));
                 else if (s.stage == VriShaderStage_Fragment)
                     fsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelFragment));
+                else if (s.stage == VriShaderStage_Mesh)
+                    { MslResult m = SpirvToMsl(d, pl, s, spv::ExecutionModelMeshEXT); meshFn = MakeFunction(d, m); meshTG = m.localSize; hasMesh = true; }
+                else if (s.stage == VriShaderStage_Task)
+                    { MslResult m = SpirvToMsl(d, pl, s, spv::ExecutionModelTaskEXT); objFn = MakeFunction(d, m); objTG = m.localSize; hasMesh = true; }
                 else if (s.stage == VriShaderStage_Geometry || s.stage == VriShaderStage_TessControl || s.stage == VriShaderStage_TessEval)
                     { if (vsFn) [vsFn release]; if (fsFn) [fsFn release]; return VriResult_Unsupported; }
             }
-            if (!vsFn) { if (fsFn) [fsFn release]; return VriResult_Failure; }
+            if ((hasMesh && !meshFn) || (!hasMesh && !vsFn))
+            { if (vsFn) [vsFn release]; if (fsFn) [fsFn release]; if (objFn) [objFn release]; if (meshFn) [meshFn release]; return VriResult_Failure; }
 
-            MTLRenderPipelineDescriptor* pd = [[MTLRenderPipelineDescriptor alloc] init];
-            pd.vertexFunction = vsFn;
-            pd.fragmentFunction = fsFn;
-            pd.rasterSampleCount = desc->multisample.sampleNum ? desc->multisample.sampleNum : 1;
-            pd.inputPrimitiveTopology = ToMtlTopologyClass(desc->inputAssembly.topology);
-
-            // Vertex input: one MTLVertexBufferLayout per stream at its reserved (high) buffer
-            // index; attribute index == its array index (== SPIR-V location, as the GL/WGPU
-            // backends assume).
-            if (desc->vertexInput.streamNum > 0)
-            {
-                MTLVertexDescriptor* vd = [MTLVertexDescriptor vertexDescriptor];
-                for (uint32_t s = 0; s < desc->vertexInput.streamNum; ++s)
+            // Color/depth attachment state is identical for the classic and mesh pipeline
+            // descriptors (both expose colorAttachments + depth/stencilAttachmentPixelFormat).
+            auto setupColor = [&](MTLRenderPipelineColorAttachmentDescriptorArray* colors) {
+                for (uint32_t i = 0; i < desc->outputMerger.colorNum; ++i)
                 {
-                    const VriVertexStreamDesc& stream = desc->vertexInput.streams[s];
-                    const uint32_t bufIdx = VertexBufferIndex(stream.bindingSlot);
-                    vd.layouts[bufIdx].stride = stream.stride;
-                    vd.layouts[bufIdx].stepFunction = stream.stepRate == VriVertexStepRate_PerInstance
-                                                    ? MTLVertexStepFunctionPerInstance : MTLVertexStepFunctionPerVertex;
-                    vd.layouts[bufIdx].stepRate = 1;
+                    const VriColorAttachmentDesc& c = desc->outputMerger.colors[i];
+                    MTLRenderPipelineColorAttachmentDescriptor* ca = colors[i];
+                    ca.pixelFormat = ToMtlFormat(c.format);
+                    ca.writeMask = ToMtlColorWriteMask(c.colorWriteMask);
+                    if (c.blend.enable)
+                    {
+                        ca.blendingEnabled = YES;
+                        ca.sourceRGBBlendFactor = ToMtlBlendFactor(c.blend.srcColor);
+                        ca.destinationRGBBlendFactor = ToMtlBlendFactor(c.blend.dstColor);
+                        ca.rgbBlendOperation = ToMtlBlendOp(c.blend.colorOp);
+                        ca.sourceAlphaBlendFactor = ToMtlBlendFactor(c.blend.srcAlpha);
+                        ca.destinationAlphaBlendFactor = ToMtlBlendFactor(c.blend.dstAlpha);
+                        ca.alphaBlendOperation = ToMtlBlendOp(c.blend.alphaOp);
+                    }
                 }
-                for (uint32_t a = 0; a < desc->vertexInput.attributeNum; ++a)
-                {
-                    const VriVertexAttributeDesc& attr = desc->vertexInput.attributes[a];
-                    const VriVertexStreamDesc& stream = desc->vertexInput.streams[attr.streamIndex];
-                    vd.attributes[a].format = ToMtlVertexFormat(attr.format);
-                    vd.attributes[a].offset = attr.offset;
-                    vd.attributes[a].bufferIndex = VertexBufferIndex(stream.bindingSlot);
-                }
-                pd.vertexDescriptor = vd;
-            }
-
-            for (uint32_t i = 0; i < desc->outputMerger.colorNum; ++i)
-            {
-                const VriColorAttachmentDesc& c = desc->outputMerger.colors[i];
-                MTLRenderPipelineColorAttachmentDescriptor* ca = pd.colorAttachments[i];
-                ca.pixelFormat = ToMtlFormat(c.format);
-                ca.writeMask = ToMtlColorWriteMask(c.colorWriteMask);
-                if (c.blend.enable)
-                {
-                    ca.blendingEnabled = YES;
-                    ca.sourceRGBBlendFactor = ToMtlBlendFactor(c.blend.srcColor);
-                    ca.destinationRGBBlendFactor = ToMtlBlendFactor(c.blend.dstColor);
-                    ca.rgbBlendOperation = ToMtlBlendOp(c.blend.colorOp);
-                    ca.sourceAlphaBlendFactor = ToMtlBlendFactor(c.blend.srcAlpha);
-                    ca.destinationAlphaBlendFactor = ToMtlBlendFactor(c.blend.dstAlpha);
-                    ca.alphaBlendOperation = ToMtlBlendOp(c.blend.alphaOp);
-                }
-            }
-            if (desc->outputMerger.depthStencilFormat != VriFormat_Unknown)
-            {
-                const MTLPixelFormat dsf = ToMtlFormat(desc->outputMerger.depthStencilFormat);
-                if (FormatHasDepth(desc->outputMerger.depthStencilFormat))   pd.depthAttachmentPixelFormat = dsf;
-                if (FormatHasStencil(desc->outputMerger.depthStencilFormat)) pd.stencilAttachmentPixelFormat = dsf;
-            }
+            };
+            const MTLPixelFormat depthFmt = desc->outputMerger.depthStencilFormat != VriFormat_Unknown
+                                          ? ToMtlFormat(desc->outputMerger.depthStencilFormat) : MTLPixelFormatInvalid;
+            const bool hasD = depthFmt != MTLPixelFormatInvalid && FormatHasDepth(desc->outputMerger.depthStencilFormat);
+            const bool hasS = depthFmt != MTLPixelFormatInvalid && FormatHasStencil(desc->outputMerger.depthStencilFormat);
+            const uint32_t samples = desc->multisample.sampleNum ? desc->multisample.sampleNum : 1;
 
             NSError* err = nil;
-            id<MTLRenderPipelineState> rps = [d->Device() newRenderPipelineStateWithDescriptor:pd error:&err];
-            [pd release];
+            id<MTLRenderPipelineState> rps = nil;
+            if (hasMesh)
+            {
+                // Object(task)/mesh/fragment pipeline. Mesh shaders ignore vertex input.
+                MTLMeshRenderPipelineDescriptor* pd = [[MTLMeshRenderPipelineDescriptor alloc] init];
+                pd.objectFunction = objFn; // nil for a mesh-only pipeline
+                pd.meshFunction = meshFn;
+                pd.fragmentFunction = fsFn;
+                pd.rasterSampleCount = samples;
+                setupColor(pd.colorAttachments);
+                if (hasD) pd.depthAttachmentPixelFormat = depthFmt;
+                if (hasS) pd.stencilAttachmentPixelFormat = depthFmt;
+                rps = [d->Device() newRenderPipelineStateWithMeshDescriptor:pd options:MTLPipelineOptionNone reflection:nil error:&err];
+                [pd release];
+            }
+            else
+            {
+                MTLRenderPipelineDescriptor* pd = [[MTLRenderPipelineDescriptor alloc] init];
+                pd.vertexFunction = vsFn;
+                pd.fragmentFunction = fsFn;
+                pd.rasterSampleCount = samples;
+                pd.inputPrimitiveTopology = ToMtlTopologyClass(desc->inputAssembly.topology);
+                // Vertex input: one MTLVertexBufferLayout per stream at its reserved (high) buffer
+                // index; attribute index == its array index (== SPIR-V location, as the GL/WGPU
+                // backends assume).
+                if (desc->vertexInput.streamNum > 0)
+                {
+                    MTLVertexDescriptor* vd = [MTLVertexDescriptor vertexDescriptor];
+                    for (uint32_t s = 0; s < desc->vertexInput.streamNum; ++s)
+                    {
+                        const VriVertexStreamDesc& stream = desc->vertexInput.streams[s];
+                        const uint32_t bufIdx = VertexBufferIndex(stream.bindingSlot);
+                        vd.layouts[bufIdx].stride = stream.stride;
+                        vd.layouts[bufIdx].stepFunction = stream.stepRate == VriVertexStepRate_PerInstance
+                                                        ? MTLVertexStepFunctionPerInstance : MTLVertexStepFunctionPerVertex;
+                        vd.layouts[bufIdx].stepRate = 1;
+                    }
+                    for (uint32_t a = 0; a < desc->vertexInput.attributeNum; ++a)
+                    {
+                        const VriVertexAttributeDesc& attr = desc->vertexInput.attributes[a];
+                        const VriVertexStreamDesc& stream = desc->vertexInput.streams[attr.streamIndex];
+                        vd.attributes[a].format = ToMtlVertexFormat(attr.format);
+                        vd.attributes[a].offset = attr.offset;
+                        vd.attributes[a].bufferIndex = VertexBufferIndex(stream.bindingSlot);
+                    }
+                    pd.vertexDescriptor = vd;
+                }
+                setupColor(pd.colorAttachments);
+                if (hasD) pd.depthAttachmentPixelFormat = depthFmt;
+                if (hasS) pd.stencilAttachmentPixelFormat = depthFmt;
+                rps = [d->Device() newRenderPipelineStateWithDescriptor:pd error:&err];
+                [pd release];
+            }
             if (vsFn) [vsFn release];
             if (fsFn) [fsFn release];
+            if (objFn) [objFn release];
+            if (meshFn) [meshFn release];
             if (!rps)
             {
                 std::string m = "newRenderPipelineState failed: ";
@@ -725,6 +768,9 @@ namespace vri::mtl
             p->depthClampEnable = desc->rasterization.depthClamp != VRI_FALSE;
             p->stencilTest = ds.stencilTest != VRI_FALSE;
             p->stencilReference = ds.front.reference;
+            p->isMesh = hasMesh;
+            p->objectTG = objTG;
+            p->meshTG = meshTG;
             *out = ToHandle(p);
             return VriResult_Success;
         }
@@ -968,7 +1014,9 @@ namespace vri::mtl
             if (!dsc) return;
             if (c->computeEnc)
             {
-                if (b.type == VriDescriptorType_Sampler && dsc->sampler)
+                if (b.type == VriDescriptorType_AccelerationStructure && dsc->accel)
+                    [c->computeEnc setAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
+                else if (b.type == VriDescriptorType_Sampler && dsc->sampler)
                     [c->computeEnc setSamplerState:dsc->sampler atIndex:b.mslIndex];
                 else if (IsTextureType(b.type) && dsc->texture)
                     [c->computeEnc setTexture:dsc->texture atIndex:b.mslIndex];
@@ -977,7 +1025,12 @@ namespace vri::mtl
                 return;
             }
             if (!c->renderEnc) return;
-            if (b.type == VriDescriptorType_Sampler && dsc->sampler)
+            if (b.type == VriDescriptorType_AccelerationStructure && dsc->accel)
+            {
+                if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
+            }
+            else if (b.type == VriDescriptorType_Sampler && dsc->sampler)
             {
                 if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexSamplerState:dsc->sampler atIndex:b.mslIndex];
                 if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentSamplerState:dsc->sampler atIndex:b.mslIndex];

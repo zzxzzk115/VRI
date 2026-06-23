@@ -127,7 +127,7 @@ namespace vri::gl
 
         std::string SpirvToGlsl(const DeviceGL* d, const PipelineLayoutGL* layout, const void* bytecode, size_t bytecodeSize,
                                 const char* entry, spv::ExecutionModel model, std::vector<CombinedSamplerGL>* outCombined,
-                                std::vector<PushMemberGL>* outPush = nullptr)
+                                std::vector<PushMemberGL>* outPush = nullptr, int inBoundary = -1, int outBoundary = -1)
         {
             const uint32_t* words = static_cast<const uint32_t*>(bytecode);
             const size_t wordCount = bytecodeSize / 4;
@@ -165,21 +165,27 @@ namespace vri::gl
 
                 const spirv_cross::ShaderResources res = comp.get_shader_resources();
 
-                // ESSL 300 / WebGL2 match inter-stage varyings by NAME (location
-                // qualifiers aren't allowed there), but compiling the stages separately
-                // yields mismatched names. Rename each varying deterministically by its
-                // location so the vertex output and fragment input agree.
-                auto renameByLocation = [&](const spirv_cross::SmallVector<spirv_cross::Resource>& vars) {
+                // GL links the separately-compiled stages by matching inter-stage varyings by
+                // NAME (ESSL/WebGL2 disallow location qualifiers; macOS desktop GL also matches
+                // these by name). Name each varying by its inter-stage "boundary" id + location:
+                // the producer's output and the consumer's input on a boundary share a name (so
+                // they link), while a middle stage's own input (previous boundary) and output
+                // (next boundary) stay distinct - avoiding the in/out name collision SPIRV-Cross
+                // would otherwise disambiguate (e.g. TCS out vriVarying0 -> vriVarying0_1, breaking
+                // the TCS->TES match). The caller assigns the ids in pipeline order. A stage's
+                // inputs are renamed unless it's the vertex stage (vertex attributes); its outputs
+                // unless it's the fragment stage (color targets).
+                auto renameByLocation = [&](const spirv_cross::SmallVector<spirv_cross::Resource>& vars, int boundary) {
                     for (const spirv_cross::Resource& r : vars)
                     {
                         const uint32_t loc = comp.get_decoration(r.id, spv::DecorationLocation);
-                        comp.set_name(r.id, "vriVarying" + std::to_string(loc));
+                        comp.set_name(r.id, "vriVarying" + std::to_string(boundary) + "_" + std::to_string(loc));
                     }
                 };
-                if (model == spv::ExecutionModelVertex)
-                    renameByLocation(res.stage_outputs);
-                else if (model == spv::ExecutionModelFragment)
-                    renameByLocation(res.stage_inputs);
+                if (model != spv::ExecutionModelVertex)
+                    renameByLocation(res.stage_inputs, inBoundary);
+                if (model != spv::ExecutionModelFragment)
+                    renameByLocation(res.stage_outputs, outBoundary);
 
                 // Remap each Vulkan (set, binding) to the flattened GL unit from the
                 // pipeline layout, and give resources deterministic names so binding
@@ -710,6 +716,18 @@ namespace vri::gl
                     return VriResult_Unsupported;
             }
 
+            // Assign each gap between consecutive present stages a "boundary" id (in pipeline
+            // order VS->TCS->TES->GS->FS) so the varying renamer names producer-out and
+            // consumer-in identically while keeping a middle stage's in/out distinct.
+            const VriShaderStageBits kOrder[5] = {VriShaderStage_Vertex, VriShaderStage_TessControl,
+                                                  VriShaderStage_TessEval, VriShaderStage_Geometry, VriShaderStage_Fragment};
+            std::vector<VriShaderStageBits> present;
+            for (VriShaderStageBits m : kOrder)
+                for (uint32_t i = 0; i < desc->shaderNum; ++i)
+                    if (desc->shaders[i].stage == m) { present.push_back(m); break; }
+            auto bIn  = [&](VriShaderStageBits m) { for (size_t k = 0; k < present.size(); ++k) if (present[k] == m) return int(k) - 1; return -1; };
+            auto bOut = [&](VriShaderStageBits m) { for (size_t k = 0; k < present.size(); ++k) if (present[k] == m) return int(k);     return -1; };
+
             std::vector<CombinedSamplerGL> combined;
             std::vector<PushMemberGL> pushMembers;
             GLuint vs = 0, fs = 0, gs = 0, tcs = 0, tes = 0;
@@ -717,16 +735,16 @@ namespace vri::gl
             {
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
-                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined, &pushMembers));
+                    vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined, &pushMembers, bIn(s.stage), bOut(s.stage)));
                 else if (s.stage == VriShaderStage_Fragment)
-                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined, &pushMembers));
+                    fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined, &pushMembers, bIn(s.stage), bOut(s.stage)));
 #if !defined(__EMSCRIPTEN__) // geometry/tessellation shaders are desktop-only (absent in GLES3/WebGL2 headers)
                 else if (s.stage == VriShaderStage_Geometry)
-                    gs = CompileShader(d, GL_GEOMETRY_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelGeometry, &combined));
+                    gs = CompileShader(d, GL_GEOMETRY_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelGeometry, &combined, nullptr, bIn(s.stage), bOut(s.stage)));
                 else if (s.stage == VriShaderStage_TessControl)
-                    tcs = CompileShader(d, GL_TESS_CONTROL_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelTessellationControl, &combined));
+                    tcs = CompileShader(d, GL_TESS_CONTROL_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelTessellationControl, &combined, nullptr, bIn(s.stage), bOut(s.stage)));
                 else if (s.stage == VriShaderStage_TessEval)
-                    tes = CompileShader(d, GL_TESS_EVALUATION_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelTessellationEvaluation, &combined));
+                    tes = CompileShader(d, GL_TESS_EVALUATION_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelTessellationEvaluation, &combined, nullptr, bIn(s.stage), bOut(s.stage)));
 #endif
             }
             auto deleteStages = [&] {

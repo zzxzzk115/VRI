@@ -179,7 +179,9 @@ namespace
     }
 } // namespace
 
-// Both cases self-skip when their backend isn't compiled (vriCreateDevice -> Unsupported)
-// or the adapter lacks ray query - so this one file covers Vulkan + D3D12.
+// Each case self-skips when its backend isn't compiled (vriCreateDevice -> Unsupported)
+// or the adapter lacks ray query - so this one file covers Vulkan + D3D12 + Metal.
 TEST_CASE("Vulkan ray query: inline trace in a compute shader") { RunRayQuery(VriGraphicsAPI_Vulkan, g_rayquerySpv, sizeof(g_rayquerySpv)); }
 TEST_CASE("D3D12 ray query: inline trace in a compute shader") { RunRayQuery(VriGraphicsAPI_D3D12, g_rayqueryDxilCS, sizeof(g_rayqueryDxilCS)); }
+// Metal transpiles the SPIR-V ray query (OpRayQuery*) to metal::raytracing via SPIRV-Cross.
+TEST_CASE("Metal ray query: inline trace in a compute shader") { RunRayQuery(VriGraphicsAPI_Metal, g_rayquerySpv, sizeof(g_rayquerySpv)); }

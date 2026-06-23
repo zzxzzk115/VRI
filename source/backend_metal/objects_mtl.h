@@ -79,14 +79,15 @@ namespace vri::mtl
 
     struct DescriptorMTL
     {
-        enum class Kind { Buffer, Texture, Sampler } kind;
-        DeviceMTL*           device;
-        id<MTLBuffer>        buffer;       // Kind::Buffer
-        uint64_t             bufferOffset;
-        uint64_t             bufferRange;
-        id<MTLTexture>       texture;      // Kind::Texture (a view; released on destroy if owned)
-        bool                 ownsTexture;
-        id<MTLSamplerState>  sampler;      // Kind::Sampler
+        enum class Kind { Buffer, Texture, Sampler, AccelStruct } kind;
+        DeviceMTL*               device;
+        id<MTLBuffer>            buffer;       // Kind::Buffer
+        uint64_t                 bufferOffset;
+        uint64_t                 bufferRange;
+        id<MTLTexture>          texture;      // Kind::Texture (a view; released on destroy if owned)
+        bool                     ownsTexture;
+        id<MTLSamplerState>     sampler;      // Kind::Sampler
+        id<MTLAccelerationStructure> accel;   // Kind::AccelStruct (borrowed; owned by the AS object)
     };
 
     // One descriptor range resolved to its Metal argument-table slot(s).
@@ -155,6 +156,10 @@ namespace vri::mtl
         bool                        stencilTest;
         uint32_t                    stencilReference;
         MTLSize                     threadsPerThreadgroup; // compute local size (from SPIR-V)
+        // Mesh-shader pipeline (object/mesh/fragment): threadgroup sizes for drawMeshThreadgroups.
+        bool                        isMesh;
+        MTLSize                     objectTG;  // task/object stage local size (1,1,1 if mesh-only)
+        MTLSize                     meshTG;    // mesh stage local size
     };
 
     struct FenceMTL
