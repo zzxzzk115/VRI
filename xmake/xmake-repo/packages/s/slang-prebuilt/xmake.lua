@@ -23,6 +23,11 @@ package("slang-prebuilt")
     elseif is_plat("linux") and is_arch("x86_64") then
         add_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-linux-x86_64.zip")
         add_versions("2026.11", "d83ef21fc08d2c035ed15b5ce7541f27de8ec8d1db42b27c72bdc1567e5c4b37")
+    elseif is_plat("linux") and is_arch("arm64", "aarch64") then
+        -- arm64 Linux is a first-class dev host here (e.g. a Raspberry Pi), so it can
+        -- rebuild shaders too - unlike Android/Web, which only consume the committed headers.
+        add_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-linux-aarch64.zip")
+        add_versions("2026.11", "d59c474d0f63c670b2e4a8134d7a95c12a35ea62cbe74e2d00afa71f8134c7d0")
     elseif is_plat("macosx") and is_arch("arm64", "aarch64") then
         add_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-macos-aarch64.zip")
         add_versions("2026.11", "595f06cb9c1c306609cd61d9ced20dc75d56c0153d7c1bf1e509834edf133c75")
