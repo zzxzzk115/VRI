@@ -1297,7 +1297,9 @@ namespace vri::gl
         // Configure the default VAO's attribute pointers for the bound pipeline +
         // vertex buffers (classic glVertexAttribPointer path; GLES3/WebGL2 has no
         // separate attribute format). Disables any attribs the previous draw enabled.
-        void SetupVertexAttribs(CommandBufferGL* c)
+        // baseVertex != 0 is only passed on the WebGL2/GLES tier (no glDrawElementsBaseVertex):
+        // there it's emulated by shifting the per-vertex attribute pointers by baseVertex*stride.
+        void SetupVertexAttribs(CommandBufferGL* c, int32_t baseVertex = 0)
         {
             // Separate-format path (GL 4.3+): bind the pipeline's pre-baked VAO and
             // only point each stream at its buffer (format is already in the VAO).
@@ -1334,7 +1336,10 @@ namespace vri::gl
                         continue;
                     glBindBuffer(GL_ARRAY_BUFFER, it->second.id);
                     glEnableVertexAttribArray(a.location);
-                    const void* attrOff = reinterpret_cast<const void*>(static_cast<uintptr_t>(it->second.offset + a.offset));
+                    // Emulated base-vertex: shift per-vertex streams (divisor == 0) by
+                    // baseVertex*stride; per-instance streams are indexed by instance, untouched.
+                    const uintptr_t baseOff = (baseVertex && a.divisor == 0) ? static_cast<uintptr_t>(static_cast<int64_t>(baseVertex) * a.stride) : 0u;
+                    const void* attrOff = reinterpret_cast<const void*>(static_cast<uintptr_t>(it->second.offset + a.offset) + baseOff);
                     if (a.integer) glVertexAttribIPointer(a.location, a.size, a.type, a.stride, attrOff);
                     else glVertexAttribPointer(a.location, a.size, a.type, a.normalized, a.stride, attrOff);
                     glVertexAttribDivisor(a.location, a.divisor); // per-instance streams advance per instance
@@ -1374,7 +1379,14 @@ namespace vri::gl
         void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
         {
             CommandBufferGL* c = CB(cmd);
+#if defined(__EMSCRIPTEN__)
+            // WebGL2/GLES has no glDrawElementsBaseVertex; bake vertexOffset into the per-vertex
+            // attribute pointers so base-vertex indexed draws (e.g. an ImGui popup/combo whose
+            // 2nd draw list has vtxOffset > 0) render correctly instead of being rejected.
+            SetupVertexAttribs(c, d->vertexOffset);
+#else
             SetupVertexAttribs(c);
+#endif
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
             const uint32_t indexSize = c->indexType == GL_UNSIGNED_SHORT ? 2u : 4u;
             const uintptr_t offset = static_cast<uintptr_t>(c->indexOffset) + static_cast<uintptr_t>(d->baseIndex) * indexSize;
@@ -1400,8 +1412,10 @@ namespace vri::gl
                 return;
             }
 #else
-            if (d->vertexOffset != 0 || d->baseInstance != 0) // WebGL2 has neither base offset
-                c->device->ReportError("CmdDrawIndexed: vertexOffset/baseInstance != 0 is unsupported on WebGL2");
+            // vertexOffset is emulated via the attribute pointers (SetupVertexAttribs above);
+            // base-instance has no WebGL2 equivalent, so it stays explicit (never silent).
+            if (d->baseInstance != 0)
+                c->device->ReportError("CmdDrawIndexed: baseInstance != 0 is unsupported on WebGL2 (no ARB_base_instance)");
 #endif
             if (d->instanceNum <= 1)
                 glDrawElements(c->topology, static_cast<GLsizei>(d->indexNum), c->indexType, ip);

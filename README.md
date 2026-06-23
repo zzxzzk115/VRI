@@ -94,6 +94,10 @@ xmake run example-stenciloutline # two-pass stencil silhouette: fill stamps sten
 xmake run example-raytracing    # ray-traced hard shadows into a storage image - HW inline ray query
                                 # (BLAS/TLAS) on VK/D3D12, SW compute brute-force on WebGPU/desktop-GL
                                 # (same image); WebGL2/GLES has no compute -> explicit unsupported
+xmake run example-deferred      # deferred shading: a textured floor + a grid of colored cubes drawn
+                                # once into a 3-target G-buffer (position/normal/albedo+spec), then a
+                                # fullscreen pass shades it against 6 moving point lights in one pass
+                                # (ImGui combo inspects each G-buffer plane)
 
 # (re)compile the Slang test shaders to embedded SPIR-V/WGSL headers
 xmake shaders
