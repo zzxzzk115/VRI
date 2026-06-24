@@ -171,6 +171,15 @@ namespace vri::gl
                 // tessellation-control stage (its output is gl_out[].gl_Position; a bare
                 // gl_Position there is invalid GLSL and strict drivers reject it).
                 o.vertex.flip_vert_y = !d->Features().clipControl && model != spv::ExecutionModelTessellationControl;
+                // Depth range: with glClipControl(ZERO_TO_ONE) the context already uses [0,1]
+                // clip-Z (the Vulkan/D3D convention the shaders are authored in). Without it
+                // (ES/WebGL2, pre-4.5 desktop) convert the [0,1] clip-Z to GL's [-1,1] in-shader
+                // (gl_Position.z = 2z - w) so the rasterizer produces an UNCOMPRESSED [0,1] window
+                // depth. This matters whenever a shader compares against a stored depth value:
+                // without it the depth-buffer value is squashed into [0.5,1] while a shader-computed
+                // reference (e.g. a shadow-map lookup) stays [0,1], so the comparison misfires
+                // (shadows vanish). Plain depth testing is monotonic either way, so it's unaffected.
+                o.vertex.fixup_clipspace = !d->Features().clipControl && model != spv::ExecutionModelTessellationControl;
                 comp.set_common_options(o);
                 if (entry)
                     comp.set_entry_point(entry, model);
