@@ -138,6 +138,7 @@ namespace vri::mtl
             v->kind = DescriptorMTL::Kind::AccelStruct;
             v->device = Dev(device);
             v->accel = AS(as)->as;
+            v->accelObj = AS(as); // so binding can make the TLAS's referenced BLASes resident (useResource)
             *out = reinterpret_cast<VriDescriptor*>(v);
             return VriResult_Success;
         }

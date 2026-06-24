@@ -88,6 +88,7 @@ namespace vri::mtl
         bool                     ownsTexture;
         id<MTLSamplerState>     sampler;      // Kind::Sampler
         id<MTLAccelerationStructure> accel;   // Kind::AccelStruct (borrowed; owned by the AS object)
+        struct AccelerationStructureMTL* accelObj = nullptr; // TLAS: source object, to keep its BLASes resident
     };
 
     // One descriptor range resolved to its Metal argument-table slot(s).

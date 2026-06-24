@@ -14,6 +14,7 @@
 #include "conversions_mtl.h"
 #include "device_mtl.h"
 #include "objects_mtl.h"
+#include "rt_mtl.h" // AccelerationStructureMTL (TLAS -> its referenced BLASes, for residency)
 
 #import <Metal/Metal.h>
 
@@ -1015,7 +1016,15 @@ namespace vri::mtl
             if (c->computeEnc)
             {
                 if (b.type == VriDescriptorType_AccelerationStructure && dsc->accel)
+                {
                     [c->computeEnc setAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
+                    // A TLAS instances BLASes that the GPU traverses into; Metal keeps the bound TLAS
+                    // resident but NOT those BLASes, so they get evicted after a while and traversal
+                    // silently returns no hits. Mark each referenced BLAS resident for this dispatch.
+                    if (dsc->accelObj)
+                        for (id<MTLAccelerationStructure> blas in dsc->accelObj->instancedAS)
+                            [c->computeEnc useResource:blas usage:MTLResourceUsageRead];
+                }
                 else if (b.type == VriDescriptorType_Sampler && dsc->sampler)
                     [c->computeEnc setSamplerState:dsc->sampler atIndex:b.mslIndex];
                 else if (IsTextureType(b.type) && dsc->texture)
@@ -1029,6 +1038,13 @@ namespace vri::mtl
             {
                 if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
                 if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
+                if (dsc->accelObj) // keep the TLAS's referenced BLASes resident (see the compute path above)
+                {
+                    MTLRenderStages st = (MTLRenderStages)(((b.stages & VriShaderStage_Vertex) ? MTLRenderStageVertex : 0) |
+                                                           ((b.stages & VriShaderStage_Fragment) ? MTLRenderStageFragment : 0));
+                    for (id<MTLAccelerationStructure> blas in dsc->accelObj->instancedAS)
+                        [c->renderEnc useResource:blas usage:MTLResourceUsageRead stages:st];
+                }
             }
             else if (b.type == VriDescriptorType_Sampler && dsc->sampler)
             {
