@@ -49,6 +49,7 @@ namespace
         td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
         td.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc;
         td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue.color.f32[3] = 1.0f; // match the render-pass clear
         VriTexture* color = nullptr;
         REQUIRE(c.CreateTexture(dev, &td, &color) == VriResult_Success);
         VriTextureViewDesc cvd{};
@@ -62,6 +63,7 @@ namespace
         dtd.width = kW; dtd.height = kH; dtd.depth = 1; dtd.mipNum = 1; dtd.layerNum = 1; dtd.sampleNum = 1;
         dtd.usage = VriTextureUsage_DepthStencilAttachment;
         dtd.memoryLocation = VriMemoryLocation_Device;
+        dtd.clearValue.depthStencil.depth = 1.0f; // match the render-pass clear
         VriTexture* depth = nullptr;
         REQUIRE(c.CreateTexture(dev, &dtd, &depth) == VriResult_Success);
         VriTextureViewDesc dvd{};

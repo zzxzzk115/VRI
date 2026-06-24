@@ -158,7 +158,9 @@ namespace vri::d3d12
             d.Filter = linear ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_MIN_MAG_MIP_POINT;
         d.AddressU = ToD3DAddress(s.addressModeU); d.AddressV = ToD3DAddress(s.addressModeV); d.AddressW = ToD3DAddress(s.addressModeW);
         d.MipLODBias = s.mipLodBias; d.MaxAnisotropy = 1;
-        d.ComparisonFunc = s.compareEnable ? ToD3DCompare(s.compareOp) : D3D12_COMPARISON_FUNC_ALWAYS;
+        // Non-comparison samplers must use COMPARISON_FUNC_NONE: a non-NONE func on a non-comparison
+        // filter trips a debug-layer warning (the func is ignored, but it flags likely-unintended use).
+        d.ComparisonFunc = s.compareEnable ? ToD3DCompare(s.compareOp) : D3D12_COMPARISON_FUNC_NONE;
         d.MinLOD = s.minLod; d.MaxLOD = s.maxLod > 0.0f ? s.maxLod : D3D12_FLOAT32_MAX;
         // D3D12 border color is always an arbitrary float4 (native custom support).
         if (s.useCustomBorderColor)

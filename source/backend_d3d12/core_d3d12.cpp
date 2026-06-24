@@ -110,11 +110,14 @@ namespace vri::d3d12
             if (desc->memoryLocation == VriMemoryLocation_HostUpload) { heap = D3D12_HEAP_TYPE_UPLOAD; state = D3D12_RESOURCE_STATE_GENERIC_READ; }
             else if (desc->memoryLocation == VriMemoryLocation_HostReadback) { heap = D3D12_HEAP_TYPE_READBACK; state = D3D12_RESOURCE_STATE_COPY_DEST; }
 
-            // Storage buffers are UAVs: need the UAV resource flag and start in the
-            // UNORDERED_ACCESS state (buffers don't auto-promote to UAV like they do to
-            // copy/SRV). A barrier transitions them to COPY_SOURCE for readback.
+            // Storage buffers are UAVs: they need the UAV resource flag. D3D12 *ignores* the
+            // CreateCommittedResource InitialState for buffers (they are always created in COMMON,
+            // and passing anything else trips a debug-layer warning), so the creation state stays
+            // COMMON. We still TRACK storage buffers as UNORDERED_ACCESS: a buffer promotes
+            // COMMON->UAV implicitly on first GPU access, so after the compute write the readback
+            // barrier correctly emits UAV->COPY_SOURCE (StateBefore comes from the tracked state).
             const bool uav = (heap == D3D12_HEAP_TYPE_DEFAULT) && (desc->usage & VriBufferUsage_StorageBuffer);
-            if (uav) state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            const D3D12_RESOURCE_STATES trackedState = uav ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : state;
 
             D3D12_HEAP_PROPERTIES hp = {}; hp.Type = heap;
             D3D12_RESOURCE_DESC rd = {};
@@ -127,7 +130,7 @@ namespace vri::d3d12
             BufferD3D12* b = new BufferD3D12{};
             if (FAILED(d->Device()->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, state, nullptr, IID_PPV_ARGS(&b->resource))))
             { delete b; d->ReportError("CreateCommittedResource (buffer) failed"); return VriResult_Failure; }
-            b->device = d; b->size = desc->size; b->heapType = heap; b->state = state;
+            b->device = d; b->size = desc->size; b->heapType = heap; b->state = trackedState;
             if (heap != D3D12_HEAP_TYPE_DEFAULT) // persistently map upload/readback heaps
             { D3D12_RANGE none = {0, 0}; b->resource->Map(0, heap == D3D12_HEAP_TYPE_READBACK ? nullptr : &none, &b->mapped); }
             *out = ToHandle(b);
@@ -169,11 +172,24 @@ namespace vri::d3d12
             if (desc->usage & VriTextureUsage_DepthStencilAttachment) rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
             if (desc->usage & VriTextureUsage_ShaderResourceStorage) rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-            // Depth/render-target resources want an optimized clear value (D3D12 warns + is slower
-            // without one, and a typeless depth target needs the typed clear format).
+            // Bake the app-declared clear value into the resource so D3D12 takes the fast-clear path.
+            // It must match the value passed to CmdBeginRendering or the debug layer warns; the app
+            // owns that (VriTextureDesc::clearValue mirrors VriAttachmentDesc::clearValue). A typeless
+            // depth target needs the typed clear format.
             D3D12_CLEAR_VALUE cv{}; const D3D12_CLEAR_VALUE* pcv = nullptr;
-            if (desc->usage & VriTextureUsage_DepthStencilAttachment) { cv.Format = dsvFormat; cv.DepthStencil.Depth = 1.0f; pcv = &cv; }
-            else if (desc->usage & VriTextureUsage_ColorAttachment) { cv.Format = fi.format; pcv = &cv; }
+            if (desc->usage & VriTextureUsage_DepthStencilAttachment)
+            {
+                cv.Format = dsvFormat;
+                cv.DepthStencil.Depth = desc->clearValue.depthStencil.depth;
+                cv.DepthStencil.Stencil = static_cast<UINT8>(desc->clearValue.depthStencil.stencil);
+                pcv = &cv;
+            }
+            else if (desc->usage & VriTextureUsage_ColorAttachment)
+            {
+                cv.Format = fi.format;
+                for (int i = 0; i < 4; ++i) cv.Color[i] = desc->clearValue.color.f32[i];
+                pcv = &cv;
+            }
 
             TextureD3D12* t = new TextureD3D12{};
             if (FAILED(d->Device()->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COMMON, pcv, IID_PPV_ARGS(&t->resource))))

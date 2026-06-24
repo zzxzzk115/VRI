@@ -40,6 +40,7 @@ namespace
         mt.type = VriTextureType_2D; mt.format = VriFormat_RGBA8_UNORM;
         mt.width = kW; mt.height = kH; mt.depth = 1; mt.mipNum = 1; mt.layerNum = 1; mt.sampleNum = kSamples;
         mt.usage = VriTextureUsage_ColorAttachment; mt.memoryLocation = VriMemoryLocation_Device;
+        mt.clearValue.color.f32[3] = 1.0f; // match the render-pass clear
         VriTexture* msaa = nullptr; REQUIRE(c.CreateTexture(dev, &mt, &msaa) == VriResult_Success);
         VriTextureViewDesc mvd{}; mvd.texture = msaa; mvd.viewType = VriTextureViewType_2D; mvd.format = VriFormat_Unknown; mvd.aspect = VriImageAspect_Color;
         VriDescriptor* msaaView = nullptr; REQUIRE(c.CreateTextureView(dev, &mvd, &msaaView) == VriResult_Success);

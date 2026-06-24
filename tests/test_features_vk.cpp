@@ -69,14 +69,23 @@ TEST_CASE("Vulkan: fail-fast (bestEffort=false) rejects an unsupported feature")
 {
     if (!VulkanAvailable()) { MESSAGE("Vulkan unavailable - skipping"); return; }
 
+    // The fail-fast path reports *why* it rejected the feature; capture that via a callback (instead
+    // of letting it fall to the default stderr sink) and confirm the diagnostic is actually delivered.
+    struct Captured { int count = 0; } captured;
+    VriCallbackInterface cb{};
+    cb.userArg = &captured;
+    cb.MessageCallback = [](void* userArg, VriMessageSeverity, const char*) { ++static_cast<Captured*>(userArg)->count; };
+
     VriDeviceCreationDesc desc{};
     desc.graphicsAPI = VriGraphicsAPI_Vulkan;
     desc.enabledFeatures = VriFeature_LowLatency; // not implemented -> must fail when not best-effort
     desc.bestEffort = VRI_FALSE;
+    desc.callbackInterface = &cb;
 
     VriDevice* device = nullptr;
     CHECK(vriCreateDevice(&desc, &device) == VriResult_Unsupported);
     CHECK(device == nullptr);
+    CHECK(captured.count >= 1); // the rejection reason was reported to the app, not swallowed
 }
 
 TEST_CASE("Vulkan: interop interface exposes native handles and wraps textures")

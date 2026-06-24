@@ -29,15 +29,18 @@ TEST_CASE("D3D12: sampled texture (SRV + sampler tables) -> blue (phase 3b)")
     VriQueue* queue = nullptr;
     REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
-    auto makeTex = [&](VriTextureUsageFlags usage) {
+    auto makeTex = [&](VriTextureUsageFlags usage, VriClearValue clear) {
         VriTextureDesc td{};
         td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM;
         td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
         td.usage = usage; td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue = clear; // match the render-pass clear (fast-clear, no D3D12 mismatch warning)
         VriTexture* t = nullptr; REQUIRE(c.CreateTexture(dev, &td, &t) == VriResult_Success); return t;
     };
-    VriTexture* texA = makeTex(VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource); // rendered then sampled
-    VriTexture* texB = makeTex(VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc);     // final target
+    VriClearValue blueClear{}; blueClear.color.f32[2] = 1.0f; blueClear.color.f32[3] = 1.0f; // texA cleared blue
+    VriClearValue blackClear{}; blackClear.color.f32[3] = 1.0f;                              // texB cleared opaque black
+    VriTexture* texA = makeTex(VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, blueClear); // rendered then sampled
+    VriTexture* texB = makeTex(VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc, blackClear);    // final target
     VriTextureViewDesc va{}; va.texture = texA; va.viewType = VriTextureViewType_2D; va.format = VriFormat_Unknown; va.aspect = VriImageAspect_Color;
     VriDescriptor* viewA = nullptr; REQUIRE(c.CreateTextureView(dev, &va, &viewA) == VriResult_Success);
     VriTextureViewDesc vb{}; vb.texture = texB; vb.viewType = VriTextureViewType_2D; vb.format = VriFormat_Unknown; vb.aspect = VriImageAspect_Color;

@@ -9,6 +9,7 @@
 #include "vri_handles.h"
 #include "vri_enums.h"
 #include "vri_flags.h"
+#include "vri_resource.h" /* VriClearValue (also used by VriTextureDesc::optimizedClearValue) */
 
 VRI_EXTERN_C_BEGIN
 
@@ -29,26 +30,6 @@ typedef struct VriRect
     uint32_t width;
     uint32_t height;
 } VriRect;
-
-/* ---- clear values ----------------------------------------------------- */
-typedef union VriClearColor
-{
-    float    f32[4];
-    uint32_t u32[4];
-    int32_t  i32[4];
-} VriClearColor;
-
-typedef struct VriClearDepthStencil
-{
-    float    depth;
-    uint32_t stencil;
-} VriClearDepthStencil;
-
-typedef union VriClearValue
-{
-    VriClearColor        color;
-    VriClearDepthStencil depthStencil;
-} VriClearValue;
 
 /* ---- dynamic rendering attachments ------------------------------------ */
 typedef struct VriAttachmentDesc

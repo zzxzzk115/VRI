@@ -30,6 +30,7 @@ TEST_CASE("D3D12: clear-to-red render pass + readback (phase 1, no shaders)")
     td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM;
     td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
     td.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc; td.memoryLocation = VriMemoryLocation_Device;
+    td.clearValue.color.f32[0] = 1.0f; td.clearValue.color.f32[3] = 1.0f; // match the render-pass clear
     VriTexture* color = nullptr;
     REQUIRE(c.CreateTexture(dev, &td, &color) == VriResult_Success);
     VriTextureViewDesc cvd{};

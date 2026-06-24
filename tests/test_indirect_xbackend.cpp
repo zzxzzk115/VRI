@@ -40,6 +40,7 @@ namespace
         td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
         td.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc;
         td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue.color.f32[3] = 1.0f; // match the render-pass clear
         VriTexture* color = nullptr;
         REQUIRE(c.CreateTexture(dev, &td, &color) == VriResult_Success);
         VriTextureViewDesc cvd{};

@@ -77,6 +77,7 @@ namespace
         td.type = VriTextureType_2D; td.format = VriFormat_RGBA8_UNORM;
         td.width = kW; td.height = kH; td.depth = 1; td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1;
         td.usage = VriTextureUsage_ColorAttachment | VriTextureUsage_TransferSrc; td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue.color.f32[3] = 1.0f; // match the render-pass clear
         VriTexture* color = nullptr; REQUIRE(c.CreateTexture(dev, &td, &color) == VriResult_Success);
         VriTextureViewDesc cvd{}; cvd.texture = color; cvd.viewType = VriTextureViewType_2D; cvd.format = VriFormat_Unknown; cvd.aspect = VriImageAspect_Color;
         VriDescriptor* colorView = nullptr; REQUIRE(c.CreateTextureView(dev, &cvd, &colorView) == VriResult_Success);
@@ -85,6 +86,7 @@ namespace
         dsd.type = VriTextureType_2D; dsd.format = VriFormat_D24_UNORM_S8_UINT;
         dsd.width = kW; dsd.height = kH; dsd.depth = 1; dsd.mipNum = 1; dsd.layerNum = 1; dsd.sampleNum = 1;
         dsd.usage = VriTextureUsage_DepthStencilAttachment; dsd.memoryLocation = VriMemoryLocation_Device;
+        dsd.clearValue.depthStencil.depth = 1.0f; // match the render-pass clear
         VriTexture* depthStencil = nullptr; REQUIRE(c.CreateTexture(dev, &dsd, &depthStencil) == VriResult_Success);
         VriTextureViewDesc dvd{}; dvd.texture = depthStencil; dvd.viewType = VriTextureViewType_2D; dvd.format = VriFormat_Unknown; dvd.aspect = VriImageAspect_Depth | VriImageAspect_Stencil;
         VriDescriptor* dsView = nullptr; REQUIRE(c.CreateTextureView(dev, &dvd, &dsView) == VriResult_Success);

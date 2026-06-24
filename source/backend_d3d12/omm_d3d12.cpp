@@ -51,6 +51,18 @@ namespace vri::d3d12
             D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_DESC ommDesc = {};
             ommDesc.NumOmmHistogramEntries = 1;
             ommDesc.pOmmHistogram = &hist;
+            // Prebuild sizing reads only the histogram, but the debug layer still rejects null
+            // InputBuffer/PerOmmDescs when the histogram declares OMMs. The real data buffers only
+            // arrive at build time, so point both at a throwaway buffer (large enough for the desc
+            // array) purely to provide valid non-null addresses for the sizing query.
+            const UINT64 descBytes = static_cast<UINT64>(desc->triangleCount) * sizeof(D3D12_RAYTRACING_OPACITY_MICROMAP_DESC);
+            ComPtr<ID3D12Resource> prebuildDummy = MakeUavBuffer(d, descBytes ? descBytes : 1, D3D12_RESOURCE_STATE_COMMON);
+            if (prebuildDummy)
+            {
+                ommDesc.InputBuffer = prebuildDummy->GetGPUVirtualAddress();
+                ommDesc.PerOmmDescs.StartAddress = prebuildDummy->GetGPUVirtualAddress();
+                ommDesc.PerOmmDescs.StrideInBytes = sizeof(D3D12_RAYTRACING_OPACITY_MICROMAP_DESC);
+            }
 
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
             inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY;

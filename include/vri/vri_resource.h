@@ -13,6 +13,28 @@
 
 VRI_EXTERN_C_BEGIN
 
+/* ---- clear values ----------------------------------------------------- */
+/* Shared by render-pass attachments (vri_command.h) and the optional
+   optimizedClearValue hint on VriTextureDesc below. */
+typedef union VriClearColor
+{
+    float    f32[4];
+    uint32_t u32[4];
+    int32_t  i32[4];
+} VriClearColor;
+
+typedef struct VriClearDepthStencil
+{
+    float    depth;
+    uint32_t stencil;
+} VriClearDepthStencil;
+
+typedef union VriClearValue
+{
+    VriClearColor        color;
+    VriClearDepthStencil depthStencil;
+} VriClearValue;
+
 /* ---- buffer ----------------------------------------------------------- */
 typedef struct VriBufferDesc
 {
@@ -38,6 +60,11 @@ typedef struct VriTextureDesc
     uint32_t             sampleNum;  /* 1 = no MSAA */
     VriTextureUsageFlags usage;
     VriMemoryLocation    memoryLocation; /* see VriBufferDesc::memoryLocation */
+    /* The clear value this texture is cleared to when used as a color or depth-stencil
+       attachment. Set it to the value you pass to the matching VriAttachmentDesc::clearValue
+       in CmdBeginRendering. D3D12 bakes it into the resource for a fast clear and warns if a
+       later clear does not match; other backends ignore it. Unused for non-attachment textures. */
+    VriClearValue        clearValue;
 } VriTextureDesc;
 
 /* ---- sampler (aligned with libvultra SamplerInfo) --------------------- */

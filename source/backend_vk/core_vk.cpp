@@ -787,9 +787,15 @@ namespace vri::vk
             cb.attachmentCount = static_cast<uint32_t>(blends.size());
             cb.pAttachments = blends.data();
 
-            const VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+            // When VRS is enabled the per-draw shading rate is always dynamic (set via
+            // CmdSetShadingRate). Declaring the dynamic state lets a draw set it; CmdBeginRendering
+            // primes a default 1x1 rate so a draw that never sets one is still valid (no validation
+            // error) and not flagged for "dynamic state used but pipeline didn't declare it".
+            VkDynamicState dynStates[3] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
             VkPipelineDynamicStateCreateInfo dyn = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
             dyn.dynamicStateCount = 2;
+            if (d->EnabledFeatures() & VriFeature_VariableShadingRate)
+                dynStates[dyn.dynamicStateCount++] = VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR;
             dyn.pDynamicStates = dynStates;
 
             VkPipelineRenderingCreateInfo rendering = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -1129,6 +1135,17 @@ namespace vri::vk
             }
 
             c->device->Ext().CmdBeginRendering(c->cmd, &ri);
+
+            // Pipelines declare the fragment-shading-rate dynamic state when VRS is enabled, so the
+            // rate must be set before any draw. Prime the no-op 1x1 rate here; CmdSetShadingRate can
+            // still override it within the pass. This keeps non-VRS draws valid without a per-pipeline
+            // opt-in (and avoids the "dynamic state set but pipeline didn't declare it" warning).
+            if ((c->device->EnabledFeatures() & VriFeature_VariableShadingRate) && c->device->Ext().CmdSetFragmentShadingRate)
+            {
+                const VkExtent2D rate = {1, 1};
+                const VkFragmentShadingRateCombinerOpKHR keep[2] = {VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR, VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR};
+                c->device->Ext().CmdSetFragmentShadingRate(c->cmd, &rate, keep);
+            }
         }
 
         void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd) { CB(cmd)->device->Ext().CmdEndRendering(CB(cmd)->cmd); }
