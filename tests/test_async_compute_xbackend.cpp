@@ -1,18 +1,25 @@
 // Async compute parity: split work across two queues synchronized by a timeline fence.
 //   - The COMPUTE queue runs a compute shader that fills a storage buffer (out[i] = i + 100) and
 //     signals the fence to value 1.
-//   - The GRAPHICS queue WAITS for fence == 1, then copies the buffer to a host-readback buffer and
-//     signals value 2.
+//   - A SECOND queue (Graphics or Transfer, see below) WAITS for fence == 1, then copies the buffer
+//     to a host-readback buffer and signals value 2.
 // The CPU waits for value 2 and checks every element. A correct result proves cross-queue submission
-// and timeline-fence synchronization work: if the graphics copy did not wait for the compute write,
-// it would read stale/garbage data. Backends that give Compute its own queue (Vulkan: a second queue
-// in the graphics family; Metal: a dedicated MTLCommandQueue) run the two passes on distinct queues;
-// where only one queue exists the timeline fence still orders them. Skips where compute is absent.
+// and timeline-fence synchronization work: if the copy did not wait for the compute write, it would
+// read stale/garbage data. Backends that give Compute its own queue (Vulkan: a second queue in the
+// graphics family; Metal: a dedicated MTLCommandQueue; D3D12: the COMPUTE engine) run the two passes
+// on distinct queues; where only one queue exists the timeline fence still orders them.
+//
+// We run it twice per backend, varying which queue performs the copy:
+//   - Graphics (DIRECT engine on D3D12)  -> exercises COMPUTE -> GRAPHICS cross-queue sync.
+//   - Transfer (COPY/DMA engine on D3D12) -> exercises COMPUTE -> TRANSFER sync and the dedicated
+//     copy engine end-to-end (a buffer copy needs no explicit barrier - it promotes from COMMON).
+// Skips where compute is absent.
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
 
 #include <cstdint>
+#include <string>
 
 #include "shaders/compute_fill_spv.h"  // g_computeFillSpv    (Vulkan / OpenGL / Metal via SPIR-V)
 #include "shaders/compute_fill_dxbc.h" // g_computeFillDxbcCS (Direct3D 12)
@@ -21,7 +28,8 @@ namespace
 {
     constexpr uint32_t kCount = 64;
 
-    bool RunAsyncCompute(VriGraphicsAPI api, const void* shader, size_t shaderSize, bool& ran, bool& hasCompute)
+    // copyQueueType selects which queue copies the compute result back: Graphics or Transfer.
+    bool RunAsyncCompute(VriGraphicsAPI api, const void* shader, size_t shaderSize, VriQueueType copyQueueType, bool& ran, bool& hasCompute)
     {
         ran = false; hasCompute = false;
         VriDeviceCreationDesc dc{};
@@ -37,7 +45,7 @@ namespace
         hasCompute = c.GetDeviceDesc(dev)->hasComputeShader != VRI_FALSE;
         if (!hasCompute) { vriDestroyDevice(dev); return true; } // nothing to run; not a failure
 
-        VriQueue* gfxQueue = nullptr;  REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &gfxQueue) == VriResult_Success);
+        VriQueue* copyQueue = nullptr; REQUIRE(c.GetQueue(dev, copyQueueType, 0, &copyQueue) == VriResult_Success);
         VriQueue* compQueue = nullptr; REQUIRE(c.GetQueue(dev, VriQueueType_Compute, 0, &compQueue) == VriResult_Success);
 
         // storage buffer (compute writes) + host readback
@@ -86,17 +94,17 @@ namespace
         VriQueueSubmitDesc sub1{}; sub1.commandBuffers = &compCmd; sub1.commandBufferNum = 1; sub1.signalFences = &sig1; sub1.signalFenceNum = 1;
         c.QueueSubmit(compQueue, &sub1);
 
-        // ---- pass 2: GRAPHICS queue waits for fence value 1, copies, signals value 2 ----
-        VriCommandAllocator* gfxAlloc = nullptr; REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &gfxAlloc) == VriResult_Success);
-        VriCommandBuffer* gfxCmd = nullptr; REQUIRE(c.CreateCommandBuffer(gfxAlloc, &gfxCmd) == VriResult_Success);
-        REQUIRE(c.BeginCommandBuffer(gfxCmd) == VriResult_Success);
+        // ---- pass 2: copy queue (Graphics or Transfer) waits for fence value 1, copies, signals value 2 ----
+        VriCommandAllocator* copyAlloc = nullptr; REQUIRE(c.CreateCommandAllocator(dev, copyQueueType, &copyAlloc) == VriResult_Success);
+        VriCommandBuffer* copyCmd = nullptr; REQUIRE(c.CreateCommandBuffer(copyAlloc, &copyCmd) == VriResult_Success);
+        REQUIRE(c.BeginCommandBuffer(copyCmd) == VriResult_Success);
         VriBufferCopyDesc copy{}; copy.size = sbd.size;
-        c.CmdCopyBuffer(gfxCmd, readback, storage, &copy);
-        REQUIRE(c.EndCommandBuffer(gfxCmd) == VriResult_Success);
+        c.CmdCopyBuffer(copyCmd, readback, storage, &copy);
+        REQUIRE(c.EndCommandBuffer(copyCmd) == VriResult_Success);
         VriFenceSubmitDesc wait1{}; wait1.fence = fence; wait1.value = 1; wait1.stages = VriPipelineStage_Transfer;
         VriFenceSubmitDesc sig2{}; sig2.fence = fence; sig2.value = 2; sig2.stages = VriPipelineStage_AllCommands;
-        VriQueueSubmitDesc sub2{}; sub2.waitFences = &wait1; sub2.waitFenceNum = 1; sub2.commandBuffers = &gfxCmd; sub2.commandBufferNum = 1; sub2.signalFences = &sig2; sub2.signalFenceNum = 1;
-        c.QueueSubmit(gfxQueue, &sub2);
+        VriQueueSubmitDesc sub2{}; sub2.waitFences = &wait1; sub2.waitFenceNum = 1; sub2.commandBuffers = &copyCmd; sub2.commandBufferNum = 1; sub2.signalFences = &sig2; sub2.signalFenceNum = 1;
+        c.QueueSubmit(copyQueue, &sub2);
 
         c.Wait(fence, 2);
 
@@ -109,7 +117,7 @@ namespace
 
         c.DeviceWaitIdle(dev);
         c.DestroyFence(fence);
-        c.DestroyCommandAllocator(gfxAlloc); c.DestroyCommandAllocator(compAlloc);
+        c.DestroyCommandAllocator(copyAlloc); c.DestroyCommandAllocator(compAlloc);
         c.DestroyDescriptor(sbView); c.DestroyDescriptorPool(pool);
         c.DestroyPipeline(pipeline); c.DestroyPipelineLayout(layout);
         c.DestroyBuffer(storage); c.DestroyBuffer(readback);
@@ -118,18 +126,31 @@ namespace
     }
 } // namespace
 
-TEST_CASE("async compute: compute queue fills a buffer, graphics queue waits on a timeline fence and copies it")
+TEST_CASE("async compute: compute queue fills a buffer; a graphics- or transfer-queue copy waits on a timeline fence")
 {
-    bool ran = false, hasCompute = false;
-    const bool vk = RunAsyncCompute(VriGraphicsAPI_Vulkan, g_computeFillSpv, sizeof(g_computeFillSpv), ran, hasCompute);
-    if (ran) { CHECK(vk); MESSAGE("Vulkan async-compute, compute=", hasCompute); } else { MESSAGE("Vulkan unavailable - skipped"); }
+    struct Backend { VriGraphicsAPI api; const void* shader; size_t size; const char* name; };
+    const Backend backends[] = {
+        {VriGraphicsAPI_Vulkan, g_computeFillSpv,     sizeof(g_computeFillSpv),     "Vulkan"},
+        {VriGraphicsAPI_Metal,  g_computeFillSpv,     sizeof(g_computeFillSpv),     "Metal"},
+        {VriGraphicsAPI_OpenGL, g_computeFillSpv,     sizeof(g_computeFillSpv),     "OpenGL"},
+        {VriGraphicsAPI_D3D12,  g_computeFillDxbcCS,  sizeof(g_computeFillDxbcCS),  "D3D12"},
+    };
+    // Vary the copy queue so both the COMPUTE->GRAPHICS and COMPUTE->TRANSFER (dedicated copy engine)
+    // sync paths are exercised on every available backend.
+    struct CopyQueue { VriQueueType type; const char* name; };
+    const CopyQueue copyQueues[] = {{VriQueueType_Graphics, "graphics"}, {VriQueueType_Transfer, "transfer"}};
 
-    const bool mtl = RunAsyncCompute(VriGraphicsAPI_Metal, g_computeFillSpv, sizeof(g_computeFillSpv), ran, hasCompute);
-    if (ran) { CHECK(mtl); MESSAGE("Metal async-compute, compute=", hasCompute); } else { MESSAGE("Metal unavailable - skipped"); }
-
-    const bool gl = RunAsyncCompute(VriGraphicsAPI_OpenGL, g_computeFillSpv, sizeof(g_computeFillSpv), ran, hasCompute);
-    if (ran) { CHECK(gl); MESSAGE("OpenGL async-compute, compute=", hasCompute); } else { MESSAGE("OpenGL unavailable - skipped"); }
-
-    const bool d3d12 = RunAsyncCompute(VriGraphicsAPI_D3D12, g_computeFillDxbcCS, sizeof(g_computeFillDxbcCS), ran, hasCompute);
-    if (ran) { CHECK(d3d12); MESSAGE("D3D12 async-compute, compute=", hasCompute); } else { MESSAGE("D3D12 unavailable - skipped"); }
+    for (const Backend& b : backends)
+        for (const CopyQueue& cq : copyQueues)
+        {
+            bool ran = false, hasCompute = false;
+            const bool ok = RunAsyncCompute(b.api, b.shader, b.size, cq.type, ran, hasCompute);
+            // doctest stringifies a bare `const char*` as a pointer and MESSAGE's `*`-binding rejects
+            // a `+` expression, so build the line as one std::string and pass that single variable.
+            const std::string msg = ran
+                ? std::string(b.name) + " async-compute via " + cq.name + " copy, compute=" + (hasCompute ? "yes" : "no")
+                : std::string(b.name) + " unavailable - skipped";
+            if (ran) CHECK(ok);
+            MESSAGE(msg);
+        }
 }
