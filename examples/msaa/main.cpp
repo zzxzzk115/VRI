@@ -62,15 +62,17 @@ int main(int, char**)
     VriBuffer* vbuf = nullptr; c.CreateBuffer(app.dev, &vbd, &vbuf);
 
     // a 4x multisampled color target + a single-sample resolve target that the composite samples.
-    auto makeTex = [&](uint32_t samples, VriTextureUsageFlags usage, VriDescriptor** outView) {
+    auto makeTex = [&](uint32_t samples, VriTextureUsageFlags usage, VriDescriptor** outView, VriClearValue clear = {}) {
         VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = kColor; td.width = kWidth; td.height = kHeight; td.depth = 1;
         td.mipNum = 1; td.layerNum = 1; td.sampleNum = samples; td.usage = usage; td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue = clear; // match the render-pass clear (D3D12 fast-clear)
         VriTexture* t = nullptr; if (c.CreateTexture(app.dev, &td, &t) != VriResult_Success) app.Fail("CreateTexture (MSAA) failed");
         VriTextureViewDesc vd{}; vd.texture = t; vd.viewType = VriTextureViewType_2D; vd.format = VriFormat_Unknown; vd.aspect = VriImageAspect_Color;
         if (c.CreateTextureView(app.dev, &vd, outView) != VriResult_Success) app.Fail("view failed");
         return t;
     };
-    VriDescriptor* msaaView = nullptr; VriTexture* msaaColor = makeTex(kSamples, VriTextureUsage_ColorAttachment, &msaaView);
+    VriClearValue msaaClear{}; msaaClear.color.f32[0] = 0.06f; msaaClear.color.f32[1] = 0.07f; msaaClear.color.f32[2] = 0.09f; msaaClear.color.f32[3] = 1.0f;
+    VriDescriptor* msaaView = nullptr; VriTexture* msaaColor = makeTex(kSamples, VriTextureUsage_ColorAttachment, &msaaView, msaaClear);
     VriDescriptor* resolvedView = nullptr; VriTexture* resolved = makeTex(1, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, &resolvedView);
 
     // ---- scene layout/pipelines: push-constant rotation only; 1x + 4x variants ----

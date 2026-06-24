@@ -95,6 +95,7 @@ int main(int, char**)
     // resource (pass 2). One view serves both (DSV on attach, SRV on sample).
     VriTextureDesc sd{}; sd.type = VriTextureType_2D; sd.format = kShadowFormat; sd.width = kShadow; sd.height = kShadow; sd.depth = 1;
     sd.mipNum = 1; sd.layerNum = 1; sd.sampleNum = 1; sd.usage = VriTextureUsage_DepthStencilAttachment | VriTextureUsage_ShaderResource; sd.memoryLocation = VriMemoryLocation_Device;
+    sd.clearValue.depthStencil.depth = 1.0f; // matches the shadow-pass depth clear (D3D12 fast-clear)
     VriTexture* shadowTex = nullptr; if (c.CreateTexture(app.dev, &sd, &shadowTex) != VriResult_Success) app.Fail("CreateTexture (shadow map) failed");
     VriTextureViewDesc svd{}; svd.texture = shadowTex; svd.viewType = VriTextureViewType_2D; svd.format = VriFormat_Unknown; svd.aspect = VriImageAspect_Depth;
     VriDescriptor* shadowView = nullptr; c.CreateTextureView(app.dev, &svd, &shadowView);

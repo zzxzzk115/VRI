@@ -50,10 +50,11 @@ namespace
     bool g_offDepthInit = false;
 
     // Create a device-local 2D color/depth attachment + its view in one shot.
-    VriTexture* MakeAttachment(vriex::ExampleApp& app, VriFormat fmt, VriTextureUsageFlags usage, VriImageAspectFlags aspect, VriDescriptor** outView)
+    VriTexture* MakeAttachment(vriex::ExampleApp& app, VriFormat fmt, VriTextureUsageFlags usage, VriImageAspectFlags aspect, VriDescriptor** outView, VriClearValue clear = {})
     {
         VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = fmt; td.width = kWidth; td.height = kHeight; td.depth = 1;
         td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1; td.usage = usage; td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue = clear; // match the render-pass clear (D3D12 fast-clear)
         VriTexture* t = nullptr; if (app.c.CreateTexture(app.dev, &td, &t) != VriResult_Success) app.Fail("offscreen CreateTexture failed");
         VriTextureViewDesc vd{}; vd.texture = t; vd.viewType = VriTextureViewType_2D; vd.format = VriFormat_Unknown; vd.aspect = aspect;
         if (app.c.CreateTextureView(app.dev, &vd, outView) != VriResult_Success) app.Fail("offscreen view failed");
@@ -122,9 +123,11 @@ int main(int, char**)
 
     // offscreen targets: 2 color (sampled later) + depth
     VriDescriptor* off0View = nullptr; VriDescriptor* off1View = nullptr; VriDescriptor* offDepthView = nullptr;
-    VriTexture* off0 = MakeAttachment(app, kOffFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &off0View);
-    VriTexture* off1 = MakeAttachment(app, kOffFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &off1View);
-    VriTexture* offDepth = MakeAttachment(app, app.depthFormat, VriTextureUsage_DepthStencilAttachment, VriImageAspect_Depth, &offDepthView);
+    VriClearValue off0Clear{}; off0Clear.color.f32[0] = 0.08f; off0Clear.color.f32[1] = 0.10f; off0Clear.color.f32[2] = 0.14f; off0Clear.color.f32[3] = 1.0f;
+    VriClearValue offDepthClear{}; offDepthClear.depthStencil.depth = 1.0f;
+    VriTexture* off0 = MakeAttachment(app, kOffFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &off0View, off0Clear);
+    VriTexture* off1 = MakeAttachment(app, kOffFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &off1View); // clears to black (default)
+    VriTexture* offDepth = MakeAttachment(app, app.depthFormat, VriTextureUsage_DepthStencilAttachment, VriImageAspect_Depth, &offDepthView, offDepthClear);
 
     // ---- offscreen pipeline: CB@0 (vertex), Texture@1 + Sampler@2 (fragment); 2 color targets + depth
     VriDescriptorRangeDesc or_[3]{};

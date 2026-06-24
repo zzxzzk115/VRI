@@ -295,6 +295,7 @@ namespace vriex
             {
                 VriTextureDesc dtd{}; dtd.type = VriTextureType_2D; dtd.format = depthFormat; dtd.width = width; dtd.height = height; dtd.depth = 1;
                 dtd.mipNum = 1; dtd.layerNum = 1; dtd.sampleNum = 1; dtd.usage = VriTextureUsage_DepthStencilAttachment; dtd.memoryLocation = VriMemoryLocation_Device;
+                dtd.clearValue.depthStencil.depth = 1.0f; // matches the per-frame depth clear (below) for D3D12 fast-clear
                 if (c.CreateTexture(dev, &dtd, &depth) != VriResult_Success) Fail("depth CreateTexture failed");
                 VriTextureViewDesc dvd{}; dvd.texture = depth; dvd.viewType = VriTextureViewType_2D; dvd.format = VriFormat_Unknown; dvd.aspect = DepthAspect();
                 if (c.CreateTextureView(dev, &dvd, &depthView) != VriResult_Success) Fail("depth view failed");

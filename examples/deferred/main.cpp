@@ -101,10 +101,11 @@ namespace
     bool g_gInit = false;      // G-buffer color targets written at least once (layout tracking)
     bool g_gDepthInit = false;
 
-    VriTexture* MakeAttachment(vriex::ExampleApp& app, VriFormat fmt, VriTextureUsageFlags usage, VriImageAspectFlags aspect, VriDescriptor** outView)
+    VriTexture* MakeAttachment(vriex::ExampleApp& app, VriFormat fmt, VriTextureUsageFlags usage, VriImageAspectFlags aspect, VriDescriptor** outView, VriClearValue clear = {})
     {
         VriTextureDesc td{}; td.type = VriTextureType_2D; td.format = fmt; td.width = kWidth; td.height = kHeight; td.depth = 1;
         td.mipNum = 1; td.layerNum = 1; td.sampleNum = 1; td.usage = usage; td.memoryLocation = VriMemoryLocation_Device;
+        td.clearValue = clear; // match the render-pass clear (G-buffers clear to 0; depth to 1.0)
         VriTexture* t = nullptr; if (app.c.CreateTexture(app.dev, &td, &t) != VriResult_Success) app.Fail("G-buffer CreateTexture failed");
         VriTextureViewDesc vd{}; vd.texture = t; vd.viewType = VriTextureViewType_2D; vd.format = VriFormat_Unknown; vd.aspect = aspect;
         if (app.c.CreateTextureView(app.dev, &vd, outView) != VriResult_Success) app.Fail("G-buffer view failed");
@@ -217,7 +218,8 @@ int main(int, char**)
     VriTexture* gPos = MakeAttachment(app, kPositionFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &gPosView);
     VriTexture* gNormal = MakeAttachment(app, kNormalFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &gNormalView);
     VriTexture* gAlbedo = MakeAttachment(app, kAlbedoFormat, VriTextureUsage_ColorAttachment | VriTextureUsage_ShaderResource, VriImageAspect_Color, &gAlbedoView);
-    VriTexture* gDepth = MakeAttachment(app, app.depthFormat, VriTextureUsage_DepthStencilAttachment, VriImageAspect_Depth, &gDepthView);
+    VriClearValue gDepthClear{}; gDepthClear.depthStencil.depth = 1.0f;
+    VriTexture* gDepth = MakeAttachment(app, app.depthFormat, VriTextureUsage_DepthStencilAttachment, VriImageAspect_Depth, &gDepthView, gDepthClear);
 
     // ---- MRT (geometry) pipeline: CB@0 (vertex), Texture@1 + Sampler@2 (fragment); 3 colors + depth ----
     VriDescriptorRangeDesc mr[3]{};
