@@ -182,13 +182,11 @@ int main(int, char**)
     app.UploadBuffer(ibuf, kIndices, sizeof(kIndices), VriAccess_IndexBufferRead, VriPipelineStage_VertexInput);
     app.EndUpload();
 
-    // light + camera. The light orbits (ImGui); the camera is fixed. zeroToOne = 0 only on WebGL2
-    // (no glClipControl -> window depth is z*0.5+0.5); every other backend has [0,1] clip depth.
+    // light + camera. The light orbits (ImGui); the camera is fixed. Every backend now has [0,1]
+    // window depth: the GL backend applies SPIRV-Cross fixup_clipspace on the no-clipControl path
+    // (ES/WebGL2/pre-4.5 desktop), so WebGL2 is uncompressed [0,1] like all the rest - no remap.
     static float lightAzimuth = 0.9f, lightElev = 0.85f, depthBias = 0.0020f, ambient = 0.30f;
     float zeroToOne = 1.0f;
-#if defined(__EMSCRIPTEN__)
-    zeroToOne = useWgsl ? 1.0f : 0.0f; // web: WebGPU is zero-to-one, WebGL2 is not
-#endif
 
     app.onUpdate = [ustg, zeroToOne](uint64_t) {
         SceneUbo s{};
