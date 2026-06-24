@@ -19,7 +19,8 @@ namespace vri::d3d12
         // callback with a now-dangling `this`.
         if (m_infoQueue && m_msgCookie)
             m_infoQueue->UnregisterMessageCallback(m_msgCookie);
-        if (m_queue.idleEvent) CloseHandle(m_queue.idleEvent);
+        for (auto& q : m_queues)
+            if (q.idleEvent) CloseHandle(q.idleEvent);
     }
 
     void DeviceD3D12::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
@@ -103,16 +104,26 @@ namespace vri::d3d12
                 m_infoQueue->RegisterMessageCallback(D3D12MessageCallback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, this, &m_msgCookie);
         }
 
-        D3D12_COMMAND_QUEUE_DESC qd = {};
-        qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        if (FAILED(m_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&m_queue.queue))))
+        // One queue per VriQueueType, each on its own D3D12 engine so Compute/Transfer overlap
+        // graphics. Cross-queue ordering is the caller's via timeline fences (QueueSubmit).
+        static constexpr D3D12_COMMAND_LIST_TYPE kQueueListType[VriQueueType_Count] = {
+            D3D12_COMMAND_LIST_TYPE_DIRECT,  // Graphics
+            D3D12_COMMAND_LIST_TYPE_COMPUTE, // Compute  (async compute engine)
+            D3D12_COMMAND_LIST_TYPE_COPY,    // Transfer (DMA copy engine)
+        };
+        for (int t = 0; t < VriQueueType_Count; ++t)
         {
-            ReportError("CreateCommandQueue failed");
-            return VriResult_Failure;
+            D3D12_COMMAND_QUEUE_DESC qd = {};
+            qd.Type = kQueueListType[t];
+            if (FAILED(m_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&m_queues[t].queue))))
+            {
+                ReportError("CreateCommandQueue failed");
+                return VriResult_Failure;
+            }
+            m_queues[t].device = this;
+            m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_queues[t].idleFence)); // for *WaitIdle
+            m_queues[t].idleEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
         }
-        m_queue.device = this;
-        m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_queue.idleFence)); // for *WaitIdle
-        m_queue.idleEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
         if (VriResult r = CreateDescriptorHeaps(); r != VriResult_Success) return r;
         if (VriResult r = NegotiateFeatures(desc); r != VriResult_Success) return r;

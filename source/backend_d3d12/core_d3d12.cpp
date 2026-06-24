@@ -244,12 +244,18 @@ namespace vri::d3d12
         void VRI_CALL DestroyDescriptor(VriDescriptor* descriptor) { if (descriptor) delete Desc(descriptor); }
 
         // ---- command allocation / recording ----------------------------
-        VriResult VRI_CALL CreateCommandAllocator(VriDevice* device, VriQueueType, VriCommandAllocator** out)
+        VriResult VRI_CALL CreateCommandAllocator(VriDevice* device, VriQueueType type, VriCommandAllocator** out)
         {
             DeviceD3D12* d = Dev(device);
+            // Allocator's engine must match the queue its lists submit to: Graphics->DIRECT,
+            // Compute->COMPUTE, Transfer->COPY. Lists carry this type so submission stays valid.
+            static constexpr D3D12_COMMAND_LIST_TYPE kListType[VriQueueType_Count] = {
+                D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_LIST_TYPE_COPY};
+            const D3D12_COMMAND_LIST_TYPE listType = kListType[type < VriQueueType_Count ? type : VriQueueType_Graphics];
             CommandAllocatorD3D12* a = new CommandAllocatorD3D12{};
             a->device = d;
-            if (FAILED(d->Device()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&a->allocator))))
+            a->listType = listType;
+            if (FAILED(d->Device()->CreateCommandAllocator(listType, IID_PPV_ARGS(&a->allocator))))
             { delete a; d->ReportError("CreateCommandAllocator failed"); return VriResult_Failure; }
             *out = ToHandle(a);
             return VriResult_Success;
@@ -261,7 +267,7 @@ namespace vri::d3d12
             CommandAllocatorD3D12* a = Alloc(allocator);
             CommandBufferD3D12* c = new CommandBufferD3D12{};
             c->device = a->device; c->allocator = a;
-            if (FAILED(a->device->Device()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, a->allocator.Get(), nullptr, IID_PPV_ARGS(&c->list))))
+            if (FAILED(a->device->Device()->CreateCommandList(0, a->listType, a->allocator.Get(), nullptr, IID_PPV_ARGS(&c->list))))
             { delete c; a->device->ReportError("CreateCommandList failed"); return VriResult_Failure; }
             c->list->Close(); // created open; BeginCommandBuffer resets it
             *out = ToHandle(c);
@@ -406,7 +412,12 @@ namespace vri::d3d12
             }
         }
         void VRI_CALL QueueWaitIdle(VriQueue* queue) { WaitQueueIdle(Q(queue)); }
-        void VRI_CALL DeviceWaitIdle(VriDevice* device) { WaitQueueIdle(Dev(device)->GetQueue(VriQueueType_Graphics)); }
+        void VRI_CALL DeviceWaitIdle(VriDevice* device)
+        {
+            DeviceD3D12* d = Dev(device);
+            for (int t = 0; t < VriQueueType_Count; ++t)
+                WaitQueueIdle(d->GetQueue(static_cast<VriQueueType>(t)));
+        }
 
         VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
         {

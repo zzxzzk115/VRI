@@ -109,6 +109,7 @@ namespace vri::d3d12
     {
         DeviceD3D12*                  device = nullptr;
         ComPtr<ID3D12CommandAllocator> allocator;
+        D3D12_COMMAND_LIST_TYPE       listType = D3D12_COMMAND_LIST_TYPE_DIRECT; // engine the lists target (matches its queue)
     };
 
     struct PipelineD3D12;

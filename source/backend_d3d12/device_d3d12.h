@@ -24,11 +24,10 @@ namespace vri::d3d12
         ID3D12Device*        Device() const { return m_device.Get(); }
         IDXGIFactory4*       Factory() const { return m_factory.Get(); }
         const VriDeviceDesc& Desc() const { return m_desc; }
-        // TODO(async-compute): one DIRECT queue currently serves all VriQueueType. For true async
-        // compute, add a D3D12_COMMAND_LIST_TYPE_COMPUTE queue (and type-matched command allocators/
-        // lists) and return it for VriQueueType_Compute. Vulkan/Metal already give Compute its own
-        // queue; the cross-queue timeline-fence sync (test_async_compute_xbackend) works regardless.
-        QueueD3D12*          GetQueue(VriQueueType /*type*/) { return &m_queue; }
+        // Each VriQueueType has its own D3D12 engine: Graphics->DIRECT, Compute->COMPUTE,
+        // Transfer->COPY. Compute/Transfer run independently of graphics; cross-queue ordering
+        // is the caller's job via timeline fences (QueueSubmit wait/signal).
+        QueueD3D12*          GetQueue(VriQueueType type) { return &m_queues[type < VriQueueType_Count ? type : VriQueueType_Graphics]; }
         uint64_t             EnabledFeatures() const { return m_enabledFeatures; }
         void                 ReportError(const char* message) const;
         // Route a backend diagnostic (D3D12 InfoQueue message) to the app's callback.
@@ -61,7 +60,7 @@ namespace vri::d3d12
         uint32_t                     m_dsvNext = 0;
         static constexpr uint32_t    kRtvHeapSize = 256;
         static constexpr uint32_t    kDsvHeapSize = 64;
-        QueueD3D12            m_queue = {};
+        QueueD3D12            m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
         uint64_t              m_enabledFeatures = 0; // granted VriFeatureBits
         VriDeviceDesc         m_desc = {};
         VriCallbackInterface  m_callback = {};
