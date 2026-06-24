@@ -27,6 +27,7 @@ target("vri-tests")
     add_files("test_msaa_xbackend.cpp")       -- 4x MSAA + resolve (antialiased edges)
     add_files("test_mipmap_xbackend.cpp")     -- per-mip upload + mip-range view sampling
     add_files("test_compute_xbackend.cpp")    -- compute pipeline + dispatch + storage buffer
+    add_files("test_async_compute_xbackend.cpp") -- compute queue + cross-queue timeline-fence sync
     add_files("test_geometry_xbackend.cpp")   -- legacy geometry shader (gated where absent)
     add_files("test_tessellation_xbackend.cpp") -- legacy tessellation hull/domain (gated where absent)
     add_files("test_coordsys_xbackend.cpp")   -- Y-up coordinate parity across backends

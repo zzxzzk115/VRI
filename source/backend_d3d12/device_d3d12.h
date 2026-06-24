@@ -24,6 +24,10 @@ namespace vri::d3d12
         ID3D12Device*        Device() const { return m_device.Get(); }
         IDXGIFactory4*       Factory() const { return m_factory.Get(); }
         const VriDeviceDesc& Desc() const { return m_desc; }
+        // TODO(async-compute): one DIRECT queue currently serves all VriQueueType. For true async
+        // compute, add a D3D12_COMMAND_LIST_TYPE_COMPUTE queue (and type-matched command allocators/
+        // lists) and return it for VriQueueType_Compute. Vulkan/Metal already give Compute its own
+        // queue; the cross-queue timeline-fence sync (test_async_compute_xbackend) works regardless.
         QueueD3D12*          GetQueue(VriQueueType /*type*/) { return &m_queue; }
         uint64_t             EnabledFeatures() const { return m_enabledFeatures; }
         void                 ReportError(const char* message) const;

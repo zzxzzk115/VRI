@@ -13,7 +13,10 @@ namespace vri::mtl
 {
     DeviceMTL::~DeviceMTL()
     {
-        // QueueMTL objects are members (not heap), nothing to free there.
+        // QueueMTL objects are members (not heap). Compute/Transfer own a dedicated MTLCommandQueue
+        // (Graphics aliases m_queue); release those, then m_queue.
+        for (int t = 0; t < VriQueueType_Count; ++t)
+            if (m_queueObjs[t].queue && m_queueObjs[t].queue != m_queue) [m_queueObjs[t].queue release];
         if (m_queue) [m_queue release];
         if (m_device) [m_device release];
     }
@@ -54,10 +57,14 @@ namespace vri::mtl
             }
         }
 
+        // Graphics uses the primary queue; Compute and Transfer each get their own MTLCommandQueue
+        // so work submitted to them runs concurrently with graphics (async compute / async transfer).
+        // Cross-queue ordering is via MTLSharedEvent timeline fences (see QueueSubmit).
         for (int t = 0; t < VriQueueType_Count; ++t)
         {
             m_queueObjs[t].device = this;
-            m_queueObjs[t].queue = m_queue; // Metal has a single unified queue; all VRI queue types share it
+            m_queueObjs[t].queue = (t == VriQueueType_Graphics) ? m_queue : [m_device newCommandQueue];
+            if (!m_queueObjs[t].queue) { ReportError("newCommandQueue (per-type) failed"); return VriResult_Failure; }
         }
 
         FillDeviceDesc();

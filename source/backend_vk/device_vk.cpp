@@ -249,15 +249,20 @@ namespace vri::vk
             return VriResult_Failure;
         }
 
-        // Phase 1: a single graphics queue serves all queue types.
+        // Give each VRI queue type its own VkQueue from the graphics family when the family exposes
+        // enough queues, so async-compute / async-transfer work can overlap graphics. Staying in one
+        // family avoids queue-family ownership transfers on shared resources (a dedicated compute-only
+        // family would need those). If the family has fewer queues than types, the extras alias queue 0.
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_queueFamilies[t] = graphicsFamily;
 
-        const float priority = 1.0f;
+        const uint32_t familyQueueCount = families[graphicsFamily].queueCount;
+        const uint32_t queueCount = familyQueueCount < (uint32_t)VriQueueType_Count ? familyQueueCount : (uint32_t)VriQueueType_Count;
+        const float priorities[VriQueueType_Count] = {1.0f, 1.0f, 1.0f};
         VkDeviceQueueCreateInfo queueCi = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         queueCi.queueFamilyIndex = graphicsFamily;
-        queueCi.queueCount = 1;
-        queueCi.pQueuePriorities = &priority;
+        queueCi.queueCount = queueCount;
+        queueCi.pQueuePriorities = priorities;
 
         // ---- available device extensions ----
         uint32_t extCount = 0;
@@ -557,12 +562,13 @@ namespace vri::vk
 
         for (int t = 0; t < VriQueueType_Count; ++t)
         {
+            const uint32_t idx = (uint32_t)t < queueCount ? (uint32_t)t : 0; // distinct queue per type if available
             VkQueue q = VK_NULL_HANDLE;
-            vkGetDeviceQueue(m_device, graphicsFamily, 0, &q);
+            vkGetDeviceQueue(m_device, graphicsFamily, idx, &q);
             m_queues[t].device = this;
             m_queues[t].queue = q;
             m_queues[t].familyIndex = graphicsFamily;
-            m_queues[t].indexInFamily = 0;
+            m_queues[t].indexInFamily = idx;
         }
 
         return VriResult_Success;

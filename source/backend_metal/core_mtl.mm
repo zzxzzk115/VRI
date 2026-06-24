@@ -258,8 +258,12 @@ namespace vri::mtl
 
         VriResult VRI_CALL CreateCommandBuffer(VriCommandAllocator* allocator, VriCommandBuffer** out)
         {
+            CommandAllocatorMTL* a = CA(allocator);
             CommandBufferMTL* c = new CommandBufferMTL{};
-            c->device = CA(allocator)->device;
+            c->device = a->device;
+            // Allocate against the queue for the allocator's type, so a Compute allocator's command
+            // buffers run on the async compute queue (and signal/wait events stay in queue order).
+            c->queue = a->device->GetQueue(a->type)->queue;
             *out = ToHandle(c);
             return VriResult_Success;
         }
@@ -267,7 +271,7 @@ namespace vri::mtl
         VriResult VRI_CALL BeginCommandBuffer(VriCommandBuffer* cmd)
         {
             CommandBufferMTL* c = CB(cmd);
-            c->cmd = [[c->device->Queue() commandBuffer] retain];
+            c->cmd = [[c->queue commandBuffer] retain];
             c->renderEnc = nil; c->computeEnc = nil; c->blitEnc = nil;
             c->boundLayout = nullptr; c->boundPipeline = nullptr;
             c->indexBuffer = nil; c->indexOffset = 0; c->indexType = MTLIndexTypeUInt16;

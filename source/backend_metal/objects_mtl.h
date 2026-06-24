@@ -38,6 +38,7 @@ namespace vri::mtl
     struct CommandBufferMTL
     {
         DeviceMTL*                  device;
+        id<MTLCommandQueue>         queue;      // the per-type queue this buffer is allocated against
         id<MTLCommandBuffer>        cmd;        // retained for the Begin..Submit span
         id<MTLRenderCommandEncoder> renderEnc;  // valid between BeginRendering/EndRendering
         id<MTLComputeCommandEncoder> computeEnc; // lazily opened for dispatch
