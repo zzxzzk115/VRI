@@ -41,6 +41,10 @@ namespace vri::gl
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
         void*                   xdisplay = nullptr; // X11 Display*
         unsigned long           xwindow = 0;        // X11 Window / GLXDrawable
+#    if defined(VRI_GL_EGL)
+        void*                   eglSurface = nullptr;   // EGLSurface for the target window (EGL present)
+        void*                   wlEglWindow = nullptr;  // wl_egl_window* (Wayland only; NULL on X11)
+#    endif
 #elif defined(__APPLE__)
         void*                   nsWindow = nullptr; // NSWindow* target (present retargets the NSOpenGL context to its view)
 #endif

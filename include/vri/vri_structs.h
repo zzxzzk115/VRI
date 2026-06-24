@@ -59,6 +59,14 @@ typedef struct VriDeviceCreationDesc
        normal creation; cast per backend (see ext/vri_ext_interop.h). */
     const void*                   nativeCreateInfo;
 
+    /* Optional native display connection shared between the device's GL/EGL context
+       and window presentation. Required by the native OpenGL ES backend on Wayland:
+       pass the app's wl_display*, since EGL needs the same connection for the context
+       and the window surface. NULL (the default) -> the backend picks a default /
+       headless display. Ignored by backends that don't need it (X11 window IDs, and
+       Vulkan/D3D12/Metal/desktop-GL, work without it). */
+    const void*                   nativeDisplay;
+
     const VriAllocationCallbacks* allocationCallbacks; /* optional */
     const VriCallbackInterface*   callbackInterface;   /* optional */
 } VriDeviceCreationDesc;

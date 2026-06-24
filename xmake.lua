@@ -61,6 +61,16 @@ option("vri_backend_gl")
     set_description("Enable the OpenGL / OpenGL ES / WebGL backend")
 option_end()
 
+option("vri_backend_gl_es")
+    -- Build the GL backend as native OpenGL ES (EGL context, system libGLESv2) instead
+    -- of desktop GL (glad + GLX/WGL). For embedded targets / Raspberry Pi. Off by default
+    -- (desktop GL); turn on with `xmake f --vri_backend_gl_es=y`. Ignored on wasm (the
+    -- web build is always WebGL2) and when the GL backend itself is disabled.
+    set_default(false)
+    set_showmenu(true)
+    set_description("Build the OpenGL backend as native OpenGL ES (EGL; embedded / Raspberry Pi)")
+option_end()
+
 option("vri_backend_d3d11")
     set_default(false)
     set_showmenu(true)

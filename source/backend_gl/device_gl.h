@@ -85,6 +85,15 @@ namespace vri::gl
         uint32_t             ShaderVersion() const { return m_shaderVersion; }
         const GlFeatures&    Features() const { return m_features; }
         GLFWwindow*          Window() const { return m_window; } // hidden context-owning window (macOS present)
+#if defined(VRI_GL_EGL)
+        // EGL handles for the windowed swapchain (build a window surface that shares this
+        // device's display + config, then retarget this context to present). On Linux this
+        // serves both desktop GL and native GLES.
+        void*                EglDisplay() const { return m_eglDisplay; }
+        void*                EglConfig() const { return m_eglConfig; }
+        void*                EglContext() const { return m_eglContext; }
+        void*                EglSurface() const { return m_eglSurface; }
+#endif
         void                 ReportError(const char* message) const;
         // Route a backend diagnostic (GL KHR_debug message) to the app's callback.
         void                 Diagnostic(VriMessageSeverity severity, const char* message) const;
@@ -99,8 +108,23 @@ namespace vri::gl
         void FillDeviceDesc();
         void DetectFeatures();
         void FillRegistry();
+#if defined(VRI_GL_EGL)
+        // GLFW-free EGL context bring-up (Linux desktop GL + native GLES). nativeDisplay is
+        // the app's wl_display* on Wayland (the context + present surface must share it), or
+        // NULL for X11 / headless (surfaceless or 1x1-pbuffer, renders into FBOs).
+        bool InitEGL(const void* nativeDisplay);
+#endif
 
-        GLFWwindow*          m_window = nullptr; // hidden context-owning window
+        GLFWwindow*          m_window = nullptr; // hidden context-owning window (desktop/web)
+#if defined(VRI_GL_EGL)
+        // EGL handles (void* to keep <EGL/egl.h> out of this header; EGLDisplay/EGLContext/
+        // EGLSurface/EGLConfig are all pointer types). m_eglConfig is kept so the windowed
+        // swapchain can build a window surface compatible with this context.
+        void*                m_eglDisplay = nullptr;
+        void*                m_eglContext = nullptr;
+        void*                m_eglSurface = nullptr; // EGL_NO_SURFACE when surfaceless
+        void*                m_eglConfig  = nullptr;
+#endif
         GLuint              m_vao = 0;           // default VAO (GL core requires one bound)
         bool                m_es = false;        // OpenGL ES / WebGL profile
         uint32_t            m_shaderVersion = 420; // GLSL #version for SPIRV-Cross

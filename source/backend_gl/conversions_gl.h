@@ -102,7 +102,7 @@ namespace vri::gl
         {
             case VriAddressMode_MirroredRepeat: return GL_MIRRORED_REPEAT;
             case VriAddressMode_ClampToEdge:    return GL_CLAMP_TO_EDGE;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             case VriAddressMode_ClampToBorder:  return GL_CLAMP_TO_BORDER; // WebGL2/GLES has no border clamp
 #else
             case VriAddressMode_ClampToBorder:  return GL_CLAMP_TO_EDGE;

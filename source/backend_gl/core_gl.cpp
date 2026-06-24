@@ -24,6 +24,7 @@
 #include <spirv_cross/spirv_glsl.hpp>
 
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -41,6 +42,22 @@ namespace vri::gl
         inline DescriptorGL*    Desc(VriDescriptor* h)   { return reinterpret_cast<DescriptorGL*>(h); }
         inline PipelineGL*      Pipe(VriPipeline* h)     { return reinterpret_cast<PipelineGL*>(h); }
         inline FenceGL*         Fen(VriFence* h)         { return reinterpret_cast<FenceGL*>(h); }
+
+        // Read a range of a buffer (bound to `target`) into host memory. glGetBufferSubData
+        // exists on desktop GL and the Emscripten WebGL2 runtime, but NOT in native OpenGL ES
+        // - there, read back by mapping the range (ES3 supports glMapBufferRange, unlike WebGL2).
+        inline void ReadBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, void* dst)
+        {
+#if defined(VRI_GL_NATIVE_ES)
+            if (void* p = glMapBufferRange(target, offset, size, GL_MAP_READ_BIT))
+            {
+                std::memcpy(dst, p, static_cast<size_t>(size));
+                glUnmapBuffer(target);
+            }
+#else
+            glGetBufferSubData(target, offset, size, dst);
+#endif
+        }
 
         // ESSL/WebGL has no gl_BaseVertex / gl_BaseInstance, but Slang lowers
         // SV_VertexID/SV_InstanceID as (VertexIndex - BaseVertex) etc. and SPIRV-Cross
@@ -354,7 +371,7 @@ namespace vri::gl
             // everything else uses the neutral GL_COPY_WRITE_BUFFER binding point.
             const GLenum target = (desc->usage & VriBufferUsage_IndexBuffer) ? GL_ELEMENT_ARRAY_BUFFER : GL_COPY_WRITE_BUFFER;
             void* persistentPtr = nullptr;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (Dev(device)->Features().dsa) // GL 4.5 DSA (implies 4.4 immutable buffer storage)
             {
                 glCreateBuffers(1, &id);
@@ -387,7 +404,7 @@ namespace vri::gl
         {
             if (!buffer) return;
             BufferGL* b = Buf(buffer);
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (b->persistentPtr) glUnmapNamedBuffer(b->id); // release the persistent mapping (glDeleteBuffers would too)
 #endif
             glDeleteBuffers(1, &b->id);
@@ -408,14 +425,14 @@ namespace vri::gl
                 if (access & GL_MAP_READ_BIT)
                 {
                     glBindBuffer(b->target, b->id);
-                    glGetBufferSubData(b->target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), b->shadow);
+                    ReadBufferSubData(b->target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), b->shadow);
                     glBindBuffer(b->target, 0);
                 }
                 return b->shadow;
             }
             if (b->persistentPtr) // GL 4.4: persistently mapped at creation, return that pointer
                 return static_cast<char*>(b->persistentPtr) + offset;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (b->device->Features().dsa) // GL 4.5: map without binding
                 return glMapNamedBufferRange(b->id, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(len), access);
 #endif
@@ -439,7 +456,7 @@ namespace vri::gl
                 b->shadow = nullptr;
                 return;
             }
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (b->device->Features().dsa) // GL 4.5: unmap without binding
             {
                 glUnmapNamedBuffer(b->id);
@@ -489,7 +506,7 @@ namespace vri::gl
 
             // Immutable storage: GL 4.2+ and always present on GLES3/WebGL2; false only on macOS GL 4.1.
             const bool texStorage = Dev(device)->Features().textureStorage;
-#if !defined(__EMSCRIPTEN__) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
+#if !defined(VRI_GL_ES_HEADERS) // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
             const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
 #endif
             GLuint id = 0;
@@ -497,7 +514,7 @@ namespace vri::gl
             bool isRenderbuffer = false;
             if (ms)
             {
-#if defined(__EMSCRIPTEN__)
+#if defined(VRI_GL_ES_HEADERS)
                 // WebGL2 has no multisample textures - use a multisample renderbuffer
                 // (render-only; resolved to a single-sample texture).
                 glGenRenderbuffers(1, &id);
@@ -531,7 +548,7 @@ namespace vri::gl
             {
                 // Cubemap: glTexStorage2D on GL_TEXTURE_CUBE_MAP allocates all 6 square faces.
                 target = GL_TEXTURE_CUBE_MAP;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                 if (dsa) { glCreateTextures(target, 1, &id); glTextureStorage2D(id, mips, gf.internalFormat, w, h); }
                 else
 #endif
@@ -546,7 +563,7 @@ namespace vri::gl
             {
                 // 2D array texture (GLES3/WebGL2 + desktop): glTexStorage3D, depth = layer count.
                 target = GL_TEXTURE_2D_ARRAY;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                 if (dsa) { glCreateTextures(target, 1, &id); glTextureStorage3D(id, mips, gf.internalFormat, w, h, layers); }
                 else
 #endif
@@ -557,7 +574,7 @@ namespace vri::gl
                     glBindTexture(target, 0);
                 }
             }
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             else if (dsa)
             {
                 glCreateTextures(GL_TEXTURE_2D, 1, &id);
@@ -634,7 +651,7 @@ namespace vri::gl
         VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, VriDescriptor** out)
         {
             GLuint s = 0;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (Dev(device)->Features().dsa) glCreateSamplers(1, &s); // GL 4.5: pre-initialized sampler object
             else
 #endif
@@ -738,7 +755,7 @@ namespace vri::gl
                     vs = CompileShader(d, GL_VERTEX_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelVertex, &combined, &pushMembers, bIn(s.stage), bOut(s.stage)));
                 else if (s.stage == VriShaderStage_Fragment)
                     fs = CompileShader(d, GL_FRAGMENT_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelFragment, &combined, &pushMembers, bIn(s.stage), bOut(s.stage)));
-#if !defined(__EMSCRIPTEN__) // geometry/tessellation shaders are desktop-only (absent in GLES3/WebGL2 headers)
+#if !defined(VRI_GL_ES_HEADERS) // geometry/tessellation shaders are desktop-only (absent in GLES3/WebGL2 headers)
                 else if (s.stage == VriShaderStage_Geometry)
                     gs = CompileShader(d, GL_GEOMETRY_SHADER, SpirvToGlsl(d, layout, s.bytecode, s.bytecodeSize, s.entryPointName, spv::ExecutionModelGeometry, &combined, nullptr, bIn(s.stage), bOut(s.stage)));
                 else if (s.stage == VriShaderStage_TessControl)
@@ -849,7 +866,7 @@ namespace vri::gl
             // buffer (glBindVertexBuffer), avoiding per-draw glVertexAttribPointer.
             // Pre-4.3 / GLES / WebGL2 keep the classic path (formatVao stays 0); the
             // 4.3+ entry points are undeclared in the Emscripten GLES3 headers.
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (d->Features().separateAttrib)
             {
                 const bool dsa = d->Features().dsa; // 4.5: configure the VAO by name
@@ -887,7 +904,7 @@ namespace vri::gl
                     if (!seen) p->vboBindings.push_back(VboBindingGL{a.bindingSlot, a.stride, a.divisor});
                 }
             }
-#endif // !__EMSCRIPTEN__ (separate-format VAO)
+#endif // !VRI_GL_ES_HEADERS (separate-format VAO)
             p->topology = ToGLTopology(desc->inputAssembly.topology);
             p->patchVertices = desc->tessellation.patchControlPoints;
             p->cullEnable = desc->rasterization.cullMode != VriCullMode_None;
@@ -929,7 +946,7 @@ namespace vri::gl
             DeviceGL* d = Dev(device);
             if (!d->Desc().hasComputeShader)
                 return VriResult_Unsupported; // GLES 3.0 / WebGL2 has no compute
-#if defined(__EMSCRIPTEN__)
+#if defined(VRI_GL_ES_HEADERS)
             return VriResult_Unsupported; // GL_COMPUTE_SHADER is not in WebGL2
 #else
             const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
@@ -971,7 +988,7 @@ namespace vri::gl
             p->isCompute = true;
             *out = ToHandle(p);
             return VriResult_Success;
-#endif // !__EMSCRIPTEN__
+#endif // !VRI_GL_ES_HEADERS
         }
         void VRI_CALL DestroyPipeline(VriPipeline* pipeline)
         {
@@ -1051,7 +1068,7 @@ namespace vri::gl
             }
             if (a->depth) { const DescriptorGL* dv = Desc(a->depth->view); key.depthId = dv->texture->id; key.depthMip = dv->mip; }
 
-#if !defined(__EMSCRIPTEN__) // GL 4.5: configure + clear the FBO by name (undeclared on GLES3)
+#if !defined(VRI_GL_ES_HEADERS) // GL 4.5: configure + clear the FBO by name (undeclared on GLES3)
             const bool dsa = c->device->Features().dsa;
 #endif
             bool isNew = false;
@@ -1068,7 +1085,7 @@ namespace vri::gl
                     const GLenum att = GL_COLOR_ATTACHMENT0 + i;
                     if (v->texture->isRenderbuffer) // MSAA renderbuffer attachment
                     {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                         if (dsa) glNamedFramebufferRenderbuffer(fbo, att, GL_RENDERBUFFER, v->texture->id);
                         else
 #endif
@@ -1076,7 +1093,7 @@ namespace vri::gl
                     }
                     else
                     {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                         if (dsa) glNamedFramebufferTexture(fbo, att, v->texture->id, static_cast<GLint>(v->mip));
                         else
 #endif
@@ -1084,7 +1101,7 @@ namespace vri::gl
                     }
                     drawBufs[i] = att;
                 }
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                 if (dsa) glNamedFramebufferDrawBuffers(fbo, static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
                 else
 #endif
@@ -1093,7 +1110,7 @@ namespace vri::gl
                 {
                     const DescriptorGL* dv = Desc(a->depth->view);
                     const GLenum attach = dv->texture->glFormat == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                     if (dsa) glNamedFramebufferTexture(fbo, attach, dv->texture->id, static_cast<GLint>(dv->mip));
                     else
 #endif
@@ -1113,7 +1130,7 @@ namespace vri::gl
                 if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
                 {
                     const GLfloat* col = a->colors[i].clearValue.color.f32;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                     if (dsa) glClearNamedFramebufferfv(fbo, GL_COLOR, static_cast<GLint>(i), col);
                     else
 #endif
@@ -1128,7 +1145,7 @@ namespace vri::gl
                     glStencilMask(0xFFu);
                     const GLfloat depth = a->depth->clearValue.depthStencil.depth;
                     const GLint stencil = static_cast<GLint>(a->depth->clearValue.depthStencil.stencil);
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                     if (dsa) glClearNamedFramebufferfi(fbo, GL_DEPTH_STENCIL, 0, depth, stencil);
                     else
 #endif
@@ -1137,7 +1154,7 @@ namespace vri::gl
                 else
                 {
                     const GLfloat d = a->depth->clearValue.depthStencil.depth;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                     if (dsa) glClearNamedFramebufferfv(fbo, GL_DEPTH, 0, &d);
                     else
 #endif
@@ -1227,7 +1244,7 @@ namespace vri::gl
             }
             else glDisable(GL_STENCIL_TEST);
             c->topology = p->topology;
-#if !defined(__EMSCRIPTEN__) && defined(GL_PATCHES) && defined(GL_PATCH_VERTICES) // tessellation: desktop GL only
+#if !defined(VRI_GL_ES_HEADERS) && defined(GL_PATCHES) && defined(GL_PATCH_VERTICES) // tessellation: desktop GL only
             if (p->topology == GL_PATCHES && p->patchVertices > 0)
                 glPatchParameteri(GL_PATCH_VERTICES, static_cast<GLint>(p->patchVertices));
 #endif
@@ -1253,7 +1270,7 @@ namespace vri::gl
                                       static_cast<GLintptr>(view->bufferOffset),
                                       static_cast<GLsizeiptr>(view->bufferRange ? view->bufferRange : view->buffer->size));
                 }
-#if !defined(__EMSCRIPTEN__) // image load/store is desktop GL 4.2+; WebGL2 has no compute
+#if !defined(VRI_GL_ES_HEADERS) // image load/store is desktop GL 4.2+; WebGL2 has no compute
                 else if (lb->type == VriDescriptorType_StorageTexture && view->texture)
                 {
                     // storage image (compute UAV): bind to its image unit for image load/store.
@@ -1264,13 +1281,13 @@ namespace vri::gl
             }
             // Textures + samplers are bound per combined sampler the pipeline declared:
             // GLSL fuses (texture, sampler) into one sampler2D at a texture unit.
-#if !defined(__EMSCRIPTEN__) // GL 4.5: glBindTextureUnit + glTextureParameteri (undeclared on GLES3)
+#if !defined(VRI_GL_ES_HEADERS) // GL 4.5: glBindTextureUnit + glTextureParameteri (undeclared on GLES3)
             const bool dsa = c->device->Features().dsa; // no active-unit churn on the modern path
 #endif
             if (c->boundPipeline)
                 for (const CombinedSamplerGL& cs : c->boundPipeline->combinedSamplers)
                 {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                     if (!dsa)
 #endif
                         glActiveTexture(GL_TEXTURE0 + cs.unit);
@@ -1282,7 +1299,7 @@ namespace vri::gl
                             const DescriptorGL* tv = it->second;
                             if (tv->texture->isRenderbuffer) continue; // renderbuffers aren't sampled
                             // Honor the view's base mip so a mip-range view samples that level.
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
                             if (dsa)
                             {
                                 glBindTextureUnit(cs.unit, tv->texture->id);
@@ -1366,7 +1383,7 @@ namespace vri::gl
             // Separate-format path (GL 4.3+): bind the pipeline's pre-baked VAO and
             // only point each stream at its buffer (format is already in the VAO).
             // formatVao is always 0 on Emscripten (the 4.3+ path compiles out there).
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (c->boundPipeline && c->boundPipeline->formatVao)
             {
                 const PipelineGL* p = c->boundPipeline;
@@ -1424,7 +1441,7 @@ namespace vri::gl
             CommandBufferGL* c = CB(cmd);
             SetupVertexAttribs(c);
             // baseVertex maps to `first` (gl_VertexID already includes it, like VK).
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (d->baseInstance != 0 && c->device->Features().baseInstance) // GL 4.2: honor firstInstance
             {
                 ApplyBaseOffsetUniforms(c, static_cast<int32_t>(d->baseVertex), d->baseInstance);
@@ -1441,7 +1458,7 @@ namespace vri::gl
         void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
         {
             CommandBufferGL* c = CB(cmd);
-#if defined(__EMSCRIPTEN__)
+#if defined(VRI_GL_ES_HEADERS)
             // WebGL2/GLES has no glDrawElementsBaseVertex; bake vertexOffset into the per-vertex
             // attribute pointers so base-vertex indexed draws (e.g. an ImGui popup/combo whose
             // 2nd draw list has vtxOffset > 0) render correctly instead of being rejected.
@@ -1454,7 +1471,7 @@ namespace vri::gl
             const uintptr_t offset = static_cast<uintptr_t>(c->indexOffset) + static_cast<uintptr_t>(d->baseIndex) * indexSize;
             const void* ip = reinterpret_cast<const void*>(offset);
             const GLsizei inst = static_cast<GLsizei>(d->instanceNum ? d->instanceNum : 1u);
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             // Base offsets: vertexOffset is GL 3.2 (glDrawElements*BaseVertex, all desktop
             // incl. macOS 4.1); baseInstance is GL 4.2. gl_VertexID/gl_InstanceID parity is
             // handled by SPIRV-Cross (gl_Base*ARB or the fallback uniforms set below).
@@ -1487,7 +1504,7 @@ namespace vri::gl
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
         {
             CommandBufferGL* c = CB(cmd);
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             // GL indirect commands match VK/GL layout {count, instanceCount, first,
             // baseInstance}. glDrawArraysIndirect is GL 4.0 (all desktop); >1 draw uses
             // multi-draw-indirect (4.3) where available, else loops single draws.
@@ -1500,6 +1517,14 @@ namespace vri::gl
                 for (uint32_t i = 0; i < (drawNum ? drawNum : 1u); ++i)
                     glDrawArraysIndirect(c->topology, reinterpret_cast<const void*>(static_cast<uintptr_t>(offset + static_cast<uint64_t>(i) * stride)));
             glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+#elif defined(VRI_GL_NATIVE_ES)
+            // Native OpenGL ES 3.1: glDrawArraysIndirect is core (unlike WebGL2). Core ES has
+            // no multi-draw-indirect, so issue one indirect draw per command from the buffer.
+            SetupVertexAttribs(c);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
+            for (uint32_t i = 0; i < (drawNum ? drawNum : 1u); ++i)
+                glDrawArraysIndirect(c->topology, reinterpret_cast<const void*>(static_cast<uintptr_t>(offset + static_cast<uint64_t>(i) * stride)));
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 #else
             (void)buffer; (void)offset; (void)drawNum; (void)stride;
             c->device->ReportError("CmdDrawIndirect: indirect draw is unavailable on WebGL2"); // explicit, never silent
@@ -1507,7 +1532,7 @@ namespace vri::gl
         }
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc* d)
         {
-#if defined(__EMSCRIPTEN__)
+#if defined(VRI_GL_ES_HEADERS)
             (void)d; // compute is unavailable in WebGL2 (no pipeline can be created)
 #else
             glDispatchCompute(d->x, d->y, d->z);
@@ -1519,7 +1544,7 @@ namespace vri::gl
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
         {
             CommandBufferGL* c = CB(cmd);
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             // glDispatchComputeIndirect is GL 4.3 (compute already requires 4.3, so no
             // extra gate). Command layout {x, y, z} matches VK/WebGPU.
             glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, Buf(buffer)->id);
@@ -1538,7 +1563,7 @@ namespace vri::gl
             // sees it bound to a non-element target (which would taint it).
             const BufferGL* s = Buf(src);
             const BufferGL* d = Buf(dst);
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (s->device->Features().dsa) // GL 4.5: copy without disturbing binding points
             {
                 glCopyNamedBufferSubData(s->id, d->id, static_cast<GLintptr>(r->srcOffset), static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size));
@@ -1555,7 +1580,7 @@ namespace vri::gl
             //     (glCopyNamedBufferSubData) isn't available either on GL 4.1, so always bounce.
             const bool srcEl = s->target == GL_ELEMENT_ARRAY_BUFFER;
             const bool dstEl = d->target == GL_ELEMENT_ARRAY_BUFFER;
-#if defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+#if defined(__APPLE__) && !defined(VRI_GL_ES_HEADERS)
             const bool cpuBounce = true;
 #else
             const bool cpuBounce = s->device->IsES() && srcEl != dstEl;
@@ -1564,7 +1589,7 @@ namespace vri::gl
             {
                 void* tmp = std::malloc(static_cast<size_t>(r->size));
                 glBindBuffer(s->target, s->id);
-                glGetBufferSubData(s->target, static_cast<GLintptr>(r->srcOffset), static_cast<GLsizeiptr>(r->size), tmp);
+                ReadBufferSubData(s->target, static_cast<GLintptr>(r->srcOffset), static_cast<GLsizeiptr>(r->size), tmp);
                 glBindBuffer(s->target, 0);
                 glBindBuffer(d->target, d->id);
                 glBufferSubData(d->target, static_cast<GLintptr>(r->dstOffset), static_cast<GLsizeiptr>(r->size), tmp);
@@ -1610,7 +1635,7 @@ namespace vri::gl
             const GLint z = static_cast<GLint>(region->texture.baseLayer);
             const GLsizei d = static_cast<GLsizei>(region->texture.layerNum ? region->texture.layerNum : 1u);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (t->device->Features().dsa) // GL 4.5: upload without binding the texture (cube uses the layered 3D path, z = face)
             {
                 if (array || cube) glTextureSubImage3D(t->id, mip, region->texture.x, region->texture.y, z, static_cast<GLsizei>(w), static_cast<GLsizei>(h), d, t->glFormat, t->glType, off);

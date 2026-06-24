@@ -32,6 +32,9 @@
 #include <cstring>
 #include <functional>
 #include <vector>
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#    include <filesystem> // auto-detect the Wayland socket so `xmake run` works from an SSH shell
+#endif
 
 #include "capture.h"
 #include "imgui_vri.h"
@@ -114,6 +117,7 @@ namespace vriex
         VriCommandAllocator* alloc = nullptr; VriCommandBuffer* cmd = nullptr; VriFence* fence = nullptr;
         VriGraphicsAPI api = VriGraphicsAPI_Auto;
         const char* apiName = "Vulkan";
+        char apiLabel[64] = {}; // backs apiName for the GL family ("OpenGL 4.6" / "OpenGL ES 3.1" / "WebGL2 (ES 3.0)")
         bool useWgsl = false, useDxbc = false;
 
         // ---- the example fills these in before Run() ----
@@ -142,6 +146,48 @@ namespace vriex
 
         [[noreturn]] void Fail(const char* msg) { std::fprintf(stderr, "[%s] %s\n", name, msg); std::exit(1); }
 
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+        // Make `xmake run example-*` reach the screen on a Wayland box (e.g. a Raspberry Pi)
+        // regardless of which shell it's launched from. Whenever there's a live Wayland session,
+        // lock SDL to the Wayland driver and drop any DISPLAY, because:
+        //   * a local terminal usually has BOTH WAYLAND_DISPLAY and DISPLAY=:0 set, and SDL may
+        //     otherwise pick X11 (XWayland) - which here doesn't present, so you'd have to
+        //     `unset DISPLAY` by hand;
+        //   * an SSH shell has neither, and a leftover `export DISPLAY=:0` makes SDL hang on a
+        //     dead XWayland.
+        // The session is "live Wayland" if WAYLAND_DISPLAY is set, or a compositor socket
+        // (XDG_RUNTIME_DIR/wayland-N) exists. An explicit SDL_VIDEODRIVER always wins.
+        static void AutoDetectDisplay()
+        {
+            if (std::getenv("SDL_VIDEODRIVER")) return; // explicit driver choice wins
+
+            bool haveWayland = std::getenv("WAYLAND_DISPLAY") != nullptr;
+            if (!haveWayland)
+            {
+                if (const char* rt = std::getenv("XDG_RUNTIME_DIR"))
+                {
+                    std::error_code ec;
+                    for (const auto& entry : std::filesystem::directory_iterator(rt, ec))
+                    {
+                        const std::string fn = entry.path().filename().string();
+                        if (fn.rfind("wayland-", 0) == 0 && fn.find(".lock") == std::string::npos &&
+                            std::filesystem::is_socket(entry.path(), ec))
+                        {
+                            setenv("WAYLAND_DISPLAY", fn.c_str(), 1);
+                            haveWayland = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (haveWayland)
+            {
+                setenv("SDL_VIDEODRIVER", "wayland", 1); // we're on Wayland -> don't let SDL pick X11
+                unsetenv("DISPLAY");                     // and don't let SDL/EGL fall back to a dead :0
+            }
+        }
+#endif
+
         // The depth target's aspect: depth, plus stencil when depthFormat is a combined format (so an
         // example can ask for a stencil buffer just by setting a D*S* depthFormat before Init).
         static bool DepthFormatHasStencil(VriFormat f) { return f == VriFormat_D24_UNORM_S8_UINT || f == VriFormat_D32_SFLOAT_S8_UINT || f == VriFormat_S8_UINT; }
@@ -155,11 +201,31 @@ namespace vriex
         {
             name = exampleName; width = w; height = h; hasDepth = depthWanted;
             api = SelectApi();
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+            AutoDetectDisplay(); // make `xmake run` work straight from an SSH shell on a Wayland box
+#endif
 #if !defined(__EMSCRIPTEN__)
             if (!SDL_Init(SDL_INIT_VIDEO)) Fail("SDL_Init failed");
 #endif
+            // Create the window BEFORE the device: the native OpenGL ES backend on Wayland needs
+            // the app's wl_display at device-creation time (its EGL context and the present
+            // surface must share one connection). Other backends/platforms ignore nativeDisplay
+            // and build their surface from the window handle at swapchain time. The title is set
+            // once the backend is resolved (it names the API), so start with the example name.
+            VriWindowHandle wh{};
+            const void* nativeDisplay = nullptr;
+#if defined(__EMSCRIPTEN__)
+            wh.type = VriWindowSystem_Web; wh.handle.web.selector = "#canvas";
+#else
+            window = SDL_CreateWindow(name, static_cast<int>(width), static_cast<int>(height), 0);
+            if (!window) Fail("SDL_CreateWindow failed");
+            wh = vriWindowHandleFromSDL3(window);
+            if (wh.type == VriWindowSystem_Wayland) nativeDisplay = wh.handle.wayland.display;
+#endif
+
             VriDeviceCreationDesc dd{}; dd.graphicsAPI = api; dd.enableValidation = VRI_TRUE; dd.bestEffort = VRI_TRUE;
             dd.enabledFeatures = requestFeatures; // bestEffort: ungranted features just leave the matching hasX false
+            dd.nativeDisplay = nativeDisplay;     // used by the native OpenGL ES backend on Wayland; ignored otherwise
             static VriCallbackInterface cb{}; cb.MessageCallback = DefaultMessageCallback; dd.callbackInterface = &cb;
             if (vriCreateDevice(&dd, &dev) != VriResult_Success) Fail("vriCreateDevice failed");
             if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success ||
@@ -182,34 +248,42 @@ namespace vriex
                 }
             }
 
-            api = c.GetDeviceDesc(dev)->graphicsAPI; // Auto resolves to a concrete backend
-            useWgsl = api == VriGraphicsAPI_WebGPU;  // GL consumes SPIR-V (transpiled), like Vulkan
+            const VriDeviceDesc* devDesc = c.GetDeviceDesc(dev);
+            api = devDesc->graphicsAPI;              // Auto resolves to a concrete backend
+            useWgsl = api == VriGraphicsAPI_WebGPU;   // GL consumes SPIR-V (transpiled), like Vulkan
             useDxbc = api == VriGraphicsAPI_D3D12;
-            // The GL backend is WebGL2 in the browser, plain OpenGL on desktop - label accordingly.
+            // Label the API, distinguishing desktop OpenGL / OpenGL ES / WebGL and showing the
+            // version the driver actually gave (e.g. "OpenGL 4.6", "OpenGL ES 3.1", "WebGL2 (ES 3.0)").
+            const unsigned glMaj = devDesc->apiVersionMajor, glMin = devDesc->apiVersionMinor;
+            if (api == VriGraphicsAPI_OpenGL)
+            {
+                std::snprintf(apiLabel, sizeof(apiLabel), "OpenGL %u.%u", glMaj, glMin);
+                apiName = apiLabel;
+            }
+            else if (api == VriGraphicsAPI_OpenGLES)
+            {
 #if defined(__EMSCRIPTEN__)
-            const char* glName = "WebGL";
+                std::snprintf(apiLabel, sizeof(apiLabel), "WebGL2 (ES %u.%u)", glMaj, glMin); // WebGL2 == GLES 3.0
 #else
-            const char* glName = "OpenGL";
+                std::snprintf(apiLabel, sizeof(apiLabel), "OpenGL ES %u.%u", glMaj, glMin);
 #endif
-            apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : ((api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES) ? glName : (api == VriGraphicsAPI_D3D12 ? "D3D12" : (api == VriGraphicsAPI_Metal ? "Metal" : "Vulkan")));
+                apiName = apiLabel;
+            }
+            else
+            {
+                apiName = api == VriGraphicsAPI_WebGPU ? "WebGPU" : (api == VriGraphicsAPI_D3D12 ? "D3D12" : (api == VriGraphicsAPI_Metal ? "Metal" : "Vulkan"));
+            }
 
-            char title[64]; std::snprintf(title, sizeof(title), "VRI %s (%s)", name, apiName);
-            VriWindowHandle wh{};
+            // Now the backend is known, label the window/page with it.
 #if defined(__EMSCRIPTEN__)
-            // Target the page canvas directly: the GL backend owns the single Emscripten
-            // GLFW window, and a second glfwCreateWindow aborts. WebGPU makes its surface
-            // from the same selector. The swapchain sizes this canvas to width x height.
-            (void)title;
             // Feed the custom shell (examples/common/shell.html) the example name + backend.
             EM_ASM({ if (Module.vriSetTitle) Module.vriSetTitle(UTF8ToString($0), UTF8ToString($1)); }, name, apiName);
-            wh.type = VriWindowSystem_Web; wh.handle.web.selector = "#canvas";
 #else
-            window = SDL_CreateWindow(title, static_cast<int>(width), static_cast<int>(height), 0);
-            if (!window) Fail("SDL_CreateWindow failed");
-            wh = vriWindowHandleFromSDL3(window);
-            // The GL backend brought up GLFW for its context before this point, and on macOS
-            // GLFW grabs NSApp activation - so the SDL window opens unfocused/behind. Raise it
-            // to claim key + focus (harmless no-op for the other backends, which already focus).
+            char title[64]; std::snprintf(title, sizeof(title), "VRI %s (%s)", name, apiName);
+            SDL_SetWindowTitle(window, title);
+            // A GL backend that brought up GLFW for its context (desktop) grabs activation, so
+            // the SDL window can open unfocused/behind. Raise it to claim key + focus (harmless
+            // no-op for the other backends and the GLFW-free native-ES build).
             SDL_RaiseWindow(window);
 #endif
             c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);

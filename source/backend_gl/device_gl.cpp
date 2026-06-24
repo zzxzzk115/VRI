@@ -2,15 +2,34 @@
 #include "core_gl.h"
 #include "swapchain_gl.h"
 
-#include <GLFW/glfw3.h>
+#if defined(VRI_GL_EGL)
+#    include <EGL/egl.h>
+#    include <EGL/eglext.h>
+#else
+#    include <GLFW/glfw3.h>
+#endif
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace vri::gl
 {
     DeviceGL::~DeviceGL()
     {
+#if defined(VRI_GL_EGL)
+        if (m_eglDisplay)
+        {
+            for (auto& [key, fbo] : m_fboCache) // context still current here
+                glDeleteFramebuffers(1, &fbo);
+            m_fboCache.clear();
+            EGLDisplay dpy = static_cast<EGLDisplay>(m_eglDisplay);
+            eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (m_eglSurface) eglDestroySurface(dpy, static_cast<EGLSurface>(m_eglSurface));
+            if (m_eglContext) eglDestroyContext(dpy, static_cast<EGLContext>(m_eglContext));
+            eglTerminate(dpy);
+        }
+#else
         if (m_window)
         {
             for (auto& [key, fbo] : m_fboCache)
@@ -20,6 +39,7 @@ namespace vri::gl
             glfwDestroyWindow(m_window);
         }
         // Intentionally not calling glfwTerminate() (another device may exist).
+#endif
     }
 
     GLuint DeviceGL::AcquireFbo(const FboKey& key, bool& isNew)
@@ -31,7 +51,7 @@ namespace vri::gl
             return it->second;
         }
         GLuint fbo = 0;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
         // DSA (4.5) requires glCreateFramebuffers so the object exists before any
         // glNamedFramebuffer* call; the classic path uses gen + bind-to-configure.
         // (glCreateFramebuffers isn't declared in the Emscripten GLES3 headers.)
@@ -71,7 +91,7 @@ namespace vri::gl
             std::fprintf(stderr, "[VRI/GL] %s\n", message);
     }
 
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
     // KHR_debug message pump (desktop GL 4.3+): forward the driver's diagnostics to the app
     // callback. WebGL2/ES has no glDebugMessageCallback, so this is desktop-only.
     namespace
@@ -99,17 +119,152 @@ namespace vri::gl
     } // namespace
 #endif
 
+#if defined(VRI_GL_EGL)
+    // EGL_MESA_platform_surfaceless lets us obtain a display with no X11/Wayland/GBM, so
+    // the context comes up over a headless SSH session. These tokens live in recent
+    // <EGL/eglext.h> / EGL 1.5; declare them if the SDK is older.
+#    if !defined(EGL_PLATFORM_SURFACELESS_MESA)
+#        define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#    endif
+#    if !defined(EGL_PLATFORM_WAYLAND_EXT)
+#        define EGL_PLATFORM_WAYLAND_EXT 0x31D8
+#    endif
+#    if !defined(EGL_CONTEXT_MAJOR_VERSION)
+#        define EGL_CONTEXT_MAJOR_VERSION 0x3098
+#    endif
+#    if !defined(EGL_CONTEXT_MINOR_VERSION)
+#        define EGL_CONTEXT_MINOR_VERSION 0x30FB
+#    endif
+#    if !defined(EGL_CONTEXT_OPENGL_PROFILE_MASK)
+#        define EGL_CONTEXT_OPENGL_PROFILE_MASK 0x30FD
+#    endif
+#    if !defined(EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT)
+#        define EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT 0x00000001
+#    endif
+
+    // On Linux the GL backend gets its context from EGL for BOTH desktop GL and native GLES
+    // (no GLFW), so one path serves Wayland and X11 and headless. m_es selects the client API.
+    bool DeviceGL::InitEGL(const void* nativeDisplay)
+    {
+        const bool es = m_es;
+        // Display selection, in order of preference:
+        //  1. Wayland: the app handed us its wl_display (nativeDisplay). EGL must use the
+        //     SAME connection for the context and the window surface, so bind that exact
+        //     display via the Wayland platform - this is what makes windowed present work.
+        //  2. A running X11 server (DISPLAY): the default display can make window surfaces;
+        //     X11 window IDs are valid across connections, so no shared handle is needed.
+        //  3. Headless (no display server): the surfaceless platform, rendering into FBOs.
+        auto getPlatformDisplay = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+            eglGetProcAddress("eglGetPlatformDisplayEXT"));
+        const bool haveX11 = std::getenv("DISPLAY") != nullptr;
+        const bool haveWindowSystem = nativeDisplay != nullptr || haveX11;
+        EGLDisplay dpy = EGL_NO_DISPLAY;
+        if (nativeDisplay) // Wayland: bind the app's wl_display
+        {
+            if (getPlatformDisplay)
+                dpy = getPlatformDisplay(EGL_PLATFORM_WAYLAND_EXT, const_cast<void*>(nativeDisplay), nullptr);
+            if (dpy == EGL_NO_DISPLAY)
+                dpy = eglGetDisplay(reinterpret_cast<EGLNativeDisplayType>(const_cast<void*>(nativeDisplay)));
+        }
+        if (dpy == EGL_NO_DISPLAY && haveX11)
+            dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (dpy == EGL_NO_DISPLAY && getPlatformDisplay) // headless
+            dpy = getPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+        if (dpy == EGL_NO_DISPLAY)
+            dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY); // last-resort implementation default
+        if (dpy == EGL_NO_DISPLAY) { ReportError("EGL: no display available"); return false; }
+
+        EGLint eglMajor = 0, eglMinor = 0;
+        if (!eglInitialize(dpy, &eglMajor, &eglMinor)) { ReportError("EGL: eglInitialize failed"); return false; }
+        if (!eglBindAPI(es ? EGL_OPENGL_ES_API : EGL_OPENGL_API))
+        { ReportError("EGL: eglBindAPI failed"); eglTerminate(dpy); return false; }
+
+        // A renderable RGBA8 config. We render into VRI's own FBO textures (depth is a separate
+        // VRI texture), so the default framebuffer needs no depth/stencil. ES advertises via
+        // EGL_OPENGL_ES2_BIT (covers ES3 on EGL <= 1.4); desktop GL via EGL_OPENGL_BIT. Require a
+        // pbuffer surface first; if the (surfaceless) display has none, retry without it.
+        const EGLint renderableType = es ? EGL_OPENGL_ES2_BIT : EGL_OPENGL_BIT;
+        EGLConfig cfg = nullptr; EGLint nCfg = 0;
+        auto chooseConfig = [&](EGLint surfaceType) {
+            const EGLint a[] = {
+                EGL_SURFACE_TYPE,    surfaceType,
+                EGL_RENDERABLE_TYPE, renderableType,
+                EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+                EGL_NONE,
+            };
+            return eglChooseConfig(dpy, a, &cfg, 1, &nCfg) && nCfg > 0;
+        };
+        // Window-capable config when presenting; pbuffer otherwise. Fall back to any config.
+        const EGLint preferred = haveWindowSystem ? (EGL_WINDOW_BIT | EGL_PBUFFER_BIT) : EGL_PBUFFER_BIT;
+        if (!chooseConfig(preferred) && !chooseConfig(EGL_PBUFFER_BIT) && !chooseConfig(EGL_DONT_CARE))
+        { ReportError("EGL: no matching config"); eglTerminate(dpy); return false; }
+
+        EGLContext ctx = EGL_NO_CONTEXT;
+        if (es)
+        {
+            const EGLint ctxAttr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE }; // highest 3.x the driver grants
+            ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxAttr);
+        }
+        else
+        {
+            // Desktop GL: request the highest core context the driver grants, descending. Core
+            // profile is 3.2+, so the oldest fallback omits it. (Mirrors the desktop GLFW hints.)
+            static const struct { EGLint major, minor; bool core; } kVers[] = {
+                {4, 6, true}, {4, 5, true}, {4, 3, true}, {4, 1, true}, {3, 3, true}, {3, 1, false},
+            };
+            for (const auto& v : kVers)
+            {
+                EGLint a[9]; int i = 0;
+                a[i++] = EGL_CONTEXT_MAJOR_VERSION; a[i++] = v.major;
+                a[i++] = EGL_CONTEXT_MINOR_VERSION; a[i++] = v.minor;
+                if (v.core) { a[i++] = EGL_CONTEXT_OPENGL_PROFILE_MASK; a[i++] = EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT; }
+                a[i++] = EGL_NONE;
+                ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, a);
+                if (ctx != EGL_NO_CONTEXT) break;
+            }
+        }
+        if (ctx == EGL_NO_CONTEXT) { ReportError("EGL: eglCreateContext failed"); eglTerminate(dpy); return false; }
+
+        // Render-to-FBO only: try a surfaceless make-current first (EGL_KHR_surfaceless_context),
+        // falling back to a 1x1 pbuffer where that extension is absent.
+        EGLSurface surf = EGL_NO_SURFACE;
+        if (!eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx))
+        {
+            const EGLint pb[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+            surf = eglCreatePbufferSurface(dpy, cfg, pb);
+            if (surf == EGL_NO_SURFACE || !eglMakeCurrent(dpy, surf, surf, ctx))
+            {
+                ReportError("EGL: eglMakeCurrent failed (surfaceless and pbuffer)");
+                if (surf != EGL_NO_SURFACE) eglDestroySurface(dpy, surf);
+                eglDestroyContext(dpy, ctx); eglTerminate(dpy);
+                return false;
+            }
+        }
+
+        m_eglDisplay = dpy; m_eglContext = ctx; m_eglSurface = surf; m_eglConfig = cfg;
+
+#if !defined(VRI_GL_NATIVE_ES)
+        // Desktop GL via EGL: the command path uses real GL entry points, so load glad through
+        // eglGetProcAddress (EGL_KHR_get_all_proc_addresses returns core functions too). The
+        // native-ES build links libGLESv2 directly and needs no loader.
+        if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(eglGetProcAddress)))
+        { ReportError("EGL: gladLoadGLLoader failed"); return false; }
+#endif
+        return true;
+    }
+#endif // VRI_GL_EGL
+
     VriResult DeviceGL::Init(const VriDeviceCreationDesc& desc)
     {
         if (desc.callbackInterface)
             m_callback = *desc.callbackInterface;
 
         m_api = desc.graphicsAPI;
-#if defined(__EMSCRIPTEN__)
-        // In the browser the only GL is WebGL2 (== GLES3). Honor a VriGraphicsAPI_OpenGL
-        // request (e.g. ?backend=webgl) as ES too, otherwise the desktop-GL paths run
-        // against WebGL2 and abort: real buffer mapping ("glMapBufferRange access must
-        // include INVALIDATE_*" -> "buffer was never mapped") and ESSL 430.
+#if defined(VRI_GL_ES_HEADERS)
+        // The only GL here is the ES profile: WebGL2 (== GLES3) in the browser, or native
+        // OpenGL ES on the embedded build. Honor a VriGraphicsAPI_OpenGL request as ES too,
+        // otherwise the desktop-GL paths run against an ES context and abort (real buffer
+        // mapping "glMapBufferRange access must include INVALIDATE_*", ESSL 430, ...).
         m_es = true;
 #else
         m_es = (desc.graphicsAPI == VriGraphicsAPI_OpenGLES);
@@ -121,6 +276,13 @@ namespace vri::gl
         // Desktop uses GLSL 430 so compute shaders (SSBO + local_size) transpile.
         m_shaderVersion = m_es ? 300u : 430u;
 
+#if defined(VRI_GL_EGL)
+        // Linux: bring up the context via EGL (no GLFW) for both desktop GL and native GLES -
+        // one path for Wayland, X11, and headless. InitEGL makes it current; the shared code
+        // below (VAO, FillDeviceDesc, ...) then runs.
+        if (!InitEGL(desc.nativeDisplay))
+            return VriResult_Failure;
+#else
         if (!glfwInit())
         {
             ReportError("glfwInit failed");
@@ -173,8 +335,9 @@ namespace vri::gl
             return VriResult_Failure;
         }
 #endif
+#endif // !VRI_GL_EGL (GLFW context bring-up)
 
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
         // KHR_debug (GL 4.3+): forward driver diagnostics to the app callback. Synchronous so
         // the message arrives at the offending call. WebGL2/ES has no glDebugMessageCallback.
         if (desc.enableValidation && glDebugMessageCallback)
@@ -198,7 +361,7 @@ namespace vri::gl
         // and depth is exact rather than the [-1,1]->[0,1] compression. ES/WebGL2 and
         // pre-4.5 desktop have no glClipControl, so they flip clip-space Y in-shader
         // (SPIRV-Cross flip_vert_y); both conventions read back top-left identically.
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
         if (m_features.clipControl)
             glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
         glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS); // filter across cube faces (always on in WebGL2/core ES3)
@@ -211,7 +374,10 @@ namespace vri::gl
     void DeviceGL::FillDeviceDesc()
     {
         m_desc = {};
-        m_desc.graphicsAPI = m_api;
+        // Report the resolved profile, not just what was requested: an OpenGL request that
+        // ran as ES (native-ES build / WebGL2 / an explicit ES context) reports OpenGLES, so
+        // the app can label it honestly ("OpenGL ES" vs "OpenGL" / "WebGL") with the version.
+        m_desc.graphicsAPI = m_es ? VriGraphicsAPI_OpenGLES : VriGraphicsAPI_OpenGL;
 
         const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         if (renderer)
@@ -252,8 +418,14 @@ namespace vri::gl
         // compute, so report it honestly (the validation layer + CreateComputePipeline
         // gate on this).
         const uint32_t major = m_desc.apiVersionMajor, minor = m_desc.apiVersionMinor;
-        const bool computeOk = m_es ? (major > 3 || (major == 3 && minor >= 1))
-                                     : (major > 4 || (major == 4 && minor >= 3));
+        bool computeOk = m_es ? (major > 3 || (major == 3 && minor >= 1))
+                              : (major > 4 || (major == 4 && minor >= 3));
+#if defined(VRI_GL_NATIVE_ES)
+        // The native-ES build currently shares WebGL2's command path, where CmdDispatch is a
+        // no-op. Report compute unavailable so it fails loudly rather than silently doing
+        // nothing (ES 3.1 compute is a follow-up - flip this on with the dispatch path).
+        computeOk = false;
+#endif
         m_desc.hasComputeShader = computeOk ? VRI_TRUE : VRI_FALSE;
         m_desc.hasGeometryShader = m_es ? VRI_FALSE : VRI_TRUE; // GLES has no geometry shaders
         m_desc.hasTessellation = m_es ? VRI_FALSE : VRI_TRUE;   // desktop GL only (GLES3/WebGL2 has none)

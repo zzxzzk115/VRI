@@ -30,9 +30,16 @@ if has_config("vri_backend_gl") then
     -- Pin a recent spirv-cross: 1.3.268 emits invalid tessellation-control GLSL
     -- (non-array output, not indexed by gl_InvocationID); vulkan-sdk-1.4.335 fixes it.
     add_requires("spirv-cross vulkan-sdk-1.4.335")
+    -- glad (GL loader) is needed for every desktop-GL build (Windows/macOS/Linux-desktop);
+    -- the native OpenGL ES build uses system GLES headers instead. glfw provides the context
+    -- on Windows/macOS only - Linux (both desktop GL and GLES) uses EGL directly, no glfw.
     if not is_plat("wasm") then
-        add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
-        add_requires("glfw")
+        if not has_config("vri_backend_gl_es") then
+            add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
+        end
+        if not is_plat("linux") then
+            add_requires("glfw")
+        end
     end
 end
 

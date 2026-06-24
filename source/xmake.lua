@@ -50,16 +50,30 @@ target("vri")
             add_ldflags("-sUSE_GLFW=3", "-sFULL_ES3",
                         "-sMIN_WEBGL_VERSION=2", "-sMAX_WEBGL_VERSION=2",
                         {public = true, force = true})
-        else
-            -- public: glad/glfw must link into the final exe (+ their runtime needs)
-            add_packages("glad", "glfw", {public = true})
-            -- Windowed GL present (swapchain_gl) retargets the context to the window via
-            -- WGL/GLX: GetDC/SetPixelFormat/SwapBuffers live in gdi32 (Windows), and the
-            -- glX* entry points live in libGL (Linux).
-            if is_plat("windows") then
-                add_syslinks("gdi32", {public = true})
-            elseif is_plat("linux") then
+        elseif is_plat("linux") then
+            -- Linux: the context + present go through EGL (VRI_GL_EGL), GLFW-free, so one
+            -- path serves Wayland, X11, and headless - for BOTH desktop GL and native GLES.
+            -- EGL drives the context; wayland-egl provides the Wayland window surface
+            -- (wl_egl_window); X11 present needs no extra lib (uses the window XID).
+            add_defines("VRI_GL_EGL")
+            add_syslinks("EGL", "wayland-egl", {public = true})
+            if has_config("vri_backend_gl_es") then
+                -- Native OpenGL ES: system libGLESv2 exports the ES entry points directly
+                -- (no loader). The GLES-subset path (shared with WebGL2) is VRI_GL_NATIVE_ES.
+                add_defines("VRI_GL_NATIVE_ES")
+                add_syslinks("GLESv2", {public = true})
+            else
+                -- Desktop GL: glad loads the GL entry points through eglGetProcAddress; link
+                -- libGL too so the core symbols resolve on every driver.
+                add_packages("glad", {public = true})
                 add_syslinks("GL", {public = true})
+            end
+        else
+            -- Windows / macOS: GLFW owns the context; present retargets it via WGL/NSGL.
+            add_packages("glad", "glfw", {public = true})
+            if is_plat("windows") then
+                -- GetDC/SetPixelFormat/SwapBuffers live in gdi32.
+                add_syslinks("gdi32", {public = true})
             elseif is_plat("macosx") then
                 -- macOS GL present retargets the device's NSOpenGL context to the window
                 -- view (nsgl_present_gl.mm). Needs Cocoa + the (deprecated) OpenGL framework.

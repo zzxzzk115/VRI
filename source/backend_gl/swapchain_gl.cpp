@@ -3,11 +3,11 @@
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #    define WIN32_LEAN_AND_MEAN
 #    include <windows.h> // WGL (wglGetCurrentContext/wglMakeCurrent) + GDI (GetDC/SwapBuffers/...)
-#elif defined(__linux__) && !defined(__EMSCRIPTEN__)
-// Declare the few GLX entry points we need ourselves (resolved from libGL via glfw's
-// link) instead of including <GL/glx.h>, which pulls <GL/gl.h> and clashes with glad.
-// GLXContext is an opaque pointer; Display* is opaque (void*); GLXDrawable is an XID
-// (unsigned long); Bool is int.
+#elif defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(VRI_GL_EGL)
+// (Legacy) desktop GL on X11 via GLX. The Linux GL backend now presents through EGL
+// (VRI_GL_EGL) for both desktop GL and GLES, so this path is unused there; kept for any
+// non-EGL Linux GL configuration. Declare the GLX entry points ourselves instead of
+// including <GL/glx.h>, which pulls <GL/gl.h> and clashes with glad.
 extern "C" void*         glXGetCurrentContext(void);
 extern "C" unsigned long glXGetCurrentDrawable(void);
 extern "C" int           glXMakeCurrent(void* dpy, unsigned long drawable, void* ctx);
@@ -19,6 +19,11 @@ extern "C" void          (*glXGetProcAddressARB(const unsigned char* name))(void
 
 #include "conversions_gl.h"
 #include "device_gl.h"
+
+#if defined(VRI_GL_EGL)
+#    include <EGL/egl.h>        // windowed present retargets the device's EGL context to the app window
+#    include <wayland-egl.h>    // wl_egl_window_{create,resize,destroy} for the Wayland window surface
+#endif
 
 #if defined(__APPLE__)
 // NSOpenGL present glue (nsgl_present_gl.mm). Retarget the device's GL context to the
@@ -45,7 +50,7 @@ namespace vri::gl
         {
             const GLFormat gf = ToGLFormat(fmt);
             GLuint id = 0;
-#if !defined(__EMSCRIPTEN__)
+#if !defined(VRI_GL_ES_HEADERS)
             if (d->Features().dsa)
             {
                 glCreateTextures(GL_TEXTURE_2D, 1, &id);
@@ -89,7 +94,56 @@ namespace vri::gl
             const uint32_t n = desc->textureNum ? desc->textureNum : 2u;
             const uint32_t w = desc->width ? desc->width : 1u;
             const uint32_t h = desc->height ? desc->height : 1u;
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(VRI_GL_EGL)
+            // Native OpenGL ES present: build an EGLSurface for the app's window from the
+            // device's EGLDisplay/EGLConfig, then Present retargets the device context to it
+            // (same blit-then-swap model as the GLX path). Supports X11 (window XID directly)
+            // and Wayland (a wl_egl_window wrapping the app's wl_surface - the device must
+            // have been created on the same wl_display, via VriDeviceCreationDesc::nativeDisplay).
+            EGLDisplay dpy = static_cast<EGLDisplay>(d->EglDisplay());
+            if (!dpy || !d->EglConfig())
+            {
+                d->ReportError("GL swapchain: no window-capable EGL display (device came up headless/surfaceless)");
+                return VriResult_Unsupported;
+            }
+            EGLNativeWindowType nativeWin = 0;
+            void* wlEglWin = nullptr;
+            if (desc->window.type == VriWindowSystem_Xlib)
+            {
+                nativeWin = static_cast<EGLNativeWindowType>(desc->window.handle.xlib.window);
+            }
+            else if (desc->window.type == VriWindowSystem_Wayland)
+            {
+                wl_surface* surface = static_cast<wl_surface*>(desc->window.handle.wayland.surface);
+                if (!surface) { d->ReportError("GL swapchain: Wayland window handle has no wl_surface"); return VriResult_InvalidArgument; }
+                wl_egl_window* win = wl_egl_window_create(surface, static_cast<int>(w), static_cast<int>(h));
+                if (!win) { d->ReportError("GL swapchain: wl_egl_window_create failed"); return VriResult_Failure; }
+                wlEglWin = win;
+                nativeWin = reinterpret_cast<EGLNativeWindowType>(win);
+            }
+            else
+            {
+                d->ReportError("GL swapchain: native OpenGL ES present implements the Xlib and Wayland window systems");
+                return VriResult_Unsupported;
+            }
+            EGLSurface eglSurf = eglCreateWindowSurface(dpy, static_cast<EGLConfig>(d->EglConfig()), nativeWin, nullptr);
+            if (eglSurf == EGL_NO_SURFACE)
+            {
+                if (wlEglWin) wl_egl_window_destroy(static_cast<wl_egl_window*>(wlEglWin));
+                d->ReportError("GL swapchain: eglCreateWindowSurface failed (window visual/config mismatch?)");
+                return VriResult_Failure;
+            }
+            SwapChainGL* s = new SwapChainGL{};
+            s->device = d;
+            if (desc->window.type == VriWindowSystem_Xlib)
+            { s->xdisplay = desc->window.handle.xlib.display; s->xwindow = desc->window.handle.xlib.window; }
+            s->eglSurface = eglSurf; s->wlEglWindow = wlEglWin;
+            s->width = w; s->height = h; s->format = desc->format; s->vsync = desc->vsync != VRI_FALSE;
+            for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
+            glGenFramebuffers(1, &s->blitFbo);
+            *out = ToHandle(s);
+            return VriResult_Success;
+#elif defined(_WIN32) && !defined(__EMSCRIPTEN__)
             if (desc->window.type != VriWindowSystem_Win32)
             {
                 d->ReportError("GL swapchain: only the Win32 window system is implemented on this platform");
@@ -191,6 +245,12 @@ namespace vri::gl
             SwapChainGL* s = Swap(swapChain);
             DestroyBackbuffers(s);
             if (s->blitFbo) glDeleteFramebuffers(1, &s->blitFbo);
+#if defined(VRI_GL_EGL)
+            if (s->eglSurface)
+                eglDestroySurface(static_cast<EGLDisplay>(s->device->EglDisplay()), static_cast<EGLSurface>(s->eglSurface));
+            if (s->wlEglWindow)
+                wl_egl_window_destroy(static_cast<wl_egl_window*>(s->wlEglWindow));
+#endif
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
             if (s->hdc && s->hwnd) ReleaseDC(static_cast<HWND>(s->hwnd), static_cast<HDC>(s->hdc));
 #endif
@@ -223,7 +283,36 @@ namespace vri::gl
 
         VriResult VRI_CALL Present(VriSwapChain* swapChain, VriFence* /*waitFence*/, uint64_t /*waitValue*/)
         {
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(VRI_GL_EGL)
+            // Retarget the device's EGL context to the window surface, blit the acquired
+            // backbuffer onto its default framebuffer (flip Y), swap, then restore the
+            // device's own (surfaceless/pbuffer) drawable so later offscreen work is unaffected.
+            SwapChainGL* s = Swap(swapChain);
+            DeviceGL* d = s->device;
+            EGLDisplay dpy = static_cast<EGLDisplay>(d->EglDisplay());
+            EGLContext ctx = static_cast<EGLContext>(d->EglContext());
+            EGLSurface win = static_cast<EGLSurface>(s->eglSurface);
+            if (!eglMakeCurrent(dpy, win, win, ctx))
+            {
+                d->ReportError("GL swapchain: eglMakeCurrent(window) failed at Present");
+                return VriResult_Failure;
+            }
+            eglSwapInterval(dpy, s->vsync ? 1 : 0);
+            const TextureGL* bb = s->textures[s->currentIndex];
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // the window's default framebuffer (no glDrawBuffer in ES)
+            const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
+            glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw may have left it on
+            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
+            eglSwapBuffers(dpy, win);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            // Restore the device drawable (EGL_NO_SURFACE when surfaceless, else its pbuffer).
+            EGLSurface devSurf = static_cast<EGLSurface>(d->EglSurface());
+            eglMakeCurrent(dpy, devSurf, devSurf, ctx);
+            return VriResult_Success;
+#elif defined(_WIN32) && !defined(__EMSCRIPTEN__)
             SwapChainGL* s = Swap(swapChain);
             DeviceGL* d = s->device;
             // The device's GL context is current here (rendering just used it). Grab it +
@@ -341,6 +430,10 @@ namespace vri::gl
             s->height = height ? height : 1u;
 #if defined(__EMSCRIPTEN__)
             emscripten_set_canvas_element_size(s->canvasSelector.c_str(), static_cast<int>(s->width), static_cast<int>(s->height));
+#endif
+#if defined(VRI_GL_EGL)
+            if (s->wlEglWindow) // keep the Wayland window surface in step with the swapchain size
+                wl_egl_window_resize(static_cast<wl_egl_window*>(s->wlEglWindow), static_cast<int>(s->width), static_cast<int>(s->height), 0, 0);
 #endif
             for (uint32_t i = 0; i < n; ++i) s->textures.push_back(CreateBackbuffer(s->device, s->width, s->height, s->format));
             s->currentIndex = 0;
