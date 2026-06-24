@@ -75,10 +75,12 @@ target("vri")
                 -- GetDC/SetPixelFormat/SwapBuffers live in gdi32.
                 add_syslinks("gdi32", {public = true})
             elseif is_plat("macosx") then
-                -- macOS GL present retargets the device's NSOpenGL context to the window
-                -- view (nsgl_present_gl.mm). Needs Cocoa + the (deprecated) OpenGL framework.
+                -- macOS GL present retargets the device's NSOpenGL context to the window view and
+                -- paces on a CVDisplayLink (nsgl_present_gl.mm). Needs Cocoa + the (deprecated)
+                -- OpenGL framework + CoreVideo (CVDisplayLink). Public so libvri consumers that don't
+                -- otherwise pull CoreVideo in (e.g. vri-tests, which doesn't link SDL3) still link it.
                 add_files("backend_gl/**.mm")
-                add_frameworks("Cocoa", "OpenGL", {public = true})
+                add_frameworks("Cocoa", "OpenGL", "CoreVideo", {public = true})
             end
         end
     end
