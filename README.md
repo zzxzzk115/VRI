@@ -92,9 +92,16 @@ xmake run example-cubemap       # cubemap skybox + a reflective chrome sphere sa
                                 # the reflection vector (procedural 6-face cube texture)
 xmake run example-stenciloutline # two-pass stencil silhouette: fill stamps stencil=1, an
                                 # enlarged pass draws a flat-color border only where stencil!=1
-xmake run example-raytracing    # ray-traced hard shadows into a storage image - HW inline ray query
+xmake run example-rayquery      # ray-traced hard shadows into a storage image - HW inline ray query
                                 # (BLAS/TLAS) on VK/D3D12, SW compute brute-force on WebGPU/desktop-GL
                                 # (same image); WebGL2/GLES has no compute -> explicit unsupported
+xmake run example-raytracing    # ray-traces the FlightHelmet glTF model: a true RT pipeline (raygen/
+                                # miss/closesthit + SBT) on VK/D3D12, or the SAME image via an inline
+                                # ray-query compute kernel on Metal (Metal has no SBT) - one model,
+                                # BLAS/TLAS & material textures shared; GL/WebGPU degrade explicitly
+xmake run example-pathtracer    # progressive multi-bounce path tracer with diffuse global illumination
+                                # over the FlightHelmet - a single inline-ray-query compute megakernel
+                                # (Metal/VK/D3D12), accumulating samples into a converging image
 xmake run example-deferred      # deferred shading: a textured floor + a grid of colored cubes drawn
                                 # once into a 3-target G-buffer (position/normal/albedo+spec), then a
                                 # fullscreen pass shades it against 6 moving point lights in one pass

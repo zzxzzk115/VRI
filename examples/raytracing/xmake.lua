@@ -9,15 +9,15 @@ target("example-raytracing")
     add_includedirs("$(projectdir)")
 
     add_files("main.cpp")
-    add_packages("imgui") -- ImGui UI (drawn through VRI by examples/common/imgui_vri.h)
+    add_packages("imgui")    -- ImGui UI (drawn through VRI by examples/common/imgui_vri.h)
+    add_packages("tinygltf") -- glTF model loading (examples/common/gltf_model.h), same lib as ../Vulkan
+    add_packages("libsdl3")
 
-    if is_plat("wasm") then
-        -- Web build: GLFW (Emscripten port) for windowing, ASYNCIFY for WebGPU's async
-        -- device/adapter/map. Emitted as a .html so emrun can host it. No assets to preload.
-        set_extension(".html")
-        add_ldflags("-sASYNCIFY", "-sALLOW_MEMORY_GROWTH=1", "-sEXIT_RUNTIME=1", "-fexceptions", "--emrun", {force = true})
-        add_ldflags("--shell-file=" .. path.join(os.scriptdir(), "..", "common", "shell.html"), {force = true}) -- Bevy-style page
-    else
-        add_packages("libsdl3")
-    end
+    -- Default model: the FlightHelmet glTF, vendored under assets/ (CC0, from the Khronos sample
+    -- models) so the example runs out of the box. Pass a different model as argv[1] to override.
+    local model = path.join(os.projectdir(), "assets", "models", "FlightHelmet", "glTF", "FlightHelmet.gltf")
+    add_defines("VRI_GLTF_MODEL_PATH=\"" .. model:gsub("\\", "/") .. "\"")
+
+    -- RT pipeline (raygen/SBT/TraceRays) exists only on Vulkan + D3D12, so this example is desktop
+    -- only - it is not part of the wasm build (handled by the guard in examples/xmake.lua).
 target_end()

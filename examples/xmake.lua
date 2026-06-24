@@ -1,4 +1,4 @@
--- VRI examples. All web-capable: SDL3 windowing on desktop, the page canvas on wasm; the
+-- VRI examples. Web-capable unless noted: SDL3 windowing on desktop, the page canvas on wasm; the
 -- shared host scaffolding lives in examples/common/example_app.h.
 includes("triangle")
 includes("cube")
@@ -13,5 +13,11 @@ includes("shadowmapping")
 includes("msaa")
 includes("cubemap")
 includes("stenciloutline")
-includes("raytracing")
+includes("rayquery")
 includes("deferred")
+-- RT pipeline (raygen/SBT/TraceRays) is Vulkan + D3D12 only -> desktop, not part of the wasm build.
+-- pathtracer uses inline ray query (Metal/Vulkan/D3D12). Both desktop only.
+if not is_plat("wasm") then
+    includes("raytracing")
+    includes("pathtracer")
+end

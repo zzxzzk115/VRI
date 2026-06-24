@@ -1,16 +1,11 @@
-// Ray tracing the FlightHelmet glTF model. Two paths render the SAME image from the SAME loaded
-// model + BLAS/TLAS + material textures, chosen by what the backend supports:
-//   - RT PIPELINE (Vulkan, D3D12): a real raygen/miss/closesthit pipeline + shader binding table;
-//     CmdTraceRays writes a lit, textured image (rt_gltf.slang). This is the DXR / VK_KHR_ray_tracing
-//     _pipeline path - the thing examples/rayquery's inline ray query is NOT.
-//   - INLINE RAY QUERY in a compute shader (Metal, or any backend with ray query but no RT pipeline):
-//     ONE compute kernel does ray generation + traversal + shading (rt_gltf_rayquery.slang). This is
-//     Metal's native ray-tracing model (Apple WWDC 2020 "Discover ray tracing with Metal"): Metal has
-//     no raygen/SBT/TraceRays, so the pipeline collapses into a single intersector kernel.
-// The closesthit/kernel fetches the hit triangle from the model's global vertex/index SSBOs and samples
-// the per-primitive material textures by index, so both paths are pixel-identical.
+// Progressive path tracer with diffuse global illumination over the FlightHelmet glTF model. A single
+// compute megakernel (rt_pathtrace.slang) does ray generation + inline ray-query traversal + the
+// multi-bounce shading loop - Metal's native ray-tracing model, and the natural shape for a path
+// tracer. The sky gradient is the only light, so indirect bounces give real GI (color bleeding,
+// contact shadows, sky occlusion). Each frame adds one jittered sample per pixel into a persistent
+// accumulation buffer; the image converges while the camera is still and RESETS when it/lighting moves.
 //
-// Backends with neither RT pipeline nor ray query (OpenGL / WebGPU / WebGL2) degrade EXPLICITLY.
+// Needs ray query (Metal, Vulkan, D3D12 inline). OpenGL/WebGPU/WebGL2 (no ray query) degrade explicitly.
 #include "../common/example_app.h"
 
 #if !defined(__EMSCRIPTEN__)
@@ -24,25 +19,23 @@
 #include <cstring>
 #include <vector>
 
-#include "tests/shaders/show_tex_spv.h"          // g_showTexSpv       (display: sample the result)
-#include "tests/shaders/show_tex_dxbc.h"         // g_showTexDxbcVS / PS
-#include "tests/shaders/rt_gltf_spv.h"           // g_rtGltfSpv         (Vulkan: raygen/miss/closesthit)
-#include "tests/shaders/rt_gltf_rayquery_spv.h"  // g_rtGltfRayquerySpv (Metal/VK: inline ray query CS)
+#include "tests/shaders/show_tex_spv.h"
+#include "tests/shaders/show_tex_dxbc.h"
+#include "tests/shaders/rt_pathtrace_spv.h"      // g_rtPathtraceSpv (Metal/VK inline ray-query megakernel)
 #if defined(_WIN32)
-#    include "tests/shaders/rt_gltf_dxil.h"          // g_rtGltfDxil         (D3D12 DXR library)
-#    include "tests/shaders/rt_gltf_rayquery_dxil.h" // g_rtGltfRayqueryDxil (D3D12 inline ray query CS)
+#    include "tests/shaders/rt_pathtrace_dxil.h" // g_rtPathtraceDxil (D3D12 inline)
 #endif
 
 #if !defined(VRI_GLTF_MODEL_PATH)
-#    define VRI_GLTF_MODEL_PATH "FlightHelmet/glTF/FlightHelmet.gltf" // overridable via xmake / argv[1]
+#    define VRI_GLTF_MODEL_PATH "FlightHelmet/glTF/FlightHelmet.gltf"
 #endif
 
 namespace
 {
     constexpr uint32_t kWidth = 960, kHeight = 720;
-    constexpr uint32_t kMaxTextures = 64; // must match rt_gltf.slang / rt_gltf_rayquery.slang
+    constexpr uint32_t kMaxTextures = 64; // must match rt_pathtrace.slang
 
-    struct Camera { float eye[4]; float camRight[4]; float camUp[4]; float camFwd[4]; float lightDir[4]; float params[4]; };
+    struct PtCamera { float eye[4]; float camRight[4]; float camUp[4]; float camFwd[4]; float sky[4]; float control[4]; };
     struct GeometryNode { uint32_t firstIndex; int32_t baseColorTexture; int32_t occlusionTexture; uint32_t pad; };
     struct AsInstance { float transform[12]; uint32_t instanceIdAndMask; uint32_t sbtOffsetAndFlags; uint64_t blasReference; };
 
@@ -53,60 +46,55 @@ namespace
     V3 norm3(V3 a) { float l = std::sqrt(dot3(a, a)); return l > 0 ? V3{a.x / l, a.y / l, a.z / l} : a; }
     void set4(float* d, V3 v, float w = 0.0f) { d[0] = v.x; d[1] = v.y; d[2] = v.z; d[3] = w; }
 } // namespace
-#endif // !__EMSCRIPTEN__
+#endif
 
 int main(int argc, char** argv)
 {
 #if defined(__EMSCRIPTEN__)
     (void)argc; (void)argv;
     static vriex::ExampleApp app;
-    app.Init("raytracing", 960, 720, /*hasDepth*/ false);
-    app.SetClearColor(0.13f, 0.16f, 0.22f);
-    std::printf("[raytracing] ray tracing is unavailable on the web (no WebGPU/WebGL ray tracing)\n");
-    app.SetupCapture();
-    app.Run();
-    return 0;
+    app.Init("pathtracer", 960, 720, /*hasDepth*/ false);
+    app.SetClearColor(0.0f, 0.0f, 0.0f);
+    std::printf("[pathtracer] ray query is unavailable on the web - path tracing unsupported\n");
+    app.SetupCapture(); app.Run(); return 0;
 #else
     static vriex::ExampleApp app;
-    app.requestFeatures = VriFeature_RayTracing | VriFeature_RayQuery; // grant whichever the adapter has
-    app.Init("raytracing", kWidth, kHeight, /*hasDepth*/ false);
-    app.SetClearColor(0.13f, 0.16f, 0.22f); // shows through only on the unsupported path
+    app.requestFeatures = VriFeature_RayQuery | VriFeature_RayTracing; // ray query is what we use
+    app.Init("pathtracer", kWidth, kHeight, /*hasDepth*/ false);
+    app.SetClearColor(0.0f, 0.0f, 0.0f);
     VriCoreInterface& c = app.c;
     const VriDeviceDesc* dd = c.GetDeviceDesc(app.dev);
 
-    // The ray-tracing interface (acceleration structures + RT pipeline) is registered when EITHER
-    // ray tracing or ray query was granted. hasRtPipeline gates the DXR/VK pipeline path; otherwise
-    // ray query drives the compute path. Both build/use BLAS/TLAS through the same interface.
     VriRayTracingInterface rt{};
-    const bool rtIface = (dd->hasRayTracing != VRI_FALSE || dd->hasRayQuery != VRI_FALSE) &&
+    const bool hasRayQuery = dd->hasRayQuery != VRI_FALSE &&
         vriGetInterface(app.dev, VRI_INTERFACE_RAYTRACING, sizeof(rt), &rt) == VriResult_Success;
-    const bool hasRtPipeline = rtIface && dd->hasRayTracing != VRI_FALSE;
-    const bool hasRayQuery = rtIface && dd->hasRayQuery != VRI_FALSE;
 
-    static float orbit = 0.0f, orbitSpeed = 0.2f, lightAzimuth = 0.7f, lightElev = 0.9f, ambient = 0.22f;
-    app.onGui = [hasRtPipeline, hasRayQuery] {
-        if (!hasRtPipeline && !hasRayQuery) { ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "ray tracing unsupported"); ImGui::Text("needs Vulkan/D3D12 RT pipeline or Metal ray query"); return; }
-        ImGui::Text("%s", hasRtPipeline ? "RT pipeline (raygen/miss/hit + SBT)" : "inline ray query (compute, Metal-style)");
-        ImGui::SliderFloat("orbit speed", &orbitSpeed, 0.0f, 1.0f);
-        ImGui::SliderFloat("light azimuth", &lightAzimuth, 0.0f, 6.28f);
-        ImGui::SliderFloat("light elevation", &lightElev, 0.2f, 1.5f);
-        ImGui::SliderFloat("ambient", &ambient, 0.0f, 0.6f);
+    static float orbit = 1.4f, lightAzimuth = 0.7f, skyIntensity = 1.2f;
+    static int maxBounces = 4;
+    static int sampleCount = 0;   // accumulated samples (drives convergence + the accumulate/reset logic)
+    static bool dirty = true;     // camera/lighting changed -> restart accumulation
+
+    app.onGui = [hasRayQuery] {
+        if (!hasRayQuery) { ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "path tracing unsupported"); ImGui::Text("needs ray query (Metal/Vulkan/D3D12)"); return; }
+        ImGui::Text("megakernel path tracer (inline ray query)");
+        ImGui::Text("samples: %d", sampleCount);
+        if (ImGui::SliderFloat("camera orbit", &orbit, 0.0f, 6.28f)) dirty = true;
+        if (ImGui::SliderInt("max bounces", &maxBounces, 1, 8)) dirty = true;
+        if (ImGui::SliderFloat("sky intensity", &skyIntensity, 0.0f, 3.0f)) dirty = true;
+        if (ImGui::SliderFloat("light azimuth", &lightAzimuth, 0.0f, 6.28f)) dirty = true;
     };
 
-    if (!hasRtPipeline && !hasRayQuery)
+    if (!hasRayQuery)
     {
-        std::printf("[raytracing] no ray tracing on this backend (need Vulkan/D3D12 RT pipeline or ray query) - degrading\n"); std::fflush(stdout);
-        app.SetupCapture();
-        app.Run();
-        return 0;
+        std::printf("[pathtracer] no ray query on this backend - degrading\n"); std::fflush(stdout);
+        app.SetupCapture(); app.Run(); return 0;
     }
 
-    // ================= shared setup (works on every RT/ray-query backend, Metal included) =================
+    // ---- model + BLAS/TLAS (identical to examples/raytracing's shared setup) ----
     const char* modelPath = argc > 1 ? argv[1] : VRI_GLTF_MODEL_PATH;
     vriex::GltfModel model;
     if (!model.Load(app, modelPath)) app.Fail("failed to load glTF model");
 
-    // BLAS: one geometry per primitive over the model's shared vertex/index buffers; single-instance TLAS.
     std::vector<VriAsGeometryDesc> geoms(model.primitives.size());
     std::vector<GeometryNode> nodes(model.primitives.size());
     for (size_t i = 0; i < model.primitives.size(); ++i)
@@ -126,7 +114,7 @@ int main(int argc, char** argv)
     if (rt.CreateAccelerationStructure(app.dev, &blasDesc, &blas) != VriResult_Success) app.Fail("CreateAccelerationStructure (BLAS) failed");
 
     AsInstance inst{}; inst.transform[0] = 1.0f; inst.transform[5] = 1.0f; inst.transform[10] = 1.0f;
-    inst.instanceIdAndMask = 0xFFu << 24; inst.sbtOffsetAndFlags = 0x1u << 24; // cull-disable
+    inst.instanceIdAndMask = 0xFFu << 24; inst.sbtOffsetAndFlags = 0x1u << 24;
     inst.blasReference = rt.GetAccelerationStructureDeviceAddress(blas);
     VriBufferDesc ibd{}; ibd.size = sizeof(AsInstance); ibd.usage = VriBufferUsage_AccelerationBuildInput; ibd.memoryLocation = VriMemoryLocation_HostUpload;
     VriBuffer* instBuf = nullptr; c.CreateBuffer(app.dev, &ibd, &instBuf);
@@ -156,11 +144,17 @@ int main(int argc, char** argv)
     VriDescriptor* idxView = storageView(model.indexBuffer, uint64_t(model.indexCount) * sizeof(uint32_t));
     VriDescriptor* gnView = storageView(geomNodeBuf, gnd.size);
 
-    VriBufferDesc cbd{}; cbd.size = sizeof(Camera); cbd.usage = VriBufferUsage_ConstantBuffer | VriBufferUsage_TransferDst; cbd.memoryLocation = VriMemoryLocation_Device;
+    // persistent radiance accumulator (one float4 per pixel; never re-initialised on the host - the
+    // shader resets it when control.z says so). Device-local storage buffer.
+    VriBufferDesc abd{}; abd.size = uint64_t(kWidth) * kHeight * sizeof(float) * 4; abd.usage = VriBufferUsage_StorageBuffer; abd.memoryLocation = VriMemoryLocation_Device;
+    VriBuffer* accumBuf = nullptr; c.CreateBuffer(app.dev, &abd, &accumBuf);
+    VriDescriptor* accumView = storageView(accumBuf, abd.size);
+
+    VriBufferDesc cbd{}; cbd.size = sizeof(PtCamera); cbd.usage = VriBufferUsage_ConstantBuffer | VriBufferUsage_TransferDst; cbd.memoryLocation = VriMemoryLocation_Device;
     VriBuffer* camBuf = nullptr; c.CreateBuffer(app.dev, &cbd, &camBuf);
-    VriBufferDesc csd{}; csd.size = sizeof(Camera); csd.usage = VriBufferUsage_TransferSrc; csd.memoryLocation = VriMemoryLocation_HostUpload;
+    VriBufferDesc csd{}; csd.size = sizeof(PtCamera); csd.usage = VriBufferUsage_TransferSrc; csd.memoryLocation = VriMemoryLocation_HostUpload;
     VriBuffer* camStg = nullptr; c.CreateBuffer(app.dev, &csd, &camStg);
-    VriBufferViewDesc cbv{}; cbv.buffer = camBuf; cbv.viewType = VriDescriptorType_ConstantBuffer; cbv.offset = 0; cbv.size = sizeof(Camera);
+    VriBufferViewDesc cbv{}; cbv.buffer = camBuf; cbv.viewType = VriDescriptorType_ConstantBuffer; cbv.offset = 0; cbv.size = sizeof(PtCamera);
     VriDescriptor* camView = nullptr; c.CreateBufferView(app.dev, &cbv, &camView);
 
     VriTextureDesc otd{}; otd.type = VriTextureType_2D; otd.format = VriFormat_RGBA8_UNORM; otd.width = kWidth; otd.height = kHeight; otd.depth = 1;
@@ -175,84 +169,49 @@ int main(int argc, char** argv)
     msmp.addressModeU = VriAddressMode_Repeat; msmp.addressModeV = VriAddressMode_Repeat; msmp.addressModeW = VriAddressMode_Repeat; msmp.maxLod = 1.0f;
     VriDescriptor* modelSampler = nullptr; c.CreateSampler(app.dev, &msmp, &modelSampler);
 
-    // texture array (kMaxTextures slots fully populated: real textures, padded by repeating slot 0)
     std::vector<const VriDescriptor*> texArr(kMaxTextures, nullptr);
     for (uint32_t i = 0; i < kMaxTextures; ++i)
         texArr[i] = model.textureViews.empty() ? nullptr : model.textureViews[i < model.textureViews.size() ? i : 0];
 
-    // the trace set (8 bindings) is identical for both paths bar the shader stage; build the ranges once
-    const VriShaderStageFlags rgStage = hasRtPipeline ? VriShaderStage_RayGen : VriShaderStage_Compute;
-    const VriShaderStageFlags chStage = hasRtPipeline ? VriShaderStage_ClosestHit : VriShaderStage_Compute;
-    const VriShaderStageFlags rgChStage = rgStage | chStage;
-    VriDescriptorRangeDesc rr[8]{};
-    rr[0].baseRegister = 0; rr[0].descriptorNum = 1;            rr[0].descriptorType = VriDescriptorType_AccelerationStructure; rr[0].shaderStages = rgChStage;
-    rr[1].baseRegister = 1; rr[1].descriptorNum = 1;            rr[1].descriptorType = VriDescriptorType_StorageTexture;        rr[1].shaderStages = rgStage;
-    rr[2].baseRegister = 2; rr[2].descriptorNum = 1;            rr[2].descriptorType = VriDescriptorType_ConstantBuffer;        rr[2].shaderStages = rgChStage;
-    rr[3].baseRegister = 3; rr[3].descriptorNum = 1;            rr[3].descriptorType = VriDescriptorType_StorageBuffer;         rr[3].shaderStages = chStage;
-    rr[4].baseRegister = 4; rr[4].descriptorNum = 1;            rr[4].descriptorType = VriDescriptorType_StorageBuffer;         rr[4].shaderStages = chStage;
-    rr[5].baseRegister = 5; rr[5].descriptorNum = 1;            rr[5].descriptorType = VriDescriptorType_StorageBuffer;         rr[5].shaderStages = chStage;
-    rr[6].baseRegister = 6; rr[6].descriptorNum = 1;            rr[6].descriptorType = VriDescriptorType_Sampler;               rr[6].shaderStages = chStage;
-    rr[7].baseRegister = 7; rr[7].descriptorNum = kMaxTextures; rr[7].descriptorType = VriDescriptorType_Texture;               rr[7].shaderStages = chStage;
-    VriDescriptorSetDesc tsd{}; tsd.registerSpace = 0; tsd.ranges = rr; tsd.rangeNum = 8;
+    // ---- compute layout: 9 bindings (the 8 trace bindings + the accumulation buffer) ----
+    VriDescriptorRangeDesc rr[9]{};
+    rr[0].baseRegister = 0; rr[0].descriptorNum = 1;            rr[0].descriptorType = VriDescriptorType_AccelerationStructure;
+    rr[1].baseRegister = 1; rr[1].descriptorNum = 1;            rr[1].descriptorType = VriDescriptorType_StorageTexture;
+    rr[2].baseRegister = 2; rr[2].descriptorNum = 1;            rr[2].descriptorType = VriDescriptorType_ConstantBuffer;
+    rr[3].baseRegister = 3; rr[3].descriptorNum = 1;            rr[3].descriptorType = VriDescriptorType_StorageBuffer;
+    rr[4].baseRegister = 4; rr[4].descriptorNum = 1;            rr[4].descriptorType = VriDescriptorType_StorageBuffer;
+    rr[5].baseRegister = 5; rr[5].descriptorNum = 1;            rr[5].descriptorType = VriDescriptorType_StorageBuffer;
+    rr[6].baseRegister = 6; rr[6].descriptorNum = 1;            rr[6].descriptorType = VriDescriptorType_Sampler;
+    rr[7].baseRegister = 7; rr[7].descriptorNum = kMaxTextures; rr[7].descriptorType = VriDescriptorType_Texture;
+    rr[8].baseRegister = 8; rr[8].descriptorNum = 1;            rr[8].descriptorType = VriDescriptorType_StorageBuffer;
+    for (auto& r : rr) r.shaderStages = VriShaderStage_Compute;
+    VriDescriptorSetDesc tsd{}; tsd.registerSpace = 0; tsd.ranges = rr; tsd.rangeNum = 9;
     VriPipelineLayoutDesc tld{}; tld.descriptorSets = &tsd; tld.descriptorSetNum = 1;
-    VriPipelineLayout* traceLayout = nullptr; if (c.CreatePipelineLayout(app.dev, &tld, &traceLayout) != VriResult_Success) app.Fail("CreatePipelineLayout (trace) failed");
+    VriPipelineLayout* ptLayout = nullptr; if (c.CreatePipelineLayout(app.dev, &tld, &ptLayout) != VriResult_Success) app.Fail("CreatePipelineLayout failed");
+
+    VriComputePipelineDesc cpd{}; cpd.pipelineLayout = ptLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
+#if defined(_WIN32)
+    if (app.useDxbc) { cpd.shader.bytecode = g_rtPathtraceDxil; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceDxil); }
+    else
+#endif
+    { cpd.shader.bytecode = g_rtPathtraceSpv; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSpv); }
+    VriPipeline* ptPipeline = nullptr; if (c.CreateComputePipeline(app.dev, &cpd, &ptPipeline) != VriResult_Success) app.Fail("CreateComputePipeline failed");
 
     VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.accelerationStructureMaxNum = 1; pdsc.storageTextureMaxNum = 1;
-    pdsc.constantBufferMaxNum = 1; pdsc.storageBufferMaxNum = 3; pdsc.samplerMaxNum = 2; pdsc.textureMaxNum = kMaxTextures + 1;
+    pdsc.constantBufferMaxNum = 1; pdsc.storageBufferMaxNum = 4; pdsc.samplerMaxNum = 2; pdsc.textureMaxNum = kMaxTextures + 1;
     VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(app.dev, &pdsc, &pool);
-    VriDescriptorSet* traceSet = nullptr; c.AllocateDescriptorSets(pool, traceLayout, 0, &traceSet, 1);
+    VriDescriptorSet* ptSet = nullptr; c.AllocateDescriptorSets(pool, ptLayout, 0, &ptSet, 1);
     {
         const VriDescriptor* as[1] = {tlasDescriptor}; const VriDescriptor* oi[1] = {outView}; const VriDescriptor* cb[1] = {camView};
-        const VriDescriptor* vb[1] = {vtxView}; const VriDescriptor* ib[1] = {idxView}; const VriDescriptor* gb[1] = {gnView}; const VriDescriptor* sm[1] = {modelSampler};
-        VriDescriptorRangeUpdateDesc u[8]{};
+        const VriDescriptor* vb[1] = {vtxView}; const VriDescriptor* ib[1] = {idxView}; const VriDescriptor* gb[1] = {gnView}; const VriDescriptor* sm[1] = {modelSampler}; const VriDescriptor* ab[1] = {accumView};
+        VriDescriptorRangeUpdateDesc u[9]{};
         u[0].descriptors = as; u[0].descriptorNum = 1; u[1].descriptors = oi; u[1].descriptorNum = 1; u[2].descriptors = cb; u[2].descriptorNum = 1;
         u[3].descriptors = vb; u[3].descriptorNum = 1; u[4].descriptors = ib; u[4].descriptorNum = 1; u[5].descriptors = gb; u[5].descriptorNum = 1;
-        u[6].descriptors = sm; u[6].descriptorNum = 1; u[7].descriptors = texArr.data(); u[7].descriptorNum = kMaxTextures;
-        c.UpdateDescriptorRanges(traceSet, 0, 8, u);
+        u[6].descriptors = sm; u[6].descriptorNum = 1; u[7].descriptors = texArr.data(); u[7].descriptorNum = kMaxTextures; u[8].descriptors = ab; u[8].descriptorNum = 1;
+        c.UpdateDescriptorRanges(ptSet, 0, 9, u);
     }
 
-    // ================= path-specific: RT pipeline (VK/D3D12) or compute ray query (Metal) =================
-    VriPipeline* rtPipeline = nullptr; VriBuffer* sbt = nullptr; uint32_t baseAlign = 0;
-    VriPipeline* computePipeline = nullptr;
-    if (hasRtPipeline)
-    {
-        VriShaderDesc sh[3]{};
-        sh[0].stage = VriShaderStage_RayGen;     sh[0].entryPointName = "rayGenMain";
-        sh[1].stage = VriShaderStage_Miss;       sh[1].entryPointName = "missMain";
-        sh[2].stage = VriShaderStage_ClosestHit; sh[2].entryPointName = "closestHitMain";
-#if defined(_WIN32)
-        if (app.useDxbc) { for (int i = 0; i < 3; ++i) { sh[i].bytecode = g_rtGltfDxil; sh[i].bytecodeSize = sizeof(g_rtGltfDxil); } }
-        else
-#endif
-        { for (int i = 0; i < 3; ++i) { sh[i].bytecode = g_rtGltfSpv; sh[i].bytecodeSize = sizeof(g_rtGltfSpv); } }
-        VriShaderGroupDesc groups[3]{};
-        groups[0].type = VriShaderGroupType_General;           groups[0].generalShader = 0; groups[0].closestHitShader = VRI_SHADER_UNUSED; groups[0].anyHitShader = VRI_SHADER_UNUSED; groups[0].intersectionShader = VRI_SHADER_UNUSED;
-        groups[1].type = VriShaderGroupType_General;           groups[1].generalShader = 1; groups[1].closestHitShader = VRI_SHADER_UNUSED; groups[1].anyHitShader = VRI_SHADER_UNUSED; groups[1].intersectionShader = VRI_SHADER_UNUSED;
-        groups[2].type = VriShaderGroupType_TrianglesHitGroup; groups[2].generalShader = VRI_SHADER_UNUSED; groups[2].closestHitShader = 2; groups[2].anyHitShader = VRI_SHADER_UNUSED; groups[2].intersectionShader = VRI_SHADER_UNUSED;
-        VriRayTracingPipelineDesc rtpd{}; rtpd.pipelineLayout = traceLayout; rtpd.shaders = sh; rtpd.shaderNum = 3; rtpd.groups = groups; rtpd.groupNum = 3; rtpd.maxRecursionDepth = 1;
-        if (rt.CreateRayTracingPipeline(app.dev, &rtpd, &rtPipeline) != VriResult_Success) app.Fail("CreateRayTracingPipeline failed");
-
-        const uint32_t handleSize = dd->rtShaderGroupHandleSize; baseAlign = dd->rtShaderGroupBaseAlignment;
-        std::vector<uint8_t> handles(size_t(3) * handleSize);
-        if (rt.GetShaderGroupHandles(rtPipeline, 0, 3, handles.size(), handles.data()) != VriResult_Success) app.Fail("GetShaderGroupHandles failed");
-        VriBufferDesc sbtd{}; sbtd.size = uint64_t(baseAlign) * 3; sbtd.usage = VriBufferUsage_ShaderBindingTable; sbtd.memoryLocation = VriMemoryLocation_HostUpload;
-        c.CreateBuffer(app.dev, &sbtd, &sbt);
-        uint8_t* p = static_cast<uint8_t*>(c.MapBuffer(sbt, 0, sbtd.size)); std::memset(p, 0, sbtd.size);
-        for (uint32_t i = 0; i < 3; ++i) std::memcpy(p + uint64_t(i) * baseAlign, handles.data() + size_t(i) * handleSize, handleSize);
-        c.UnmapBuffer(sbt);
-    }
-    else // hasRayQuery: Metal-style single-kernel inline ray query
-    {
-        VriComputePipelineDesc cpd{}; cpd.pipelineLayout = traceLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
-#if defined(_WIN32)
-        if (app.useDxbc) { cpd.shader.bytecode = g_rtGltfRayqueryDxil; cpd.shader.bytecodeSize = sizeof(g_rtGltfRayqueryDxil); }
-        else
-#endif
-        { cpd.shader.bytecode = g_rtGltfRayquerySpv; cpd.shader.bytecodeSize = sizeof(g_rtGltfRayquerySpv); }
-        if (c.CreateComputePipeline(app.dev, &cpd, &computePipeline) != VriResult_Success) app.Fail("CreateComputePipeline (ray query) failed");
-    }
-
-    // ================= display pipeline (fullscreen show_tex), shared =================
+    // ---- display pipeline ----
     VriDescriptorRangeDesc dr[2]{};
     dr[0].baseRegister = 0; dr[0].descriptorNum = 1; dr[0].descriptorType = VriDescriptorType_Texture; dr[0].shaderStages = VriShaderStage_Fragment;
     dr[1].baseRegister = 1; dr[1].descriptorNum = 1; dr[1].descriptorType = VriDescriptorType_Sampler; dr[1].shaderStages = VriShaderStage_Fragment;
@@ -272,14 +231,13 @@ int main(int argc, char** argv)
     VriDescriptorSet* displaySet = nullptr; c.AllocateDescriptorSets(pool, displayLayout, 0, &displaySet, 1);
     { const VriDescriptor* a[1] = {outView}; const VriDescriptor* b[1] = {dispSampler}; VriDescriptorRangeUpdateDesc u[2]{}; u[0].descriptors = a; u[0].descriptorNum = 1; u[1].descriptors = b; u[1].descriptorNum = 1; c.UpdateDescriptorRanges(displaySet, 0, 2, u); }
 
-    // camera framing from model bounds
     const V3 center = {(model.boundsMin[0] + model.boundsMax[0]) * 0.5f, (model.boundsMin[1] + model.boundsMax[1]) * 0.5f, (model.boundsMin[2] + model.boundsMax[2]) * 0.5f};
     const V3 ext = {model.boundsMax[0] - model.boundsMin[0], model.boundsMax[1] - model.boundsMin[1], model.boundsMax[2] - model.boundsMin[2]};
     const float radius = 0.5f * std::sqrt(ext.x * ext.x + ext.y * ext.y + ext.z * ext.z);
 
     app.onUpdate = [=](uint64_t) {
-        orbit += app.dt * orbitSpeed;
-        Camera cam{};
+        if (dirty) { sampleCount = 0; dirty = false; }      // restart accumulation on any change
+        PtCamera cam{};
         const float dist = radius * 3.6f; // far enough that the whole model fits the frame
         const V3 eye = {center.x + std::cos(orbit) * dist, center.y + radius * 0.5f, center.z + std::sin(orbit) * dist};
         const V3 fwd = norm3(sub(center, eye));
@@ -291,43 +249,34 @@ int main(int argc, char** argv)
         set4(cam.camRight, {right.x * tanHalf * aspect, right.y * tanHalf * aspect, right.z * tanHalf * aspect});
         set4(cam.camUp, {up.x * tanHalf, up.y * tanHalf, up.z * tanHalf});
         set4(cam.camFwd, fwd);
-        const float ce = std::cos(lightElev), se = std::sin(lightElev);
-        set4(cam.lightDir, norm3({std::cos(lightAzimuth) * ce, se, std::sin(lightAzimuth) * ce}));
-        cam.params[0] = ambient;
-        std::memcpy(c.MapBuffer(camStg, 0, sizeof(Camera)), &cam, sizeof(Camera)); c.UnmapBuffer(camStg);
+        // warm sky tint that shifts with the "light azimuth" so the GI direction is visible
+        const float a = lightAzimuth;
+        set4(cam.sky, {0.7f + 0.3f * std::cos(a), 0.75f, 0.85f + 0.15f * std::sin(a)}, skyIntensity);
+        cam.control[0] = float(sampleCount);
+        cam.control[1] = float(maxBounces);
+        cam.control[2] = (sampleCount == 0) ? 1.0f : 0.0f; // reset the accumulator on the first sample
+        std::memcpy(c.MapBuffer(camStg, 0, sizeof(PtCamera)), &cam, sizeof(PtCamera)); c.UnmapBuffer(camStg);
+        ++sampleCount;
     };
 
     static bool g_imgInit = false;
-    const VriPipelineStageFlags traceStageBit = hasRtPipeline ? VriPipelineStage_RayTracingShader : VriPipelineStage_ComputeShader;
     app.onPreRender = [=](VriCommandBuffer* cmd) {
-        VriBufferCopyDesc ucp{}; ucp.size = sizeof(Camera); c.CmdCopyBuffer(cmd, camBuf, camStg, &ucp);
+        VriBufferCopyDesc ucp{}; ucp.size = sizeof(PtCamera); c.CmdCopyBuffer(cmd, camBuf, camStg, &ucp);
         VriBufferBarrierDesc ub{}; ub.buffer = camBuf; ub.before.access = VriAccess_CopyDestinationWrite; ub.before.stages = VriPipelineStage_Transfer;
-        ub.after.access = VriAccess_ConstantBufferRead; ub.after.stages = traceStageBit;
+        ub.after.access = VriAccess_ConstantBufferRead; ub.after.stages = VriPipelineStage_ComputeShader;
         VriBarrierGroupDesc ubg{}; ubg.buffers = &ub; ubg.bufferNum = 1; c.CmdBarrier(cmd, &ubg);
 
         VriTextureBarrierDesc tw{}; tw.texture = outImg; tw.before.layout = g_imgInit ? VriLayout_ShaderResource : VriLayout_Undefined; tw.before.stages = g_imgInit ? VriPipelineStage_FragmentShader : VriPipelineStage_None;
-        tw.after.access = VriAccess_ShaderResourceStorageWrite; tw.after.layout = VriLayout_ShaderResourceStorage; tw.after.stages = traceStageBit; tw.aspect = VriImageAspect_Color;
+        tw.after.access = VriAccess_ShaderResourceStorageWrite; tw.after.layout = VriLayout_ShaderResourceStorage; tw.after.stages = VriPipelineStage_ComputeShader; tw.aspect = VriImageAspect_Color;
         VriBarrierGroupDesc gw{}; gw.textures = &tw; gw.textureNum = 1; c.CmdBarrier(cmd, &gw);
         g_imgInit = true;
 
-        c.CmdSetPipeline(cmd, hasRtPipeline ? rtPipeline : computePipeline);
-        c.CmdSetPipelineLayout(cmd, traceLayout);
-        c.CmdSetDescriptorSet(cmd, 0, traceSet);
-        if (hasRtPipeline)
-        {
-            VriDispatchRaysDesc trace{};
-            trace.raygen.buffer = sbt; trace.raygen.offset = 0u * baseAlign; trace.raygen.stride = baseAlign; trace.raygen.size = baseAlign;
-            trace.miss.buffer   = sbt; trace.miss.offset   = 1u * baseAlign; trace.miss.stride   = baseAlign; trace.miss.size   = baseAlign;
-            trace.hit.buffer    = sbt; trace.hit.offset    = 2u * baseAlign; trace.hit.stride    = baseAlign; trace.hit.size    = baseAlign;
-            trace.width = kWidth; trace.height = kHeight; trace.depth = 1;
-            rt.CmdTraceRays(cmd, &trace);
-        }
-        else
-        {
-            VriDispatchDesc disp{}; disp.x = (kWidth + 7) / 8; disp.y = (kHeight + 7) / 8; disp.z = 1; c.CmdDispatch(cmd, &disp);
-        }
+        c.CmdSetPipeline(cmd, ptPipeline);
+        c.CmdSetPipelineLayout(cmd, ptLayout);
+        c.CmdSetDescriptorSet(cmd, 0, ptSet);
+        VriDispatchDesc disp{}; disp.x = (kWidth + 7) / 8; disp.y = (kHeight + 7) / 8; disp.z = 1; c.CmdDispatch(cmd, &disp);
 
-        VriTextureBarrierDesc tr{}; tr.texture = outImg; tr.before.access = VriAccess_ShaderResourceStorageWrite; tr.before.layout = VriLayout_ShaderResourceStorage; tr.before.stages = traceStageBit;
+        VriTextureBarrierDesc tr{}; tr.texture = outImg; tr.before.access = VriAccess_ShaderResourceStorageWrite; tr.before.layout = VriLayout_ShaderResourceStorage; tr.before.stages = VriPipelineStage_ComputeShader;
         tr.after.access = VriAccess_ShaderResourceRead; tr.after.layout = VriLayout_ShaderResource; tr.after.stages = VriPipelineStage_FragmentShader; tr.aspect = VriImageAspect_Color;
         VriBarrierGroupDesc gr{}; gr.textures = &tr; gr.textureNum = 1; c.CmdBarrier(cmd, &gr);
     };
@@ -338,19 +287,16 @@ int main(int argc, char** argv)
         VriDrawDesc d{}; d.vertexNum = 3; d.instanceNum = 1; c.CmdDraw(cmd, &d);
     };
 
-    std::printf("[raytracing] %s tracing '%s' (%zu primitives) into %ux%u\n",
-                hasRtPipeline ? "RT pipeline" : "inline ray query (compute)", modelPath, model.primitives.size(), kWidth, kHeight); std::fflush(stdout);
+    std::printf("[pathtracer] megakernel path tracer (inline ray query) over '%s' (%zu primitives), %ux%u\n", modelPath, model.primitives.size(), kWidth, kHeight); std::fflush(stdout);
     app.SetupCapture();
     app.Run();
 
     c.DestroyDescriptorPool(pool);
     c.DestroyPipeline(displayPipeline); c.DestroyPipelineLayout(displayLayout);
-    if (rtPipeline) c.DestroyPipeline(rtPipeline);
-    if (computePipeline) c.DestroyPipeline(computePipeline);
-    c.DestroyPipelineLayout(traceLayout);
-    if (sbt) c.DestroyBuffer(sbt);
+    c.DestroyPipeline(ptPipeline); c.DestroyPipelineLayout(ptLayout);
     c.DestroyDescriptor(dispSampler); c.DestroyDescriptor(modelSampler);
     c.DestroyDescriptor(outView); c.DestroyTexture(outImg);
+    c.DestroyDescriptor(accumView); c.DestroyBuffer(accumBuf);
     c.DestroyDescriptor(camView); c.DestroyBuffer(camStg); c.DestroyBuffer(camBuf);
     c.DestroyDescriptor(vtxView); c.DestroyDescriptor(idxView); c.DestroyDescriptor(gnView);
     c.DestroyBuffer(geomNodeBuf);
@@ -360,5 +306,5 @@ int main(int argc, char** argv)
     model.Destroy(app);
     app.Shutdown();
     return 0;
-#endif // __EMSCRIPTEN__
+#endif
 }
