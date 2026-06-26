@@ -23,7 +23,7 @@
 #include "tests/shaders/show_tex_dxbc.h"
 #include "tests/shaders/rt_pathtrace_spv.h"      // g_rtPathtraceSpv (Metal/VK inline ray-query megakernel)
 #if defined(_WIN32)
-#    include "tests/shaders/rt_pathtrace_dxil.h" // g_rtPathtraceDxil (D3D12 inline)
+#    include "tests/shaders/rt_pathtrace_dxil.h" // g_rtPathtraceDxilCS (D3D12 inline)
 #endif
 
 #if !defined(VRI_GLTF_MODEL_PATH)
@@ -191,7 +191,7 @@ int main(int argc, char** argv)
 
     VriComputePipelineDesc cpd{}; cpd.pipelineLayout = ptLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
 #if defined(_WIN32)
-    if (app.useDxbc) { cpd.shader.bytecode = g_rtPathtraceDxil; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceDxil); }
+    if (app.useDxbc) { cpd.shader.bytecode = g_rtPathtraceDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceDxilCS); }
     else
 #endif
     { cpd.shader.bytecode = g_rtPathtraceSpv; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSpv); }

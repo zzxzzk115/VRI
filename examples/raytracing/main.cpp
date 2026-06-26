@@ -29,8 +29,8 @@
 #include "tests/shaders/rt_gltf_spv.h"           // g_rtGltfSpv         (Vulkan: raygen/miss/closesthit)
 #include "tests/shaders/rt_gltf_rayquery_spv.h"  // g_rtGltfRayquerySpv (Metal/VK: inline ray query CS)
 #if defined(_WIN32)
-#    include "tests/shaders/rt_gltf_dxil.h"          // g_rtGltfDxil         (D3D12 DXR library)
-#    include "tests/shaders/rt_gltf_rayquery_dxil.h" // g_rtGltfRayqueryDxil (D3D12 inline ray query CS)
+#    include "tests/shaders/rt_gltf_dxil.h"          // g_rtGltfDxilRGEN/MISS/CHIT (D3D12 DXR library, per stage)
+#    include "tests/shaders/rt_gltf_rayquery_dxil.h" // g_rtGltfRayqueryDxilCS     (D3D12 inline ray query CS)
 #endif
 
 #if !defined(VRI_GLTF_MODEL_PATH)
@@ -221,7 +221,11 @@ int main(int argc, char** argv)
         sh[1].stage = VriShaderStage_Miss;       sh[1].entryPointName = "missMain";
         sh[2].stage = VriShaderStage_ClosestHit; sh[2].entryPointName = "closestHitMain";
 #if defined(_WIN32)
-        if (app.useDxbc) { for (int i = 0; i < 3; ++i) { sh[i].bytecode = g_rtGltfDxil; sh[i].bytecodeSize = sizeof(g_rtGltfDxil); } }
+        if (app.useDxbc) {
+            sh[0].bytecode = g_rtGltfDxilRGEN; sh[0].bytecodeSize = sizeof(g_rtGltfDxilRGEN);
+            sh[1].bytecode = g_rtGltfDxilMISS; sh[1].bytecodeSize = sizeof(g_rtGltfDxilMISS);
+            sh[2].bytecode = g_rtGltfDxilCHIT; sh[2].bytecodeSize = sizeof(g_rtGltfDxilCHIT);
+        }
         else
 #endif
         { for (int i = 0; i < 3; ++i) { sh[i].bytecode = g_rtGltfSpv; sh[i].bytecodeSize = sizeof(g_rtGltfSpv); } }
@@ -245,7 +249,7 @@ int main(int argc, char** argv)
     {
         VriComputePipelineDesc cpd{}; cpd.pipelineLayout = traceLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
 #if defined(_WIN32)
-        if (app.useDxbc) { cpd.shader.bytecode = g_rtGltfRayqueryDxil; cpd.shader.bytecodeSize = sizeof(g_rtGltfRayqueryDxil); }
+        if (app.useDxbc) { cpd.shader.bytecode = g_rtGltfRayqueryDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtGltfRayqueryDxilCS); }
         else
 #endif
         { cpd.shader.bytecode = g_rtGltfRayquerySpv; cpd.shader.bytecodeSize = sizeof(g_rtGltfRayquerySpv); }
