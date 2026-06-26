@@ -37,20 +37,26 @@ option("vri_build_tools") -- build host tools (vri-shaderc)?
     set_description("Enable VRI host tools (vri-shaderc)")
 option_end()
 
--- backend options (MVP: Vulkan on by default; others enabled as they come online)
--- On wasm the only viable backend is GL (-> WebGL2); Vulkan is unavailable there.
+-- backend options (MVP: Vulkan on by default; others enabled as they come online).
+--
+-- Platform-dependent defaults are set in on_check, NOT set_default: an option's set_default is
+-- baked in an early pass where the -p target isn't resolved yet (get_config("plat") == nil, so
+-- is_plat("wasm") is false there). on_check runs after the platform is known, so is_plat() is
+-- correct - and option:enable() there does not clobber a value the user passed explicitly, so
+-- --vri_backend_*=y/n is still honored. (set_default would also suppress on_check, hence neither.)
 option("vri_backend_vulkan")
-    set_default(not is_plat("wasm"))
+    -- on by default on desktop; unavailable on the web (-> off on wasm).
     set_showmenu(true)
     set_description("Enable the Vulkan backend")
+    on_check(function (option) if not is_plat("wasm") then option:enable(true) end end)
 option_end()
 
 option("vri_backend_wgpu")
-    -- default on for wasm: WebGPU is the primary web backend (Auto picks it first), with
-    -- the GL/WebGL2 backend (also default-on below) as the fallback.
-    set_default(is_plat("wasm"))
+    -- opt-in on desktop; the primary web backend on wasm (Auto picks it first, GL/WebGL2 is the
+    -- fallback) -> on by default there.
     set_showmenu(true)
     set_description("Enable the WebGPU backend")
+    on_check(function (option) if is_plat("wasm") then option:enable(true) end end)
 option_end()
 
 option("vri_backend_gl")
