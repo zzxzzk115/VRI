@@ -429,28 +429,40 @@ namespace vri::vk
             return false;
         };
 
+        auto enableBindless = [&]() -> bool {
+            if (f12.descriptorIndexing)
+                return true;
+            if (!v12Sup.descriptorIndexing || !v12Sup.runtimeDescriptorArray || !v12Sup.descriptorBindingPartiallyBound ||
+                !v12Sup.shaderSampledImageArrayNonUniformIndexing)
+                return false;
+            f12.descriptorIndexing = VK_TRUE;
+            f12.runtimeDescriptorArray = VK_TRUE;
+            f12.descriptorBindingPartiallyBound = VK_TRUE;
+            // Variable-count (runtime-sized) bindless arrays + update-after-bind.
+            // MoltenVK can't do VARIABLE_DESCRIPTOR_COUNT with image arrays, so on macOS
+            // bindless is granted but limited to fixed-size arrays (see core_vk.cpp). [UNVERIFIED]
+#if !defined(__APPLE__)
+            f12.descriptorBindingVariableDescriptorCount = v12Sup.descriptorBindingVariableDescriptorCount;
+#endif
+            f12.descriptorBindingSampledImageUpdateAfterBind = v12Sup.descriptorBindingSampledImageUpdateAfterBind;
+            f12.descriptorBindingUpdateUnusedWhilePending = v12Sup.descriptorBindingUpdateUnusedWhilePending;
+            f12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+            return true;
+        };
+
         if (requested & VriFeature_Bindless)
         {
-            if (v12Sup.descriptorIndexing && v12Sup.runtimeDescriptorArray && v12Sup.descriptorBindingPartiallyBound)
-            {
-                f12.descriptorIndexing = VK_TRUE;
-                f12.runtimeDescriptorArray = VK_TRUE;
-                f12.descriptorBindingPartiallyBound = VK_TRUE;
-                // Variable-count (runtime-sized) bindless arrays + update-after-bind.
-                // MoltenVK can't do VARIABLE_DESCRIPTOR_COUNT with image arrays, so on macOS
-                // bindless is granted but limited to fixed-size arrays (see core_vk.cpp). [UNVERIFIED]
-#if !defined(__APPLE__)
-                f12.descriptorBindingVariableDescriptorCount = v12Sup.descriptorBindingVariableDescriptorCount;
-#endif
-                f12.descriptorBindingSampledImageUpdateAfterBind = v12Sup.descriptorBindingSampledImageUpdateAfterBind;
-                f12.descriptorBindingUpdateUnusedWhilePending = v12Sup.descriptorBindingUpdateUnusedWhilePending;
-                f12.shaderSampledImageArrayNonUniformIndexing = v12Sup.shaderSampledImageArrayNonUniformIndexing;
+            if (enableBindless())
                 granted |= VriFeature_Bindless;
-            }
             else if (unsupported("bindless (descriptor indexing) not supported"))
                 return VriResult_Unsupported;
         }
 
+        // The glTF ray-tracing shaders sample material textures through NonUniformResourceIndex.
+        // Enable the matching Vulkan 1.2 descriptor-indexing feature whenever available, even if
+        // the public bindless feature was not explicitly requested by the app.
+        if (requested & (VriFeature_RayTracing | VriFeature_RayQuery))
+            enableBindless();
         // Acceleration structures back BOTH ray-tracing pipelines and ray query, so the
         // AS extension/feature is enabled once and shared. enableAS() is idempotent.
         bool asEnabled = false;
