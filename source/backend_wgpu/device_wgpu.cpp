@@ -94,6 +94,7 @@ namespace vri::wgpu
     }
 
     void DeviceWGPU::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+    void DeviceWGPU::ReportWarning(const char* message) const { Diagnostic(VriMessageSeverity_Warning, message); }
 
     void DeviceWGPU::Diagnostic(VriMessageSeverity severity, const char* message) const
     {

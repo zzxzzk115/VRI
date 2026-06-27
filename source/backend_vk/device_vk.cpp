@@ -81,6 +81,14 @@ namespace vri::vk
             std::fprintf(stderr, "[VRI/VK] %s\n", message);
     }
 
+    void DeviceVK::ReportWarning(const char* message) const
+    {
+        if (m_callback.MessageCallback)
+            m_callback.MessageCallback(m_callback.userArg, VriMessageSeverity_Warning, message);
+        else
+            std::fprintf(stderr, "[VRI/VK] %s\n", message);
+    }
+
     VriResult DeviceVK::Init(const VriDeviceCreationDesc& desc)
     {
         if (desc.callbackInterface)

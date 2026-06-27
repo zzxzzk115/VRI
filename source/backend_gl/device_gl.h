@@ -103,6 +103,7 @@ namespace vri::gl
         void* EglSurface() const { return m_eglSurface; }
 #endif
         void ReportError(const char* message) const;
+        void ReportWarning(const char* message) const;
         // Route a backend diagnostic (GL KHR_debug message) to the app's callback.
         void Diagnostic(VriMessageSeverity severity, const char* message) const;
 

@@ -11,6 +11,8 @@
 
 #include "wgpu_native.h" // webgpu.h + native-only poll helpers
 
+#include <cstdio>
+
 #include "conversions_wgpu.h"
 #include "device_wgpu.h"
 #include "swapchain_wgpu.h"
@@ -63,8 +65,51 @@ namespace vri::wgpu
             cfg.usage  = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc; // CopySrc: screenshot readback
             cfg.width  = sc->width;
             cfg.height = sc->height;
-            cfg.alphaMode   = WGPUCompositeAlphaMode_Auto;
-            cfg.presentMode = sc->vsync ? WGPUPresentMode_Fifo : WGPUPresentMode_Mailbox;
+            cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
+            // map VriPresentMode -> WGPUPresentMode; Fifo is always supported, fall back to it (+warn) otherwise.
+            WGPUPresentMode want = WGPUPresentMode_Fifo;
+            const char*     name = "Fifo";
+            switch (sc->presentMode)
+            {
+                case VriPresentMode_FifoRelaxed:
+                    want = WGPUPresentMode_FifoRelaxed;
+                    name = "FifoRelaxed";
+                    break;
+                case VriPresentMode_Mailbox:
+                    want = WGPUPresentMode_Mailbox;
+                    name = "Mailbox";
+                    break;
+                case VriPresentMode_Immediate:
+                    want = WGPUPresentMode_Immediate;
+                    name = "Immediate";
+                    break;
+                default:
+                    break;
+            }
+            if (want != WGPUPresentMode_Fifo)
+            {
+                WGPUSurfaceCapabilities pcaps = {};
+                wgpuSurfaceGetCapabilities(sc->surface, sc->device->Adapter(), &pcaps);
+                bool ok = false;
+                for (size_t i = 0; i < pcaps.presentModeCount; ++i)
+                    if (pcaps.presentModes[i] == want)
+                    {
+                        ok = true;
+                        break;
+                    }
+                wgpuSurfaceCapabilitiesFreeMembers(pcaps);
+                if (!ok)
+                {
+                    char msg[160];
+                    std::snprintf(msg,
+                                  sizeof(msg),
+                                  "present mode '%s' is unsupported by this surface; falling back to Fifo (vsync)",
+                                  name);
+                    sc->device->ReportWarning(msg);
+                    want = WGPUPresentMode_Fifo;
+                }
+            }
+            cfg.presentMode = want;
             wgpuSurfaceConfigure(sc->surface, &cfg);
         }
 
@@ -96,7 +141,7 @@ namespace vri::wgpu
             sc->format          = chosen;
             sc->width           = desc->width;
             sc->height          = desc->height;
-            sc->vsync           = desc->vsync != VRI_FALSE;
+            sc->presentMode     = desc->presentMode;
             sc->requestedFormat = desc->format;
             Configure(sc);
 

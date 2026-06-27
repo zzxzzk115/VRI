@@ -2263,7 +2263,7 @@ namespace
         scd.width                      = kW;
         scd.height                     = kH;
         scd.textureNum                 = 2;
-        scd.vsync                      = VRI_TRUE;
+        scd.presentMode                = VriPresentMode_Fifo;
         VriSwapChain* swc              = nullptr;
         if (sw.CreateSwapChain(dev, &scd, &swc) != VriResult_Success)
         {

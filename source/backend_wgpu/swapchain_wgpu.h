@@ -17,7 +17,7 @@ namespace vri::wgpu
         WGPUTextureFormat format;
         uint32_t          width;
         uint32_t          height;
-        bool              vsync;
+        VriPresentMode    presentMode;
         VriFormat         requestedFormat;
         // WebGPU hands back the current frame texture on acquire; we expose a
         // single stable VRI texture handle whose underlying WGPUTexture is

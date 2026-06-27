@@ -44,6 +44,17 @@ namespace vri::gl
         DeviceGL*    Dev(VriDevice* d) { return reinterpret_cast<DeviceGL*>(d); }
         SwapChainGL* Swap(VriSwapChain* s) { return reinterpret_cast<SwapChainGL*>(s); }
 
+        // OpenGL only exposes vsync on/off (the swap interval): Immediate -> 0, everything else -> 1.
+        // GL has no Mailbox, so that falls back to Fifo (vsync) with a warning, as the API contracts.
+        int GlSwapInterval(DeviceGL* d, VriPresentMode m)
+        {
+            if (m == VriPresentMode_Immediate)
+                return 0;
+            if (m == VriPresentMode_Mailbox)
+                d->ReportWarning("present mode 'Mailbox' has no OpenGL equivalent; falling back to Fifo (vsync)");
+            return 1; // Fifo / FifoRelaxed / Mailbox -> vsync
+        }
+
         // A backbuffer is an ordinary renderable color texture; the app draws into it
         // via the normal FBO path, then Present blits it to the window.
         TextureGL* CreateBackbuffer(DeviceGL* d, uint32_t w, uint32_t h, VriFormat fmt)
@@ -167,12 +178,12 @@ namespace vri::gl
                 s->xdisplay = desc->window.handle.xlib.display;
                 s->xwindow  = desc->window.handle.xlib.window;
             }
-            s->eglSurface  = eglSurf;
-            s->wlEglWindow = wlEglWin;
-            s->width       = w;
-            s->height      = h;
-            s->format      = desc->format;
-            s->vsync       = desc->vsync != VRI_FALSE;
+            s->eglSurface   = eglSurf;
+            s->wlEglWindow  = wlEglWin;
+            s->width        = w;
+            s->height       = h;
+            s->format       = desc->format;
+            s->swapInterval = GlSwapInterval(d, desc->presentMode);
             for (uint32_t i = 0; i < n; ++i)
                 s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
             glGenFramebuffers(1, &s->blitFbo);
@@ -222,14 +233,14 @@ namespace vri::gl
                 return VriResult_Failure;
             }
 
-            SwapChainGL* s = new SwapChainGL {};
-            s->device      = d;
-            s->hwnd        = hwnd;
-            s->hdc         = hdc;
-            s->width       = w;
-            s->height      = h;
-            s->format      = desc->format;
-            s->vsync       = desc->vsync != VRI_FALSE;
+            SwapChainGL* s  = new SwapChainGL {};
+            s->device       = d;
+            s->hwnd         = hwnd;
+            s->hdc          = hdc;
+            s->width        = w;
+            s->height       = h;
+            s->format       = desc->format;
+            s->swapInterval = GlSwapInterval(d, desc->presentMode);
             for (uint32_t i = 0; i < n; ++i)
                 s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
             glGenFramebuffers(1, &s->blitFbo);
@@ -245,14 +256,14 @@ namespace vri::gl
                 d->ReportError("GL swapchain: only the Xlib window system is implemented on Linux (Wayland GLX TBD)");
                 return VriResult_Unsupported;
             }
-            SwapChainGL* s = new SwapChainGL {};
-            s->device      = d;
-            s->xdisplay    = desc->window.handle.xlib.display;
-            s->xwindow     = desc->window.handle.xlib.window;
-            s->width       = w;
-            s->height      = h;
-            s->format      = desc->format;
-            s->vsync       = desc->vsync != VRI_FALSE;
+            SwapChainGL* s  = new SwapChainGL {};
+            s->device       = d;
+            s->xdisplay     = desc->window.handle.xlib.display;
+            s->xwindow      = desc->window.handle.xlib.window;
+            s->width        = w;
+            s->height       = h;
+            s->format       = desc->format;
+            s->swapInterval = GlSwapInterval(d, desc->presentMode);
             for (uint32_t i = 0; i < n; ++i)
                 s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
             glGenFramebuffers(1, &s->blitFbo);
@@ -265,12 +276,12 @@ namespace vri::gl
             if (desc->window.type != VriWindowSystem_Web && desc->window.type != VriWindowSystem_None)
                 d->ReportError(
                     "GL swapchain (web): expected VriWindowSystem_Web (canvas); presenting to the default canvas");
-            SwapChainGL* s = new SwapChainGL {};
-            s->device      = d;
-            s->width       = w;
-            s->height      = h;
-            s->format      = desc->format;
-            s->vsync       = desc->vsync != VRI_FALSE;
+            SwapChainGL* s  = new SwapChainGL {};
+            s->device       = d;
+            s->width        = w;
+            s->height       = h;
+            s->format       = desc->format;
+            s->swapInterval = GlSwapInterval(d, desc->presentMode);
             if (desc->window.type == VriWindowSystem_Web && desc->window.handle.web.selector)
                 s->canvasSelector = desc->window.handle.web.selector;
             // The GL device's WebGL2 context comes from a 1x1 GLFW window, so the canvas
@@ -290,13 +301,13 @@ namespace vri::gl
                 d->ReportError("GL swapchain: expected a Cocoa window handle (NSWindow*)");
                 return VriResult_Unsupported;
             }
-            SwapChainGL* s = new SwapChainGL {};
-            s->device      = d;
-            s->nsWindow    = desc->window.handle.cocoa.window;
-            s->width       = w;
-            s->height      = h;
-            s->format      = desc->format;
-            s->vsync       = desc->vsync != VRI_FALSE;
+            SwapChainGL* s  = new SwapChainGL {};
+            s->device       = d;
+            s->nsWindow     = desc->window.handle.cocoa.window;
+            s->width        = w;
+            s->height       = h;
+            s->format       = desc->format;
+            s->swapInterval = GlSwapInterval(d, desc->presentMode);
             for (uint32_t i = 0; i < n; ++i)
                 s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
             glGenFramebuffers(1, &s->blitFbo);
@@ -388,7 +399,7 @@ namespace vri::gl
                 d->ReportError("GL swapchain: eglMakeCurrent(window) failed at Present");
                 return VriResult_Failure;
             }
-            eglSwapInterval(dpy, s->vsync ? 1 : 0);
+            eglSwapInterval(dpy, s->swapInterval);
             const TextureGL* bb = s->textures[s->currentIndex];
             glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
             glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
@@ -427,7 +438,7 @@ namespace vri::gl
             static PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT_ =
                 reinterpret_cast<PFNWGLSWAPINTERVALEXTPROC>(wglGetProcAddress("wglSwapIntervalEXT"));
             if (wglSwapIntervalEXT_)
-                wglSwapIntervalEXT_(s->vsync ? 1 : 0);
+                wglSwapIntervalEXT_(s->swapInterval);
             // Blit the acquired backbuffer onto the window's default framebuffer. The
             // backbuffer is VRI top-left origin; FBO 0 is GL bottom-left, so flip Y.
             const TextureGL* bb = s->textures[s->currentIndex];
@@ -464,7 +475,7 @@ namespace vri::gl
             static PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT_ = reinterpret_cast<PFNGLXSWAPINTERVALEXTPROC>(
                 glXGetProcAddressARB(reinterpret_cast<const unsigned char*>("glXSwapIntervalEXT")));
             if (glXSwapIntervalEXT_)
-                glXSwapIntervalEXT_(s->xdisplay, s->xwindow, s->vsync ? 1 : 0);
+                glXSwapIntervalEXT_(s->xdisplay, s->xwindow, s->swapInterval);
             const TextureGL* bb = s->textures[s->currentIndex];
             glBindFramebuffer(GL_READ_FRAMEBUFFER, s->blitFbo);
             glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bb->id, 0);
@@ -526,7 +537,7 @@ namespace vri::gl
                               GL_COLOR_BUFFER_BIT,
                               GL_LINEAR);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-            vriNSGLEndPresent(d->Window(), s->vsync ? 1 : 0);
+            vriNSGLEndPresent(d->Window(), s->swapInterval);
             return VriResult_Success;
 #else
             (void)swapChain;

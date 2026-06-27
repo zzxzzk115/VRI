@@ -64,6 +64,7 @@ namespace vri::vk
         uint64_t            EnabledFeatures() const { return m_enabledFeatures; }
 
         void ReportError(const char* message) const;
+        void ReportWarning(const char* message) const;
 
     private:
         VriResult CreateInstance(const VriDeviceCreationDesc& desc);

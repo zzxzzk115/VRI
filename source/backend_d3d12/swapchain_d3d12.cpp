@@ -62,7 +62,11 @@ namespace vri::d3d12
             s->height         = desc->height ? desc->height : 1;
             s->format         = desc->format;
             s->bufferCount    = desc->textureNum >= 2 ? desc->textureNum : 2;
-            s->vsync          = desc->vsync != VRI_FALSE;
+            // Flip-model: SyncInterval 1 = vsync (Fifo); 0 = uncapped. Mailbox/Immediate both present
+            // the latest frame with no vsync wait (the flip queue discards stale frames, no tearing).
+            s->syncInterval =
+                (desc->presentMode == VriPresentMode_Mailbox || desc->presentMode == VriPresentMode_Immediate) ? 0u :
+                                                                                                                 1u;
 
             DXGI_SWAP_CHAIN_DESC1 sd = {};
             sd.Width                 = s->width;
@@ -145,7 +149,7 @@ namespace vri::d3d12
         VriResult VRI_CALL Present(VriSwapChain* swapChain, VriFence* /*waitFence*/, uint64_t /*waitValue*/)
         {
             SwapChainD3D12* s = SC(swapChain);
-            return SUCCEEDED(s->swapchain->Present(s->vsync ? 1 : 0, 0)) ? VriResult_Success : VriResult_Failure;
+            return SUCCEEDED(s->swapchain->Present(s->syncInterval, 0)) ? VriResult_Success : VriResult_Failure;
         }
 
         VriResult VRI_CALL Resize(VriSwapChain* swapChain, uint32_t width, uint32_t height)

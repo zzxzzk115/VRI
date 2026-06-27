@@ -27,9 +27,9 @@ namespace vri::d3d12
         ComPtr<IDXGISwapChain3>    swapchain;
         std::vector<TextureD3D12*> textures; // backbuffers wrapped as VRI textures (owned)
         uint32_t                   width = 0, height = 0;
-        VriFormat                  format      = VriFormat_Unknown;
-        uint32_t                   bufferCount = 0;
-        bool                       vsync       = true;
+        VriFormat                  format       = VriFormat_Unknown;
+        uint32_t                   bufferCount  = 0;
+        UINT                       syncInterval = 1; // 1 = Fifo (vsync); 0 = Mailbox/Immediate (uncapped)
     };
 
     inline VriSwapChain* ToHandle(SwapChainD3D12* s) { return reinterpret_cast<VriSwapChain*>(s); }

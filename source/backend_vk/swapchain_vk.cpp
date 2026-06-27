@@ -19,6 +19,7 @@
 #include "device_vk.h"
 #include "swapchain_vk.h"
 
+#include <cstdio>
 #include <vector>
 
 namespace vri::vk
@@ -64,12 +65,12 @@ namespace vri::vk
             sc->textures.clear();
         }
 
-        VriResult BuildSwapchain(SwapChainVK* sc,
-                                 uint32_t     width,
-                                 uint32_t     height,
-                                 VriFormat    format,
-                                 uint32_t     textureNum,
-                                 bool         vsync)
+        VriResult BuildSwapchain(SwapChainVK*   sc,
+                                 uint32_t       width,
+                                 uint32_t       height,
+                                 VriFormat      format,
+                                 uint32_t       textureNum,
+                                 VriPresentMode presentMode)
         {
             DeviceVK*        d    = sc->device;
             VkPhysicalDevice phys = d->PhysicalDevice();
@@ -95,20 +96,49 @@ namespace vri::vk
                 }
             }
 
-            // present mode
-            VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR; // always supported
-            if (!vsync)
+            // present mode: map the requested VriPresentMode -> VkPresentModeKHR, falling back to FIFO
+            // (the only mode guaranteed present) with a warning if the surface lacks the requested one.
+            uint32_t modeCount = 0;
+            vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, nullptr);
+            std::vector<VkPresentModeKHR> modes(modeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, modes.data());
+            const auto supported = [&](VkPresentModeKHR m) {
+                for (VkPresentModeKHR x : modes)
+                    if (x == m)
+                        return true;
+                return false;
+            };
+            VkPresentModeKHR want = VK_PRESENT_MODE_FIFO_KHR;
+            const char*      name = "Fifo";
+            switch (presentMode)
             {
-                uint32_t modeCount = 0;
-                vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, nullptr);
-                std::vector<VkPresentModeKHR> modes(modeCount);
-                vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, modes.data());
-                for (VkPresentModeKHR m : modes)
-                    if (m == VK_PRESENT_MODE_MAILBOX_KHR)
-                    {
-                        mode = m;
-                        break;
-                    }
+                case VriPresentMode_FifoRelaxed:
+                    want = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+                    name = "FifoRelaxed";
+                    break;
+                case VriPresentMode_Mailbox:
+                    want = VK_PRESENT_MODE_MAILBOX_KHR;
+                    name = "Mailbox";
+                    break;
+                case VriPresentMode_Immediate:
+                    want = VK_PRESENT_MODE_IMMEDIATE_KHR;
+                    name = "Immediate";
+                    break;
+                default:
+                    want = VK_PRESENT_MODE_FIFO_KHR;
+                    name = "Fifo";
+                    break;
+            }
+            VkPresentModeKHR mode = want;
+            if (want != VK_PRESENT_MODE_FIFO_KHR && !supported(want))
+            {
+                char msg[160];
+                std::snprintf(msg,
+                              sizeof(msg),
+                              "present mode '%s' is unsupported on this surface; falling back to Fifo (vsync)",
+                              name);
+                sc->device->ReportWarning(msg);
+                mode = VK_PRESENT_MODE_FIFO_KHR;
             }
 
             // extent
@@ -179,14 +209,14 @@ namespace vri::vk
 
         VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
         {
-            DeviceVK*    d          = Dev(device);
-            SwapChainVK* sc         = new SwapChainVK {};
-            sc->device              = d;
-            sc->presentQueue        = Q(desc->queue)->queue;
-            sc->swapchain           = VK_NULL_HANDLE;
-            sc->requestedFormat     = desc->format;
-            sc->requestedTextureNum = desc->textureNum;
-            sc->vsync               = desc->vsync != VRI_FALSE;
+            DeviceVK*    d           = Dev(device);
+            SwapChainVK* sc          = new SwapChainVK {};
+            sc->device               = d;
+            sc->presentQueue         = Q(desc->queue)->queue;
+            sc->swapchain            = VK_NULL_HANDLE;
+            sc->requestedFormat      = desc->format;
+            sc->requestedTextureNum  = desc->textureNum;
+            sc->requestedPresentMode = desc->presentMode;
 
             sc->surface = CreateSurface(d, desc->window);
             if (!sc->surface)
@@ -209,7 +239,7 @@ namespace vri::vk
             vkCreateFence(d->Device(), &fci, nullptr, &sc->acquireFence);
 
             VriResult r =
-                BuildSwapchain(sc, desc->width, desc->height, desc->format, desc->textureNum, desc->vsync != VRI_FALSE);
+                BuildSwapchain(sc, desc->width, desc->height, desc->format, desc->textureNum, desc->presentMode);
             if (r != VriResult_Success)
             {
                 vkDestroyFence(d->Device(), sc->acquireFence, nullptr);
@@ -295,7 +325,8 @@ namespace vri::vk
         {
             SwapChainVK* sc = SC(swapChain);
             vkDeviceWaitIdle(sc->device->Device());
-            return BuildSwapchain(sc, width, height, sc->requestedFormat, sc->requestedTextureNum, sc->vsync);
+            return BuildSwapchain(
+                sc, width, height, sc->requestedFormat, sc->requestedTextureNum, sc->requestedPresentMode);
         }
 
         const VriSwapChainInterface g_swapChainVK = {

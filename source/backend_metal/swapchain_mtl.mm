@@ -53,13 +53,15 @@ namespace vri::mtl
             sc->format = fmt;
             sc->width = desc->width;
             sc->height = desc->height;
-            sc->vsync = desc->vsync != VRI_FALSE;
+            sc->presentMode = desc->presentMode;
 
             sc->layer.device = d->Device();
             sc->layer.pixelFormat = fmt;
             sc->layer.framebufferOnly = NO; // allow CopySrc / readback from the drawable
             sc->layer.drawableSize = CGSizeMake(desc->width, desc->height);
-            sc->layer.displaySyncEnabled = sc->vsync ? YES : NO;
+            // Only Immediate disables vsync; Fifo/FifoRelaxed/Mailbox keep displaySync on (no tearing) and
+            // rely on maximumDrawableCount below for buffering (Mailbox-style latest-frame on a 3-deep queue).
+            sc->layer.displaySyncEnabled = (sc->presentMode == VriPresentMode_Immediate) ? NO : YES;
             if (desc->textureNum)
                 sc->layer.maximumDrawableCount = desc->textureNum < 2 ? 2 : (desc->textureNum > 3 ? 3 : desc->textureNum);
 

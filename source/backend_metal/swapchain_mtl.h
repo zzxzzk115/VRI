@@ -17,7 +17,7 @@ namespace vri::mtl
         MTLPixelFormat       format;
         uint32_t             width;
         uint32_t             height;
-        bool                 vsync;
+        VriPresentMode       presentMode;
         id<CAMetalDrawable>  drawable; // current acquired frame (retained until Present)
         TextureMTL           current;  // stable handle; its texture is refreshed each acquire
     };

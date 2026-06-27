@@ -104,6 +104,30 @@ namespace vriex
         return n;
     }
 
+    // VRI_PRESENT (fifo|relaxed|mailbox|immediate) picks the swapchain present mode. Default: Fifo
+    // (vsync) - universally supported and warning-free. Set VRI_PRESENT=mailbox for smooth, low-latency
+    // presentation with no tearing (renders uncapped). The web build always uses Fifo (the browser paces).
+    inline VriPresentMode SelectPresentMode()
+    {
+#if defined(__EMSCRIPTEN__)
+        return VriPresentMode_Fifo;
+#else
+        const char* env = std::getenv("VRI_PRESENT");
+        if (env)
+        {
+            if (std::strcmp(env, "fifo") == 0 || std::strcmp(env, "vsync") == 0)
+                return VriPresentMode_Fifo;
+            if (std::strcmp(env, "relaxed") == 0)
+                return VriPresentMode_FifoRelaxed;
+            if (std::strcmp(env, "mailbox") == 0)
+                return VriPresentMode_Mailbox;
+            if (std::strcmp(env, "immediate") == 0 || std::strcmp(env, "novsync") == 0)
+                return VriPresentMode_Immediate;
+        }
+        return VriPresentMode_Fifo;
+#endif
+    }
+
     // Fill a ShaderVariants {ptr, size} slot from an embedded blob symbol. The D3D12 (DXBC/DXIL)
     // headers are only #included on Windows, so VRI_SHADER_D3D12 drops the symbol entirely off
     // Windows (the slot is never read there, since useDxbc is false) - the same construction then
@@ -405,13 +429,13 @@ namespace vriex
 #endif
             c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
             VriSwapChainDesc scd {};
-            scd.window     = wh;
-            scd.queue      = queue;
-            scd.format     = swapFormat;
-            scd.width      = width;
-            scd.height     = height;
-            scd.textureNum = 3;
-            scd.vsync      = VRI_TRUE;
+            scd.window      = wh;
+            scd.queue       = queue;
+            scd.format      = swapFormat;
+            scd.width       = width;
+            scd.height      = height;
+            scd.textureNum  = 3;
+            scd.presentMode = SelectPresentMode();
             if (swap.CreateSwapChain(dev, &scd, &swapchain) != VriResult_Success)
                 Fail("CreateSwapChain failed");
 

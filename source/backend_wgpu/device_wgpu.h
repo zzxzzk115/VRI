@@ -25,6 +25,7 @@ namespace vri::wgpu
         const VriDeviceDesc& Desc() const { return m_desc; }
 
         void ReportError(const char* message) const;
+        void ReportWarning(const char* message) const;
         // Route a backend diagnostic (native WebGPU error/warning) to the app's callback.
         void Diagnostic(VriMessageSeverity severity, const char* message) const;
 

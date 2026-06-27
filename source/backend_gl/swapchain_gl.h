@@ -31,7 +31,7 @@ namespace vri::gl
         uint32_t                height       = 0;
         VriFormat               format       = VriFormat_Unknown; // backbuffer format (reused on Resize)
         uint32_t                currentIndex = 0;
-        bool                    vsync        = true;
+        int                     swapInterval = 1; // swap interval: 1 = Fifo (vsync), 0 = Immediate (no vsync)
         GLuint                  blitFbo      = 0; // read FBO holding the backbuffer for the present blit
 #if defined(__EMSCRIPTEN__)
         std::string canvasSelector = "#canvas"; // sized to the swapchain so the present blit fills it

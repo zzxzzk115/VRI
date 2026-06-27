@@ -85,6 +85,7 @@ namespace vri::gl
     }
 
     void DeviceGL::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+    void DeviceGL::ReportWarning(const char* message) const { Diagnostic(VriMessageSeverity_Warning, message); }
 
     void DeviceGL::Diagnostic(VriMessageSeverity severity, const char* message) const
     {

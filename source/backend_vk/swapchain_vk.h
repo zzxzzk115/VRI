@@ -25,9 +25,9 @@ namespace vri::vk
         VkFence                 acquireFence;
         uint32_t                currentIndex;
         // original creation request (reused on Resize)
-        VriFormat requestedFormat;
-        uint32_t  requestedTextureNum;
-        bool      vsync;
+        VriFormat      requestedFormat;
+        uint32_t       requestedTextureNum;
+        VriPresentMode requestedPresentMode;
     };
 
     inline VriSwapChain* ToHandle(SwapChainVK* s) { return reinterpret_cast<VriSwapChain*>(s); }
