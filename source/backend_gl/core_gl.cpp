@@ -959,7 +959,8 @@ namespace vri::gl
             return VriResult_Unsupported; // GL_COMPUTE_SHADER is not in WebGL2
 #else
             const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
-            const GLuint cs = CompileShader(d, GL_COMPUTE_SHADER, SpirvToGlsl(d, layout, desc->shader.bytecode, desc->shader.bytecodeSize, desc->shader.entryPointName, spv::ExecutionModelGLCompute, nullptr));
+            std::vector<CombinedSamplerGL> combined; // sampled textures used by the compute kernel
+            const GLuint cs = CompileShader(d, GL_COMPUTE_SHADER, SpirvToGlsl(d, layout, desc->shader.bytecode, desc->shader.bytecodeSize, desc->shader.entryPointName, spv::ExecutionModelGLCompute, &combined));
             if (!cs)
                 return VriResult_Failure;
             GLuint program = glCreateProgram();
@@ -978,7 +979,8 @@ namespace vri::gl
                 return VriResult_Failure;
             }
             // Uniform blocks (if any) still need binding points; SSBOs use the
-            // layout(binding=) emitted by SPIRV-Cross (GLSL 430).
+            // layout(binding=) emitted by SPIRV-Cross (GLSL 430). Sampled textures need their
+            // sampler uniform pointed at its texture unit, same as the graphics path.
             if (layout)
             {
                 glUseProgram(program);
@@ -989,12 +991,19 @@ namespace vri::gl
                         if (idx != GL_INVALID_INDEX)
                             glUniformBlockBinding(program, idx, b.glUnit);
                     }
+                for (const CombinedSamplerGL& cs : combined)
+                {
+                    const GLint loc = glGetUniformLocation(program, cs.name.c_str());
+                    if (loc >= 0)
+                        glUniform1i(loc, static_cast<GLint>(cs.unit));
+                }
                 glUseProgram(0);
             }
             PipelineGL* p = new PipelineGL{};
             p->device = d;
             p->program = program;
             p->isCompute = true;
+            p->combinedSamplers = std::move(combined);
             *out = ToHandle(p);
             return VriResult_Success;
 #endif // !VRI_GL_ES_HEADERS
