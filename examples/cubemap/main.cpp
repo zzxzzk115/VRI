@@ -174,7 +174,7 @@ int main(int, char**)
     VriPipelineLayout* layout = nullptr; c.CreatePipelineLayout(app.dev, &pld, &layout); // both pipelines share it
 
     auto makePipeline = [&](const void* spv, size_t spvLen, const void* wgsl, size_t wgslLen,
-                            const void* vs, size_t vsLen, const void* ps, size_t psLen, bool depthOn, VriCullMode cull) {
+                            const void* vs, size_t vsLen, const void* ps, size_t psLen, bool depthOn, VriCullMode cull, uint32_t attributeNum) {
         VriShaderDesc sh[2]{};
         sh[0].stage = VriShaderStage_Vertex;   sh[0].entryPointName = "vertexMain";
         sh[1].stage = VriShaderStage_Fragment; sh[1].entryPointName = "fragmentMain";
@@ -184,7 +184,7 @@ int main(int, char**)
         VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
         VriGraphicsPipelineDesc pd{};
         pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2;
-        pd.vertexInput.attributes = attrs; pd.vertexInput.attributeNum = 2; pd.vertexInput.streams = &stream; pd.vertexInput.streamNum = 1;
+        pd.vertexInput.attributes = attrs; pd.vertexInput.attributeNum = attributeNum; pd.vertexInput.streams = &stream; pd.vertexInput.streamNum = 1;
         pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
         pd.rasterization.cullMode = cull; pd.rasterization.frontFace = VriFrontFace_CounterClockwise; pd.rasterization.lineWidth = 1.0f;
         pd.multisample.sampleNum = 1;
@@ -199,9 +199,9 @@ int main(int, char**)
     // solid, so cull BACK faces - drawing both faces (None) leaves the inward-normal back faces to
     // z-fight the front on D3D12, speckling the reflection.
     VriPipeline* skyPipe = makePipeline(g_skyboxSpv, sizeof(g_skyboxSpv), g_skyboxWgsl, sizeof(g_skyboxWgsl),
-                                        g_skyboxDxbcVS, sizeof(g_skyboxDxbcVS), g_skyboxDxbcPS, sizeof(g_skyboxDxbcPS), /*depthOn*/ false, VriCullMode_None);
+                                        g_skyboxDxbcVS, sizeof(g_skyboxDxbcVS), g_skyboxDxbcPS, sizeof(g_skyboxDxbcPS), /*depthOn*/ false, VriCullMode_None, useDxbc ? 2u : 1u);
     VriPipeline* refPipe = makePipeline(g_skyboxReflectSpv, sizeof(g_skyboxReflectSpv), g_skyboxReflectWgsl, sizeof(g_skyboxReflectWgsl),
-                                        g_skyboxReflectDxbcVS, sizeof(g_skyboxReflectDxbcVS), g_skyboxReflectDxbcPS, sizeof(g_skyboxReflectDxbcPS), /*depthOn*/ true, VriCullMode_Back);
+                                        g_skyboxReflectDxbcVS, sizeof(g_skyboxReflectDxbcVS), g_skyboxReflectDxbcPS, sizeof(g_skyboxReflectDxbcPS), /*depthOn*/ true, VriCullMode_Back, useDxbc ? 2u : 1u);
 
     // ---- descriptor sets (one per pipeline; both bind the same cubemap + sampler) ----
     VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.constantBufferMaxNum = 2; pdsc.textureMaxNum = 2; pdsc.samplerMaxNum = 2;

@@ -321,7 +321,11 @@ namespace vriex
         // Usage: BeginUpload(); UploadBuffer(...)/UploadTexture(...) ...; EndUpload();
         // Each Upload* creates a host staging buffer, records the copy + the
         // copy->read barrier, and EndUpload() submits, waits, and frees the staging.
-        void BeginUpload() { c.BeginCommandBuffer(cmd); }
+        void BeginUpload()
+        {
+            c.ResetCommandAllocator(alloc);
+            c.BeginCommandBuffer(cmd);
+        }
 
         void UploadBuffer(VriBuffer* dst, const void* data, uint64_t size, VriAccessFlags afterAccess, VriPipelineStageFlags afterStage)
         {
@@ -462,6 +466,7 @@ namespace vriex
             VriTextureViewDesc bvd{}; bvd.texture = backbuffer; bvd.viewType = VriTextureViewType_2D; bvd.format = VriFormat_Unknown; bvd.aspect = VriImageAspect_Color;
             VriDescriptor* bbView = nullptr; c.CreateTextureView(dev, &bvd, &bbView);
 
+            c.ResetCommandAllocator(alloc);
             c.BeginCommandBuffer(cmd);
             if (onPreRender) onPreRender(cmd);
             gui.RecordCopy(cmd); // copy ImGui verts/indices (written pre-acquire) before the render pass

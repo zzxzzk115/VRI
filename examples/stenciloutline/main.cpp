@@ -103,7 +103,7 @@ int main(int, char**)
 
     auto makePipeline = [&](const void* spv, size_t spvLen, const void* wgsl, size_t wgslLen,
                             const void* vs, size_t vsLen, const void* ps, size_t psLen,
-                            bool depthTest, bool depthWrite, VriCompareOp depthCmp, VriStencilOpDesc face) {
+                            bool depthTest, bool depthWrite, VriCompareOp depthCmp, VriStencilOpDesc face, uint32_t attributeNum) {
         VriShaderDesc sh[2]{};
         sh[0].stage = VriShaderStage_Vertex;   sh[0].entryPointName = "vertexMain";
         sh[1].stage = VriShaderStage_Fragment; sh[1].entryPointName = "fragmentMain";
@@ -113,7 +113,7 @@ int main(int, char**)
         VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
         VriGraphicsPipelineDesc pd{};
         pd.pipelineLayout = layout; pd.shaders = sh; pd.shaderNum = 2;
-        pd.vertexInput.attributes = attrs; pd.vertexInput.attributeNum = 2; pd.vertexInput.streams = &stream; pd.vertexInput.streamNum = 1;
+        pd.vertexInput.attributes = attrs; pd.vertexInput.attributeNum = attributeNum; pd.vertexInput.streams = &stream; pd.vertexInput.streamNum = 1;
         pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
         pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.frontFace = VriFrontFace_CounterClockwise; pd.rasterization.lineWidth = 1.0f;
         pd.multisample.sampleNum = 1;
@@ -127,10 +127,10 @@ int main(int, char**)
     // FILL: depth on, stencil Always->Replace (stamp 1). OUTLINE: depth off, stencil NotEqual 1 (keep the rim, don't write).
     VriPipeline* fillPipe = makePipeline(g_stencilFillSpv, sizeof(g_stencilFillSpv), g_stencilFillWgsl, sizeof(g_stencilFillWgsl),
                                          g_stencilFillDxbcVS, sizeof(g_stencilFillDxbcVS), g_stencilFillDxbcPS, sizeof(g_stencilFillDxbcPS),
-                                         /*depthTest*/ true, /*depthWrite*/ true, VriCompareOp_Less, stencilFace(VriCompareOp_Always, VriStencilOp_Replace, 0xFFu));
+                                         /*depthTest*/ true, /*depthWrite*/ true, VriCompareOp_Less, stencilFace(VriCompareOp_Always, VriStencilOp_Replace, 0xFFu), 2);
     VriPipeline* outlinePipe = makePipeline(g_stencilOutlineSpv, sizeof(g_stencilOutlineSpv), g_stencilOutlineWgsl, sizeof(g_stencilOutlineWgsl),
                                             g_stencilOutlineDxbcVS, sizeof(g_stencilOutlineDxbcVS), g_stencilOutlineDxbcPS, sizeof(g_stencilOutlineDxbcPS),
-                                            /*depthTest*/ false, /*depthWrite*/ false, VriCompareOp_Less, stencilFace(VriCompareOp_NotEqual, VriStencilOp_Keep, 0x00u));
+                                            /*depthTest*/ false, /*depthWrite*/ false, VriCompareOp_Less, stencilFace(VriCompareOp_NotEqual, VriStencilOp_Keep, 0x00u), useDxbc ? 2u : 1u);
 
     VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 1; pdsc.constantBufferMaxNum = 1;
     VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(app.dev, &pdsc, &pool);

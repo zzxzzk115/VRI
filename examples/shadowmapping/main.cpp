@@ -131,7 +131,7 @@ int main(int, char**)
 
     VriGraphicsPipelineDesc dpd{};
     dpd.pipelineLayout = shadowLayout; dpd.shaders = dsh; dpd.shaderNum = 2;
-    dpd.vertexInput.attributes = attrs; dpd.vertexInput.attributeNum = 2; dpd.vertexInput.streams = &stream; dpd.vertexInput.streamNum = 1;
+    dpd.vertexInput.attributes = attrs; dpd.vertexInput.attributeNum = useDxbc ? 2u : 1u; dpd.vertexInput.streams = &stream; dpd.vertexInput.streamNum = 1;
     dpd.inputAssembly.topology = VriPrimitiveTopology_TriangleList;
     dpd.rasterization.cullMode = VriCullMode_None; dpd.rasterization.frontFace = VriFrontFace_CounterClockwise; dpd.rasterization.lineWidth = 1.0f;
     dpd.multisample.sampleNum = 1;
