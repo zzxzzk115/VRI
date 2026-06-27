@@ -234,8 +234,12 @@ if has_config("vri_build_tools") then
     add_requires("slang-prebuilt 2026.11")
 end
 
+-- shared registries/helpers
+includes("xmake/examples.lua")
+
 -- tasks (e.g. `xmake shaders` to compile test .slang -> SPIR-V headers)
 includes("xmake/tasks/shaders.lua")
+includes("xmake/tasks/examples.lua")
 
 -- include external libraries
 includes("external")

@@ -62,11 +62,10 @@ if has_config("vri_build_examples") then
     else
         add_requires("imgui v1.92.5", {configs = {sdl3 = true}})
     end
-    -- glTF model loading for example-raytracing (examples/common/gltf_model.h). Header-only,
-    -- the same tinygltf library Sascha Willems' Vulkan-Examples use. Desktop only (RT pipeline).
-    if not is_plat("wasm") then
-        add_requires("tinygltf")
-    end
+    -- glTF model loading for example-raytracing/pathtracer (examples/common/gltf_model.h).
+    -- Header-only, the same tinygltf library Sascha Willems' Vulkan-Examples use. Needed on every
+    -- platform now that those examples render on WebGPU too via the compute-BVH software fallback.
+    add_requires("tinygltf")
 end
 
 -- Host tools: vri-shaderc links the Slang compiler bundled with the Vulkan SDK
