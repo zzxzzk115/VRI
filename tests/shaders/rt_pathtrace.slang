@@ -26,15 +26,15 @@ struct PtCamera
     float4 control; // x: sampleCount-so-far (this frame is the (x+1)-th), y: maxBounces, z: reset(>0.5)
 };
 
-[[vk::binding(0, 0)]] RaytracingAccelerationStructure tlas;
-[[vk::binding(1, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outImage;   // tonemapped display
-[[vk::binding(2, 0)]] ConstantBuffer<PtCamera> cam;
-[[vk::binding(3, 0)]] RWStructuredBuffer<Vertex> vertices;        // read-only use
-[[vk::binding(4, 0)]] RWStructuredBuffer<uint> indices;           // read-only use
-[[vk::binding(5, 0)]] RWStructuredBuffer<GeometryNode> geometryNodes;
-[[vk::binding(6, 0)]] SamplerState samp;
-[[vk::binding(7, 0)]] Texture2D<float4> textures[kMaxTextures];
-[[vk::binding(8, 0)]] RWStructuredBuffer<float4> accumBuffer;     // persistent radiance accumulator
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure tlas : register(t0);
+[[vk::binding(1, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outImage : register(u0);   // tonemapped display
+[[vk::binding(2, 0)]] ConstantBuffer<PtCamera> cam : register(b2);
+[[vk::binding(3, 0)]] RWStructuredBuffer<Vertex> vertices : register(u3);        // read-only use
+[[vk::binding(4, 0)]] RWStructuredBuffer<uint> indices : register(u4);           // read-only use
+[[vk::binding(5, 0)]] RWStructuredBuffer<GeometryNode> geometryNodes : register(u5);
+[[vk::binding(6, 0)]] SamplerState samp : register(s0);
+[[vk::binding(7, 0)]] Texture2D<float4> textures[kMaxTextures] : register(t1);
+[[vk::binding(8, 0)]] RWStructuredBuffer<float4> accumBuffer : register(u8);     // persistent radiance accumulator
 
 // PCG hash RNG (one state word per thread, advanced per draw).
 uint pcg(inout uint s) { s = s * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28) + 4u)) ^ s) * 277803737u; return (w >> 22) ^ w; }
