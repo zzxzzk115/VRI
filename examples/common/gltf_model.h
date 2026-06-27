@@ -52,6 +52,14 @@ namespace vriex
         std::vector<GltfPrimitive>  primitives;
         std::vector<VriTexture*>    textures;
         std::vector<VriDescriptor*> textureViews;
+        // Optional 2D-array texture holding every glTF texture as one layer (all resampled to a
+        // common size), built when Load(..., buildTextureArray=true). The bindless software ray-
+        // tracing path (GL/WebGPU, no descriptor-array support) samples this by glTF texture index.
+        VriTexture*                 textureArray = nullptr;
+        VriDescriptor*              textureArrayView = nullptr;
+        uint32_t                    textureArrayLayers = 0;
+        std::vector<GltfVertex>     cpuVerts;
+        std::vector<uint32_t>       cpuIndices;
         float                       boundsMin[3] = {0, 0, 0};
         float                       boundsMax[3] = {0, 0, 0};
 
@@ -131,7 +139,9 @@ namespace vriex
         }
 
         // Load a .gltf (ASCII + external .bin/images) or .glb. Returns false on parse failure.
-        bool Load(ExampleApp& app, const char* path)
+        // keepCpuGeometry retains cpuVerts/cpuIndices (for a CPU BVH build); buildTextureArray also
+        // assembles textureArray (for the non-bindless software ray-tracing path).
+        bool Load(ExampleApp& app, const char* path, bool keepCpuGeometry = false, bool buildTextureArray = false)
         {
             VriCoreInterface& c = app.c;
             tinygltf::Model mdl;
@@ -222,14 +232,17 @@ namespace vriex
             VriBufferDesc ibd{}; ibd.size = ibSize; ibd.usage = VriBufferUsage_AccelerationBuildInput | VriBufferUsage_StorageBuffer; ibd.memoryLocation = VriMemoryLocation_HostUpload;
             c.CreateBuffer(app.dev, &ibd, &indexBuffer);
             std::memcpy(c.MapBuffer(indexBuffer, 0, ibSize), indices.data(), ibSize); c.UnmapBuffer(indexBuffer);
+            if (keepCpuGeometry) { cpuVerts = verts; cpuIndices = indices; }
 
             // One GPU texture per glTF texture (RGBA8). Decoded by tinygltf via stb_image.
             app.BeginUpload();
             std::vector<std::vector<uint8_t>> pixelHold; pixelHold.reserve(mdl.textures.size());
+            std::vector<std::pair<uint32_t, uint32_t>> texDims; texDims.reserve(mdl.textures.size());
             for (const tinygltf::Texture& t : mdl.textures)
             {
                 const tinygltf::Image& img = mdl.images[t.source >= 0 ? t.source : 0];
                 const uint32_t w = (uint32_t)img.width, h = (uint32_t)img.height;
+                texDims.push_back({w, h});
                 std::vector<uint8_t> rgba((size_t)w * h * 4, 255);
                 const int comp = img.component;
                 for (size_t px = 0; px < (size_t)w * h; ++px)
@@ -245,6 +258,38 @@ namespace vriex
                 app.UploadTexture(tex, pixelHold.back().data(), w, h, 1, w * h * 4);
                 textures.push_back(tex); textureViews.push_back(view);
             }
+
+            // 2D-array texture (one layer per glTF texture, all nearest-resampled to a common size)
+            // for the non-bindless software path. Capped at 1024 to bound memory; nearest-neighbor
+            // keeps the loader dependency-free (no stb_image_resize) and is plenty for the examples.
+            if (buildTextureArray && !pixelHold.empty())
+            {
+                constexpr uint32_t kDim = 1024;
+                textureArrayLayers = (uint32_t)pixelHold.size();
+                const size_t layerBytes = (size_t)kDim * kDim * 4;
+                std::vector<uint8_t> packed(layerBytes * textureArrayLayers);
+                for (uint32_t L = 0; L < textureArrayLayers; ++L)
+                {
+                    const uint32_t sw = texDims[L].first, sh = texDims[L].second;
+                    const uint8_t* src = pixelHold[L].data();
+                    uint8_t* dst = packed.data() + (size_t)L * layerBytes;
+                    for (uint32_t y = 0; y < kDim; ++y)
+                    {
+                        const uint32_t sy = sh ? (y * sh) / kDim : 0;
+                        for (uint32_t x = 0; x < kDim; ++x)
+                        {
+                            const uint32_t sx = sw ? (x * sw) / kDim : 0;
+                            std::memcpy(dst + ((size_t)y * kDim + x) * 4, src + ((size_t)sy * sw + sx) * 4, 4);
+                        }
+                    }
+                }
+                VriTextureDesc ad{}; ad.type = VriTextureType_2D; ad.format = VriFormat_RGBA8_UNORM; ad.width = kDim; ad.height = kDim; ad.depth = 1;
+                ad.mipNum = 1; ad.layerNum = textureArrayLayers; ad.sampleNum = 1; ad.usage = VriTextureUsage_ShaderResource | VriTextureUsage_TransferDst; ad.memoryLocation = VriMemoryLocation_Device;
+                c.CreateTexture(app.dev, &ad, &textureArray);
+                VriTextureViewDesc avd{}; avd.texture = textureArray; avd.viewType = VriTextureViewType_2DArray; avd.format = VriFormat_Unknown; avd.aspect = VriImageAspect_Color; avd.layerNum = textureArrayLayers;
+                c.CreateTextureView(app.dev, &avd, &textureArrayView);
+                app.UploadTexture(textureArray, packed.data(), kDim, kDim, textureArrayLayers, (uint32_t)layerBytes);
+            }
             app.EndUpload();
 
             std::printf("[gltf] '%s': %u verts, %u indices, %zu primitives, %zu textures\n",
@@ -257,9 +302,12 @@ namespace vriex
             VriCoreInterface& c = app.c;
             for (VriDescriptor* v : textureViews) c.DestroyDescriptor(v);
             for (VriTexture* t : textures) c.DestroyTexture(t);
+            if (textureArrayView) c.DestroyDescriptor(textureArrayView);
+            if (textureArray) c.DestroyTexture(textureArray);
             if (vertexBuffer) c.DestroyBuffer(vertexBuffer);
             if (indexBuffer) c.DestroyBuffer(indexBuffer);
-            textureViews.clear(); textures.clear(); primitives.clear();
+            textureArrayView = nullptr; textureArray = nullptr; textureArrayLayers = 0;
+            textureViews.clear(); textures.clear(); primitives.clear(); cpuVerts.clear(); cpuIndices.clear();
         }
     };
 } // namespace vriex

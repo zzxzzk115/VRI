@@ -8,10 +8,10 @@
 // Needs ray query (Metal, Vulkan, D3D12 inline). OpenGL/WebGPU/WebGL2 (no ray query) degrade explicitly.
 #include "../common/example_app.h"
 
-#if !defined(__EMSCRIPTEN__)
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #include "../common/gltf_model.h"
+#include "../common/bvh.h"
 
 #include <cmath>
 #include <cstdint>
@@ -20,10 +20,14 @@
 #include <vector>
 
 #include "tests/shaders/show_tex_spv.h"
+#include "tests/shaders/show_tex_wgsl.h"               // g_showTexWgsl (WebGPU display)
 #include "tests/shaders/show_tex_dxbc.h"
-#include "tests/shaders/rt_pathtrace_spv.h"      // g_rtPathtraceSpv (Metal/VK inline ray-query megakernel)
+#include "tests/shaders/rt_pathtrace_spv.h"            // g_rtPathtraceSpv (Metal/VK inline ray-query megakernel)
+#include "tests/shaders/rt_pathtrace_software_spv.h"   // g_rtPathtraceSoftwareSpv (compute BVH fallback, GL/VK)
+#include "tests/shaders/rt_pathtrace_software_wgsl.h"  // g_rtPathtraceSoftwareWgsl (compute BVH fallback, WebGPU)
 #if defined(_WIN32)
-#    include "tests/shaders/rt_pathtrace_dxil.h" // g_rtPathtraceDxilCS (D3D12 inline)
+#    include "tests/shaders/rt_pathtrace_dxil.h"          // g_rtPathtraceDxilCS (D3D12 inline)
+#    include "tests/shaders/rt_pathtrace_software_dxil.h" // g_rtPathtraceSoftwareDxilCS (D3D12 compute BVH)
 #endif
 
 #if !defined(VRI_GLTF_MODEL_PATH)
@@ -46,18 +50,9 @@ namespace
     V3 norm3(V3 a) { float l = std::sqrt(dot3(a, a)); return l > 0 ? V3{a.x / l, a.y / l, a.z / l} : a; }
     void set4(float* d, V3 v, float w = 0.0f) { d[0] = v.x; d[1] = v.y; d[2] = v.z; d[3] = w; }
 } // namespace
-#endif
 
 int main(int argc, char** argv)
 {
-#if defined(__EMSCRIPTEN__)
-    (void)argc; (void)argv;
-    static vriex::ExampleApp app;
-    app.Init("pathtracer", 960, 720, /*hasDepth*/ false);
-    app.SetClearColor(0.0f, 0.0f, 0.0f);
-    std::printf("[pathtracer] ray query is unavailable on the web - path tracing unsupported\n");
-    app.SetupCapture(); app.Run(); return 0;
-#else
     static vriex::ExampleApp app;
     app.requestFeatures = VriFeature_RayQuery | VriFeature_RayTracing; // ray query is what we use
     app.Init("pathtracer", kWidth, kHeight, /*hasDepth*/ false);
@@ -68,78 +63,116 @@ int main(int argc, char** argv)
     VriRayTracingInterface rt{};
     const bool hasRayQuery = dd->hasRayQuery != VRI_FALSE &&
         vriGetInterface(app.dev, VRI_INTERFACE_RAYTRACING, sizeof(rt), &rt) == VriResult_Success;
+    const bool hasCompute = dd->hasComputeShader != VRI_FALSE;
+    const bool useSoftware = !hasRayQuery && hasCompute; // GL/WebGPU: trace the CPU BVH in a compute megakernel
 
     static float orbit = 1.4f, lightAzimuth = 0.7f, skyIntensity = 1.2f;
     static int maxBounces = 4;
-    static int sampleCount = 0;   // accumulated samples (drives convergence + the accumulate/reset logic)
-    static bool dirty = true;     // camera/lighting changed -> restart accumulation
+    static int targetSamples = 128;
+    static int sampleCount = 0;       // accumulated samples (drives convergence + the accumulate/reset logic)
+    static bool traceThisFrame = true; // false once targetSamples has been reached
+    static bool dirty = true;         // camera/lighting changed -> restart accumulation
 
-    app.onGui = [hasRayQuery] {
-        if (!hasRayQuery) { ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "path tracing unsupported"); ImGui::Text("needs ray query (Metal/Vulkan/D3D12)"); return; }
-        ImGui::Text("megakernel path tracer (inline ray query)");
-        ImGui::Text("samples: %d", sampleCount);
+    app.onGui = [hasRayQuery, useSoftware] {
+        if (!hasRayQuery && !useSoftware) { ImGui::TextColored(ImVec4(1, 0.5f, 0.5f, 1), "path tracing unsupported"); ImGui::Text("needs ray query or compute"); return; }
+        ImGui::Text("%s", hasRayQuery ? "megakernel path tracer (inline ray query)" : "megakernel path tracer (software BVH compute)");
+        ImGui::Text("samples: %d / %d", sampleCount, targetSamples);
+        if (ImGui::SliderInt("target samples", &targetSamples, 1, 8192) && sampleCount > targetSamples) dirty = true;
         if (ImGui::SliderFloat("camera orbit", &orbit, 0.0f, 6.28f)) dirty = true;
         if (ImGui::SliderInt("max bounces", &maxBounces, 1, 8)) dirty = true;
         if (ImGui::SliderFloat("sky intensity", &skyIntensity, 0.0f, 3.0f)) dirty = true;
         if (ImGui::SliderFloat("light azimuth", &lightAzimuth, 0.0f, 6.28f)) dirty = true;
     };
 
-    if (!hasRayQuery)
+    if (!hasRayQuery && !useSoftware)
     {
-        std::printf("[pathtracer] no ray query on this backend - degrading\n"); std::fflush(stdout);
+        std::printf("[pathtracer] no ray query or compute on this backend - degrading\n"); std::fflush(stdout);
         app.SetupCapture(); app.Run(); return 0;
     }
 
-    // ---- model + BLAS/TLAS (identical to examples/raytracing's shared setup) ----
+    // ---- model (+ CPU geometry/texture array for the software path) ----
+#if defined(__EMSCRIPTEN__)
+    (void)argc; (void)argv; // web: argv carries the URL query string (?backend=…), not a CLI path; the model is preloaded at a fixed MEMFS path
+    const char* modelPath = VRI_GLTF_MODEL_PATH;
+#else
     const char* modelPath = argc > 1 ? argv[1] : VRI_GLTF_MODEL_PATH;
+#endif
     vriex::GltfModel model;
-    if (!model.Load(app, modelPath)) app.Fail("failed to load glTF model");
+    if (!model.Load(app, modelPath, useSoftware, useSoftware)) app.Fail("failed to load glTF model");
 
-    std::vector<VriAsGeometryDesc> geoms(model.primitives.size());
     std::vector<GeometryNode> nodes(model.primitives.size());
     for (size_t i = 0; i < model.primitives.size(); ++i)
     {
         const vriex::GltfPrimitive& p = model.primitives[i];
-        VriAsGeometryDesc& g = geoms[i];
-        g.type = VriAsGeometryType_Triangles; g.flags = VriAsGeometry_Opaque;
-        g.triangles.vertexBuffer = model.vertexBuffer; g.triangles.vertexCount = model.vertexCount;
-        g.triangles.vertexStride = sizeof(vriex::GltfVertex); g.triangles.vertexFormat = VriFormat_RGB32_SFLOAT;
-        g.triangles.indexBuffer = model.indexBuffer; g.triangles.indexOffset = uint64_t(p.firstIndex) * sizeof(uint32_t);
-        g.triangles.indexCount = p.indexCount; g.triangles.indexType = VriIndexType_UInt32;
         nodes[i] = {p.firstIndex, p.baseColorTexture, p.occlusionTexture, 0};
     }
-    VriAccelerationStructureDesc blasDesc{}; blasDesc.type = VriAccelerationStructureType_BottomLevel; blasDesc.flags = VriAccelerationStructureBuild_PreferFastTrace;
-    blasDesc.geometryCount = uint32_t(geoms.size()); blasDesc.geometries = geoms.data();
+
+    // ---- hardware path: BLAS/TLAS (identical to examples/raytracing's shared setup) ----
     VriAccelerationStructure* blas = nullptr;
-    if (rt.CreateAccelerationStructure(app.dev, &blasDesc, &blas) != VriResult_Success) app.Fail("CreateAccelerationStructure (BLAS) failed");
-
-    AsInstance inst{}; inst.transform[0] = 1.0f; inst.transform[5] = 1.0f; inst.transform[10] = 1.0f;
-    inst.instanceIdAndMask = 0xFFu << 24; inst.sbtOffsetAndFlags = 0x1u << 24;
-    inst.blasReference = rt.GetAccelerationStructureDeviceAddress(blas);
-    VriBufferDesc ibd{}; ibd.size = sizeof(AsInstance); ibd.usage = VriBufferUsage_AccelerationBuildInput; ibd.memoryLocation = VriMemoryLocation_HostUpload;
-    VriBuffer* instBuf = nullptr; c.CreateBuffer(app.dev, &ibd, &instBuf);
-    std::memcpy(c.MapBuffer(instBuf, 0, sizeof(inst)), &inst, sizeof(inst)); c.UnmapBuffer(instBuf);
-
-    VriAsGeometryDesc tlasGeom{}; tlasGeom.type = VriAsGeometryType_Instances; tlasGeom.instances.instanceBuffer = instBuf; tlasGeom.instances.instanceCount = 1;
-    VriAccelerationStructureDesc tlasDesc{}; tlasDesc.type = VriAccelerationStructureType_TopLevel; tlasDesc.flags = VriAccelerationStructureBuild_PreferFastTrace;
-    tlasDesc.geometryCount = 1; tlasDesc.geometries = &tlasGeom;
     VriAccelerationStructure* tlas = nullptr;
-    if (rt.CreateAccelerationStructure(app.dev, &tlasDesc, &tlas) != VriResult_Success) app.Fail("CreateAccelerationStructure (TLAS) failed");
+    VriBuffer* instBuf = nullptr;
+    VriDescriptor* tlasDescriptor = nullptr;
+    if (!useSoftware)
+    {
+        std::vector<VriAsGeometryDesc> geoms(model.primitives.size());
+        for (size_t i = 0; i < model.primitives.size(); ++i)
+        {
+            const vriex::GltfPrimitive& p = model.primitives[i];
+            VriAsGeometryDesc& g = geoms[i];
+            g.type = VriAsGeometryType_Triangles; g.flags = VriAsGeometry_Opaque;
+            g.triangles.vertexBuffer = model.vertexBuffer; g.triangles.vertexCount = model.vertexCount;
+            g.triangles.vertexStride = sizeof(vriex::GltfVertex); g.triangles.vertexFormat = VriFormat_RGB32_SFLOAT;
+            g.triangles.indexBuffer = model.indexBuffer; g.triangles.indexOffset = uint64_t(p.firstIndex) * sizeof(uint32_t);
+            g.triangles.indexCount = p.indexCount; g.triangles.indexType = VriIndexType_UInt32;
+        }
+        VriAccelerationStructureDesc blasDesc{}; blasDesc.type = VriAccelerationStructureType_BottomLevel; blasDesc.flags = VriAccelerationStructureBuild_PreferFastTrace;
+        blasDesc.geometryCount = uint32_t(geoms.size()); blasDesc.geometries = geoms.data();
+        if (rt.CreateAccelerationStructure(app.dev, &blasDesc, &blas) != VriResult_Success) app.Fail("CreateAccelerationStructure (BLAS) failed");
+
+        AsInstance inst{}; inst.transform[0] = 1.0f; inst.transform[5] = 1.0f; inst.transform[10] = 1.0f;
+        inst.instanceIdAndMask = 0xFFu << 24; inst.sbtOffsetAndFlags = 0x1u << 24;
+        inst.blasReference = rt.GetAccelerationStructureDeviceAddress(blas);
+        VriBufferDesc ibd{}; ibd.size = sizeof(AsInstance); ibd.usage = VriBufferUsage_AccelerationBuildInput; ibd.memoryLocation = VriMemoryLocation_HostUpload;
+        c.CreateBuffer(app.dev, &ibd, &instBuf);
+        std::memcpy(c.MapBuffer(instBuf, 0, sizeof(inst)), &inst, sizeof(inst)); c.UnmapBuffer(instBuf);
+
+        VriAsGeometryDesc tlasGeom{}; tlasGeom.type = VriAsGeometryType_Instances; tlasGeom.instances.instanceBuffer = instBuf; tlasGeom.instances.instanceCount = 1;
+        VriAccelerationStructureDesc tlasDesc{}; tlasDesc.type = VriAccelerationStructureType_TopLevel; tlasDesc.flags = VriAccelerationStructureBuild_PreferFastTrace;
+        tlasDesc.geometryCount = 1; tlasDesc.geometries = &tlasGeom;
+        if (rt.CreateAccelerationStructure(app.dev, &tlasDesc, &tlas) != VriResult_Success) app.Fail("CreateAccelerationStructure (TLAS) failed");
+
+        c.ResetCommandAllocator(app.alloc);
+        c.BeginCommandBuffer(app.cmd);
+        VriBuildAccelerationStructureDesc bb{}; bb.dst = blas; bb.geometry = &blasDesc; rt.CmdBuildAccelerationStructure(app.cmd, &bb);
+        VriBuildAccelerationStructureDesc tb{}; tb.dst = tlas; tb.geometry = &tlasDesc; rt.CmdBuildAccelerationStructure(app.cmd, &tb);
+        c.EndCommandBuffer(app.cmd);
+        { VriFence* buildFence = nullptr; c.CreateFence(app.dev, 0, &buildFence); VriFenceSubmitDesc sig{}; sig.fence = buildFence; sig.value = 1; VriQueueSubmitDesc sub{}; sub.commandBuffers = &app.cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1; c.QueueSubmit(app.queue, &sub); c.Wait(buildFence, 1); c.DestroyFence(buildFence); }
+
+        if (rt.CreateAccelerationStructureDescriptor(app.dev, tlas, &tlasDescriptor) != VriResult_Success) app.Fail("CreateAccelerationStructureDescriptor failed");
+    }
 
     VriBufferDesc gnd{}; gnd.size = nodes.size() * sizeof(GeometryNode); gnd.usage = VriBufferUsage_StorageBuffer; gnd.memoryLocation = VriMemoryLocation_HostUpload;
     VriBuffer* geomNodeBuf = nullptr; c.CreateBuffer(app.dev, &gnd, &geomNodeBuf);
     std::memcpy(c.MapBuffer(geomNodeBuf, 0, gnd.size), nodes.data(), gnd.size); c.UnmapBuffer(geomNodeBuf);
 
-    c.BeginCommandBuffer(app.cmd);
-    VriBuildAccelerationStructureDesc bb{}; bb.dst = blas; bb.geometry = &blasDesc; rt.CmdBuildAccelerationStructure(app.cmd, &bb);
-    VriBuildAccelerationStructureDesc tb{}; tb.dst = tlas; tb.geometry = &tlasDesc; rt.CmdBuildAccelerationStructure(app.cmd, &tb);
-    c.EndCommandBuffer(app.cmd);
-    { VriFenceSubmitDesc sig{}; sig.fence = app.fence; sig.value = 1; VriQueueSubmitDesc sub{}; sub.commandBuffers = &app.cmd; sub.commandBufferNum = 1; sub.signalFences = &sig; sub.signalFenceNum = 1; c.QueueSubmit(app.queue, &sub); c.Wait(app.fence, 1); }
-
-    VriDescriptor* tlasDescriptor = nullptr;
-    if (rt.CreateAccelerationStructureDescriptor(app.dev, tlas, &tlasDescriptor) != VriResult_Success) app.Fail("CreateAccelerationStructureDescriptor failed");
-
     auto storageView = [&](VriBuffer* buf, uint64_t size) { VriBufferViewDesc v{}; v.buffer = buf; v.viewType = VriDescriptorType_StorageBuffer; v.offset = 0; v.size = size; VriDescriptor* d = nullptr; c.CreateBufferView(app.dev, &v, &d); return d; };
+
+    // ---- software path: CPU BVH -> two storage buffers ----
+    VriBuffer* bvhNodeBuf = nullptr; VriBuffer* triRefBuf = nullptr;
+    VriDescriptor* bvhNodeView = nullptr; VriDescriptor* triRefView = nullptr;
+    if (useSoftware)
+    {
+        vriex::Bvh bvh = vriex::BuildBvh(model);
+        VriBufferDesc bd{}; bd.size = bvh.nodes.size() * sizeof(vriex::BvhNode); bd.usage = VriBufferUsage_StorageBuffer; bd.memoryLocation = VriMemoryLocation_HostUpload;
+        c.CreateBuffer(app.dev, &bd, &bvhNodeBuf);
+        std::memcpy(c.MapBuffer(bvhNodeBuf, 0, bd.size), bvh.nodes.data(), bd.size); c.UnmapBuffer(bvhNodeBuf);
+        VriBufferDesc td{}; td.size = bvh.triRefs.size() * sizeof(vriex::BvhTriRef); td.usage = VriBufferUsage_StorageBuffer; td.memoryLocation = VriMemoryLocation_HostUpload;
+        c.CreateBuffer(app.dev, &td, &triRefBuf);
+        std::memcpy(c.MapBuffer(triRefBuf, 0, td.size), bvh.triRefs.data(), td.size); c.UnmapBuffer(triRefBuf);
+        bvhNodeView = storageView(bvhNodeBuf, bd.size);
+        triRefView = storageView(triRefBuf, td.size);
+        std::printf("[pathtracer] software BVH: %zu nodes, %zu triangles\n", bvh.nodes.size(), bvh.triRefs.size()); std::fflush(stdout);
+    }
     VriDescriptor* vtxView = storageView(model.vertexBuffer, uint64_t(model.vertexCount) * sizeof(vriex::GltfVertex));
     VriDescriptor* idxView = storageView(model.indexBuffer, uint64_t(model.indexCount) * sizeof(uint32_t));
     VriDescriptor* gnView = storageView(geomNodeBuf, gnd.size);
@@ -169,46 +202,68 @@ int main(int argc, char** argv)
     msmp.addressModeU = VriAddressMode_Repeat; msmp.addressModeV = VriAddressMode_Repeat; msmp.addressModeW = VriAddressMode_Repeat; msmp.maxLod = 1.0f;
     VriDescriptor* modelSampler = nullptr; c.CreateSampler(app.dev, &msmp, &modelSampler);
 
+    // Hardware path binds a kMaxTextures-wide descriptor array; the software (GL/WebGPU) path samples
+    // the model's 2D-array texture as a single descriptor (no descriptor-array support there).
+    const uint32_t texCount = useSoftware ? 1u : kMaxTextures;
     std::vector<const VriDescriptor*> texArr(kMaxTextures, nullptr);
-    for (uint32_t i = 0; i < kMaxTextures; ++i)
-        texArr[i] = model.textureViews.empty() ? nullptr : model.textureViews[i < model.textureViews.size() ? i : 0];
+    if (!useSoftware)
+        for (uint32_t i = 0; i < kMaxTextures; ++i)
+            texArr[i] = model.textureViews.empty() ? nullptr : model.textureViews[i < model.textureViews.size() ? i : 0];
+    const VriDescriptor* texArrayView[1] = {model.textureArrayView};
 
-    // ---- compute layout: 9 bindings (the 8 trace bindings + the accumulation buffer) ----
-    VriDescriptorRangeDesc rr[9]{};
-    rr[0].baseRegister = 0; rr[0].descriptorNum = 1;            rr[0].descriptorType = VriDescriptorType_AccelerationStructure;
-    rr[1].baseRegister = 1; rr[1].descriptorNum = 1;            rr[1].descriptorType = VriDescriptorType_StorageTexture;
-    rr[2].baseRegister = 2; rr[2].descriptorNum = 1;            rr[2].descriptorType = VriDescriptorType_ConstantBuffer;
-    rr[3].baseRegister = 3; rr[3].descriptorNum = 1;            rr[3].descriptorType = VriDescriptorType_StorageBuffer;
-    rr[4].baseRegister = 4; rr[4].descriptorNum = 1;            rr[4].descriptorType = VriDescriptorType_StorageBuffer;
-    rr[5].baseRegister = 5; rr[5].descriptorNum = 1;            rr[5].descriptorType = VriDescriptorType_StorageBuffer;
-    rr[6].baseRegister = 6; rr[6].descriptorNum = 1;            rr[6].descriptorType = VriDescriptorType_Sampler;
-    rr[7].baseRegister = 7; rr[7].descriptorNum = kMaxTextures; rr[7].descriptorType = VriDescriptorType_Texture;
-    rr[8].baseRegister = 8; rr[8].descriptorNum = 1;            rr[8].descriptorType = VriDescriptorType_StorageBuffer;
-    for (auto& r : rr) r.shaderStages = VriShaderStage_Compute;
-    VriDescriptorSetDesc tsd{}; tsd.registerSpace = 0; tsd.ranges = rr; tsd.rangeNum = 9;
+    // ---- compute layout: 9 bindings (8 trace + accumulation) on the hardware path; the software path
+    // drops the TLAS (register 0) and appends the BVH-node + triRef storage buffers (registers 9, 10).
+    VriDescriptorRangeDesc rr[11]{};
+    uint32_t rn = 0;
+    if (!useSoftware) { rr[rn].baseRegister = 0; rr[rn].descriptorNum = 1; rr[rn].descriptorType = VriDescriptorType_AccelerationStructure; ++rn; }
+    rr[rn].baseRegister = 1; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_StorageTexture; ++rn;
+    rr[rn].baseRegister = 2; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_ConstantBuffer; ++rn;
+    rr[rn].baseRegister = 3; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_StorageBuffer; ++rn;
+    rr[rn].baseRegister = 4; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_StorageBuffer; ++rn;
+    rr[rn].baseRegister = 5; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_StorageBuffer; ++rn;
+    rr[rn].baseRegister = 6; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_Sampler; ++rn;
+    rr[rn].baseRegister = 7; rr[rn].descriptorNum = texCount; rr[rn].descriptorType = VriDescriptorType_Texture; if (useSoftware) rr[rn].viewType = VriTextureViewType_2DArray; ++rn;
+    rr[rn].baseRegister = 8; rr[rn].descriptorNum = 1;        rr[rn].descriptorType = VriDescriptorType_StorageBuffer; ++rn; // accumulation
+    if (useSoftware)
+    {
+        rr[rn].baseRegister = 9;  rr[rn].descriptorNum = 1; rr[rn].descriptorType = VriDescriptorType_StorageBuffer; ++rn;
+        rr[rn].baseRegister = 10; rr[rn].descriptorNum = 1; rr[rn].descriptorType = VriDescriptorType_StorageBuffer; ++rn;
+    }
+    for (uint32_t i = 0; i < rn; ++i) rr[i].shaderStages = VriShaderStage_Compute;
+    VriDescriptorSetDesc tsd{}; tsd.registerSpace = 0; tsd.ranges = rr; tsd.rangeNum = rn;
     VriPipelineLayoutDesc tld{}; tld.descriptorSets = &tsd; tld.descriptorSetNum = 1;
     VriPipelineLayout* ptLayout = nullptr; if (c.CreatePipelineLayout(app.dev, &tld, &ptLayout) != VriResult_Success) app.Fail("CreatePipelineLayout failed");
 
     VriComputePipelineDesc cpd{}; cpd.pipelineLayout = ptLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
 #if defined(_WIN32)
-    if (app.useDxbc) { cpd.shader.bytecode = g_rtPathtraceDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceDxilCS); }
+    if (app.useDxbc)
+    {
+        if (useSoftware) { cpd.shader.bytecode = g_rtPathtraceSoftwareDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSoftwareDxilCS); }
+        else             { cpd.shader.bytecode = g_rtPathtraceDxilCS;         cpd.shader.bytecodeSize = sizeof(g_rtPathtraceDxilCS); }
+    }
     else
 #endif
-    { cpd.shader.bytecode = g_rtPathtraceSpv; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSpv); }
+    if (useSoftware) { cpd.shader.bytecode = app.useWgsl ? static_cast<const void*>(g_rtPathtraceSoftwareWgsl) : static_cast<const void*>(g_rtPathtraceSoftwareSpv); cpd.shader.bytecodeSize = app.useWgsl ? sizeof(g_rtPathtraceSoftwareWgsl) : sizeof(g_rtPathtraceSoftwareSpv); }
+    else             { cpd.shader.bytecode = g_rtPathtraceSpv;         cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSpv); }
     VriPipeline* ptPipeline = nullptr; if (c.CreateComputePipeline(app.dev, &cpd, &ptPipeline) != VriResult_Success) app.Fail("CreateComputePipeline failed");
 
-    VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.accelerationStructureMaxNum = 1; pdsc.storageTextureMaxNum = 1;
-    pdsc.constantBufferMaxNum = 1; pdsc.storageBufferMaxNum = 4; pdsc.samplerMaxNum = 2; pdsc.textureMaxNum = kMaxTextures + 1;
+    VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.accelerationStructureMaxNum = useSoftware ? 0 : 1; pdsc.storageTextureMaxNum = 1;
+    pdsc.constantBufferMaxNum = 1; pdsc.storageBufferMaxNum = useSoftware ? 6 : 4; pdsc.samplerMaxNum = 2; pdsc.textureMaxNum = kMaxTextures + 1;
     VriDescriptorPool* pool = nullptr; c.CreateDescriptorPool(app.dev, &pdsc, &pool);
     VriDescriptorSet* ptSet = nullptr; c.AllocateDescriptorSets(pool, ptLayout, 0, &ptSet, 1);
     {
         const VriDescriptor* as[1] = {tlasDescriptor}; const VriDescriptor* oi[1] = {outView}; const VriDescriptor* cb[1] = {camView};
         const VriDescriptor* vb[1] = {vtxView}; const VriDescriptor* ib[1] = {idxView}; const VriDescriptor* gb[1] = {gnView}; const VriDescriptor* sm[1] = {modelSampler}; const VriDescriptor* ab[1] = {accumView};
-        VriDescriptorRangeUpdateDesc u[9]{};
-        u[0].descriptors = as; u[0].descriptorNum = 1; u[1].descriptors = oi; u[1].descriptorNum = 1; u[2].descriptors = cb; u[2].descriptorNum = 1;
-        u[3].descriptors = vb; u[3].descriptorNum = 1; u[4].descriptors = ib; u[4].descriptorNum = 1; u[5].descriptors = gb; u[5].descriptorNum = 1;
-        u[6].descriptors = sm; u[6].descriptorNum = 1; u[7].descriptors = texArr.data(); u[7].descriptorNum = kMaxTextures; u[8].descriptors = ab; u[8].descriptorNum = 1;
-        c.UpdateDescriptorRanges(ptSet, 0, 9, u);
+        const VriDescriptor* bn[1] = {bvhNodeView}; const VriDescriptor* tref[1] = {triRefView};
+        VriDescriptorRangeUpdateDesc u[11]{}; uint32_t un = 0;
+        if (!useSoftware) { u[un].descriptors = as; u[un].descriptorNum = 1; ++un; }
+        u[un].descriptors = oi; u[un].descriptorNum = 1; ++un; u[un].descriptors = cb; u[un].descriptorNum = 1; ++un;
+        u[un].descriptors = vb; u[un].descriptorNum = 1; ++un; u[un].descriptors = ib; u[un].descriptorNum = 1; ++un; u[un].descriptors = gb; u[un].descriptorNum = 1; ++un;
+        u[un].descriptors = sm; u[un].descriptorNum = 1; ++un;
+        u[un].descriptors = useSoftware ? texArrayView : texArr.data(); u[un].descriptorNum = texCount; ++un;
+        u[un].descriptors = ab; u[un].descriptorNum = 1; ++un;
+        if (useSoftware) { u[un].descriptors = bn; u[un].descriptorNum = 1; ++un; u[un].descriptors = tref; u[un].descriptorNum = 1; ++un; }
+        c.UpdateDescriptorRanges(ptSet, 0, un, u);
     }
 
     // ---- display pipeline ----
@@ -222,7 +277,7 @@ int main(int argc, char** argv)
     dsh[0].stage = VriShaderStage_Vertex;   dsh[0].entryPointName = "vertexMain";
     dsh[1].stage = VriShaderStage_Fragment; dsh[1].entryPointName = "fragmentMain";
     if (app.useDxbc) { dsh[0].bytecode = g_showTexDxbcVS; dsh[0].bytecodeSize = sizeof(g_showTexDxbcVS); dsh[1].bytecode = g_showTexDxbcPS; dsh[1].bytecodeSize = sizeof(g_showTexDxbcPS); }
-    else { dsh[0].bytecode = dsh[1].bytecode = g_showTexSpv; dsh[0].bytecodeSize = dsh[1].bytecodeSize = sizeof(g_showTexSpv); }
+    else { dsh[0].bytecode = dsh[1].bytecode = app.useWgsl ? static_cast<const void*>(g_showTexWgsl) : static_cast<const void*>(g_showTexSpv); dsh[0].bytecodeSize = dsh[1].bytecodeSize = app.useWgsl ? sizeof(g_showTexWgsl) : sizeof(g_showTexSpv); }
     VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
     VriGraphicsPipelineDesc pd{}; pd.pipelineLayout = displayLayout; pd.shaders = dsh; pd.shaderNum = 2;
     pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList; pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f;
@@ -237,6 +292,7 @@ int main(int argc, char** argv)
 
     app.onUpdate = [=](uint64_t) {
         if (dirty) { sampleCount = 0; dirty = false; }      // restart accumulation on any change
+        traceThisFrame = sampleCount < targetSamples;
         PtCamera cam{};
         const float dist = radius * 3.6f; // far enough that the whole model fits the frame
         const V3 eye = {center.x + std::cos(orbit) * dist, center.y + radius * 0.5f, center.z + std::sin(orbit) * dist};
@@ -254,13 +310,14 @@ int main(int argc, char** argv)
         set4(cam.sky, {0.7f + 0.3f * std::cos(a), 0.75f, 0.85f + 0.15f * std::sin(a)}, skyIntensity);
         cam.control[0] = float(sampleCount);
         cam.control[1] = float(maxBounces);
-        cam.control[2] = (sampleCount == 0) ? 1.0f : 0.0f; // reset the accumulator on the first sample
+        cam.control[2] = (traceThisFrame && sampleCount == 0) ? 1.0f : 0.0f; // reset the accumulator on the first sample
         std::memcpy(c.MapBuffer(camStg, 0, sizeof(PtCamera)), &cam, sizeof(PtCamera)); c.UnmapBuffer(camStg);
-        ++sampleCount;
+        if (traceThisFrame) ++sampleCount;
     };
 
     static bool g_imgInit = false;
     app.onPreRender = [=](VriCommandBuffer* cmd) {
+        if (!traceThisFrame) return;
         VriBufferCopyDesc ucp{}; ucp.size = sizeof(PtCamera); c.CmdCopyBuffer(cmd, camBuf, camStg, &ucp);
         VriBufferBarrierDesc ub{}; ub.buffer = camBuf; ub.before.access = VriAccess_CopyDestinationWrite; ub.before.stages = VriPipelineStage_Transfer;
         ub.after.access = VriAccess_ConstantBufferRead; ub.after.stages = VriPipelineStage_ComputeShader;
@@ -300,11 +357,17 @@ int main(int argc, char** argv)
     c.DestroyDescriptor(camView); c.DestroyBuffer(camStg); c.DestroyBuffer(camBuf);
     c.DestroyDescriptor(vtxView); c.DestroyDescriptor(idxView); c.DestroyDescriptor(gnView);
     c.DestroyBuffer(geomNodeBuf);
-    c.DestroyDescriptor(tlasDescriptor);
-    rt.DestroyAccelerationStructure(tlas); rt.DestroyAccelerationStructure(blas);
-    c.DestroyBuffer(instBuf);
+    if (bvhNodeView) c.DestroyDescriptor(bvhNodeView);
+    if (triRefView) c.DestroyDescriptor(triRefView);
+    if (bvhNodeBuf) c.DestroyBuffer(bvhNodeBuf);
+    if (triRefBuf) c.DestroyBuffer(triRefBuf);
+    if (!useSoftware) // the ray-tracing interface (and the AS objects) only exist on the hardware path
+    {
+        c.DestroyDescriptor(tlasDescriptor);
+        rt.DestroyAccelerationStructure(tlas); rt.DestroyAccelerationStructure(blas);
+        c.DestroyBuffer(instBuf);
+    }
     model.Destroy(app);
     app.Shutdown();
     return 0;
-#endif
 }

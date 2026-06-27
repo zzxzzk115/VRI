@@ -1,0 +1,110 @@
+static const float kInf = 1e30;
+static const uint kBvhStack = 32; // max traversal depth; a balanced median-split BVH stays well under this
+
+struct Vertex { float4 a; float4 b; };
+float3 vPos(Vertex v) { return v.a.xyz; }
+float3 vNormal(Vertex v) { return float3(v.a.w, v.b.x, v.b.y); }
+float2 vUv(Vertex v) { return v.b.zw; }
+struct GeometryNode { uint firstIndex; int baseColorTexture; int occlusionTexture; uint _pad; };
+// Explicit uint members (NOT packed into float4 .w lanes): the indices are small integers whose
+// float bit patterns are denormals, and GL drivers may flush denormals to zero on an SSBO float
+// load, so a floatBitsToUint round-trip silently zeroes every index. std430 packs this to the same
+// 32-byte layout the host uploads (aabbMin@0, leftOrFirst@12, aabbMax@16, countOrSecond@28).
+struct BvhNode { float3 aabbMin; uint leftOrFirst; float3 aabbMax; uint countOrSecond; };
+struct TriRef { uint indexBase; uint geomNodeIndex; };
+struct Hit { float t; float u; float v; uint indexBase; uint geomNodeIndex; bool hit; };
+
+static const uint kBvhLeafFlag = 0x80000000u; // set in countOrSecond on leaf nodes (matches bvh.h)
+
+uint nodeLeftOrFirst(BvhNode n) { return n.leftOrFirst; }
+uint nodeCountOrSecond(BvhNode n) { return n.countOrSecond; }
+bool nodeIsLeaf(BvhNode n) { return (n.countOrSecond & kBvhLeafFlag) != 0u; }
+
+// Slab test: returns the ray's ENTRY distance into the box (>= 0), or kInf on a miss. Returning the
+// entry t lets the traversal visit the nearer child first so a tightening hit.t culls the far subtree.
+float intersectAabb(float3 ro, float3 invRd, float3 bmin, float3 bmax, float tMax)
+{
+    float3 t0 = (bmin - ro) * invRd;
+    float3 t1 = (bmax - ro) * invRd;
+    float3 mn = min(t0, t1);
+    float3 mx = max(t0, t1);
+    float lo = max(max(mn.x, mn.y), max(mn.z, 0.0));
+    float hi = min(min(mx.x, mx.y), min(mx.z, tMax));
+    return hi >= lo ? lo : kInf;
+}
+
+bool intersectTri(float3 ro, float3 rd, float3 p0, float3 p1, float3 p2, inout Hit hit)
+{
+    float3 e1 = p1 - p0;
+    float3 e2 = p2 - p0;
+    float3 p = cross(rd, e2);
+    float det = dot(e1, p);
+    if (abs(det) < 1e-7) return false;
+    float invDet = 1.0 / det;
+    float3 tv = ro - p0;
+    float u = dot(tv, p) * invDet;
+    if (u < 0.0 || u > 1.0) return false;
+    float3 q = cross(tv, e1);
+    float v = dot(rd, q) * invDet;
+    if (v < 0.0 || u + v > 1.0) return false;
+    float t = dot(e2, q) * invDet;
+    if (t <= 1e-3 || t >= hit.t) return false;
+    hit.t = t; hit.u = u; hit.v = v; hit.hit = true;
+    return true;
+}
+
+Hit traceBvh(float3 ro, float3 rd, RWStructuredBuffer<Vertex> vertices, RWStructuredBuffer<uint> indices, RWStructuredBuffer<BvhNode> bvhNodes, RWStructuredBuffer<TriRef> triRefs)
+{
+    Hit hit; hit.t = kInf; hit.u = 0.0; hit.v = 0.0; hit.indexBase = 0; hit.geomNodeIndex = 0; hit.hit = false;
+    // Zero the whole traversal stack up front: spirv-cross lowers it to a dynamically-indexed local
+    // array, and NVIDIA's GLSL compiler rejects (not just warns on) reads it can't prove are
+    // initialized. A full init makes every slot defined, so the GL/WebGPU compute path compiles.
+    uint stack[kBvhStack];
+    for (uint si = 0; si < kBvhStack; ++si) stack[si] = 0u;
+    uint sp = 0; stack[sp++] = 0;
+    float3 invRd = 1.0 / rd;
+
+    while (sp > 0)
+    {
+        uint ni = stack[--sp];
+        BvhNode n = bvhNodes[ni];
+        // Re-test against the current hit.t: a node pushed earlier may now be fully occluded.
+        if (intersectAabb(ro, invRd, n.aabbMin, n.aabbMax, hit.t) >= kInf) continue;
+
+        uint a = nodeLeftOrFirst(n);
+        if (nodeIsLeaf(n))
+        {
+            uint count = nodeCountOrSecond(n) & ~kBvhLeafFlag;
+            for (uint i = 0; i < count; ++i)
+            {
+                TriRef tr = triRefs[a + i];
+                Vertex v0 = vertices[indices[tr.indexBase + 0]];
+                Vertex v1 = vertices[indices[tr.indexBase + 1]];
+                Vertex v2 = vertices[indices[tr.indexBase + 2]];
+                if (intersectTri(ro, rd, vPos(v0), vPos(v1), vPos(v2), hit))
+                {
+                    hit.indexBase = tr.indexBase;
+                    hit.geomNodeIndex = tr.geomNodeIndex;
+                }
+            }
+        }
+        else
+        {
+            // Ordered descent: enter the nearer child first (pushed last) so a hit there tightens
+            // hit.t and the far child is cheaply skipped (or culled on pop). Children the ray misses
+            // are never pushed.
+            uint left = a, right = nodeCountOrSecond(n);
+            float tl = intersectAabb(ro, invRd, bvhNodes[left].aabbMin, bvhNodes[left].aabbMax, hit.t);
+            float tr2 = intersectAabb(ro, invRd, bvhNodes[right].aabbMin, bvhNodes[right].aabbMax, hit.t);
+            uint near = tl <= tr2 ? left : right;
+            uint far = tl <= tr2 ? right : left;
+            float tFar = max(tl, tr2), tNear = min(tl, tr2);
+            if (sp + 2 <= kBvhStack)
+            {
+                if (tFar < kInf) stack[sp++] = far;
+                if (tNear < kInf) stack[sp++] = near;
+            }
+        }
+    }
+    return hit;
+}
