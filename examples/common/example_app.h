@@ -89,6 +89,17 @@ namespace vriex
         return n;
     }
 
+    // Fill a ShaderVariants {ptr, size} slot from an embedded blob symbol. The D3D12 (DXBC/DXIL)
+    // headers are only #included on Windows, so VRI_SHADER_D3D12 drops the symbol entirely off
+    // Windows (the slot is never read there, since useDxbc is false) - the same construction then
+    // compiles on every platform.
+#define VRI_SHADER_BLOB(sym) (sym), sizeof(sym)
+#if defined(_WIN32)
+#    define VRI_SHADER_D3D12(sym) (sym), sizeof(sym)
+#else
+#    define VRI_SHADER_D3D12(sym) nullptr, 0
+#endif
+
     struct ExampleApp
     {
         // ---- config (override before/at Init) ----
@@ -119,6 +130,26 @@ namespace vriex
         const char* apiName = "Vulkan";
         char apiLabel[64] = {}; // backs apiName for the GL family ("OpenGL 4.6" / "OpenGL ES 3.1" / "WebGL2 (ES 3.0)")
         bool useWgsl = false, useDxbc = false;
+
+        // VRI takes raw per-stage bytecode; which blob to feed is a backend choice - SPIR-V for
+        // Vulkan/OpenGL/Metal (the GL/Metal backends transpile it), WGSL for WebGPU, DXBC or DXIL
+        // for D3D12. Bundle a shader's per-backend blobs in a ShaderVariants and let Shader() pick,
+        // so examples stop repeating the `useDxbc ? .. : useWgsl ? wgsl : spv` ladder per shader.
+        // (Picking *which* shader - e.g. a software vs hardware variant - stays the example's job.)
+        struct ShaderVariants
+        {
+            const void* spv = nullptr;   size_t spvLen = 0;   // Vulkan / OpenGL / Metal (transpiled)
+            const void* wgsl = nullptr;  size_t wgslLen = 0;  // WebGPU
+            const void* d3d12 = nullptr; size_t d3d12Len = 0; // D3D12 (DXBC sm5.1 or DXIL sm6.x)
+        };
+        VriShaderDesc Shader(VriShaderStageBits stage, const char* entry, const ShaderVariants& v) const
+        {
+            VriShaderDesc d{}; d.stage = stage; d.entryPointName = entry;
+            if (useDxbc)      { d.bytecode = v.d3d12; d.bytecodeSize = v.d3d12Len; }
+            else if (useWgsl) { d.bytecode = v.wgsl;  d.bytecodeSize = v.wgslLen; }
+            else              { d.bytecode = v.spv;   d.bytecodeSize = v.spvLen; }
+            return d;
+        }
 
         // ---- the example fills these in before Run() ----
         // onUpdate: CPU-side per-frame work (e.g. write a staging buffer). Runs BEFORE the

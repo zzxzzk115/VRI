@@ -252,19 +252,11 @@ int main(int argc, char** argv)
     VriPipeline* computePipeline = nullptr;
     if (hasRtPipeline)
     {
-        VriShaderDesc sh[3]{};
-        sh[0].stage = VriShaderStage_RayGen;     sh[0].entryPointName = "rayGenMain";
-        sh[1].stage = VriShaderStage_Miss;       sh[1].entryPointName = "missMain";
-        sh[2].stage = VriShaderStage_ClosestHit; sh[2].entryPointName = "closestHitMain";
-#if defined(_WIN32)
-        if (app.useDxbc) {
-            sh[0].bytecode = g_rtGltfDxilRGEN; sh[0].bytecodeSize = sizeof(g_rtGltfDxilRGEN);
-            sh[1].bytecode = g_rtGltfDxilMISS; sh[1].bytecodeSize = sizeof(g_rtGltfDxilMISS);
-            sh[2].bytecode = g_rtGltfDxilCHIT; sh[2].bytecodeSize = sizeof(g_rtGltfDxilCHIT);
-        }
-        else
-#endif
-        { for (int i = 0; i < 3; ++i) { sh[i].bytecode = g_rtGltfSpv; sh[i].bytecodeSize = sizeof(g_rtGltfSpv); } }
+        VriShaderDesc sh[3] = { // SPIR-V (VK) or per-stage DXIL (D3D12); the RT pipeline never runs on WebGPU
+            app.Shader(VriShaderStage_RayGen,     "rayGenMain",     { VRI_SHADER_BLOB(g_rtGltfSpv), nullptr, 0, VRI_SHADER_D3D12(g_rtGltfDxilRGEN) }),
+            app.Shader(VriShaderStage_Miss,       "missMain",       { VRI_SHADER_BLOB(g_rtGltfSpv), nullptr, 0, VRI_SHADER_D3D12(g_rtGltfDxilMISS) }),
+            app.Shader(VriShaderStage_ClosestHit, "closestHitMain", { VRI_SHADER_BLOB(g_rtGltfSpv), nullptr, 0, VRI_SHADER_D3D12(g_rtGltfDxilCHIT) }),
+        };
         VriShaderGroupDesc groups[3]{};
         groups[0].type = VriShaderGroupType_General;           groups[0].generalShader = 0; groups[0].closestHitShader = VRI_SHADER_UNUSED; groups[0].anyHitShader = VRI_SHADER_UNUSED; groups[0].intersectionShader = VRI_SHADER_UNUSED;
         groups[1].type = VriShaderGroupType_General;           groups[1].generalShader = 1; groups[1].closestHitShader = VRI_SHADER_UNUSED; groups[1].anyHitShader = VRI_SHADER_UNUSED; groups[1].intersectionShader = VRI_SHADER_UNUSED;
@@ -283,17 +275,13 @@ int main(int argc, char** argv)
     }
     else // compute: Metal-style inline ray query, or the software BVH fallback (no RT hardware)
     {
-        VriComputePipelineDesc cpd{}; cpd.pipelineLayout = traceLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
-#if defined(_WIN32)
-        if (app.useDxbc)
-        {
-            if (useSoftware) { cpd.shader.bytecode = g_rtGltfSoftwareDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtGltfSoftwareDxilCS); }
-            else             { cpd.shader.bytecode = g_rtGltfRayqueryDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtGltfRayqueryDxilCS); }
-        }
-        else
-#endif
-        if (useSoftware) { cpd.shader.bytecode = app.useWgsl ? static_cast<const void*>(g_rtGltfSoftwareWgsl) : static_cast<const void*>(g_rtGltfSoftwareSpv); cpd.shader.bytecodeSize = app.useWgsl ? sizeof(g_rtGltfSoftwareWgsl) : sizeof(g_rtGltfSoftwareSpv); }
-        else             { cpd.shader.bytecode = g_rtGltfRayquerySpv;  cpd.shader.bytecodeSize = sizeof(g_rtGltfRayquerySpv); } // ray query never runs on WebGPU
+        // software BVH (GL/WebGPU/VK) or Metal-style inline ray query (Metal/VK/D3D12); the example
+        // picks WHICH shader, Shader() picks the backend blob. Ray query never runs on WebGPU.
+        const vriex::ExampleApp::ShaderVariants traceCs = useSoftware
+            ? vriex::ExampleApp::ShaderVariants{ VRI_SHADER_BLOB(g_rtGltfSoftwareSpv), VRI_SHADER_BLOB(g_rtGltfSoftwareWgsl), VRI_SHADER_D3D12(g_rtGltfSoftwareDxilCS) }
+            : vriex::ExampleApp::ShaderVariants{ VRI_SHADER_BLOB(g_rtGltfRayquerySpv), nullptr, 0, VRI_SHADER_D3D12(g_rtGltfRayqueryDxilCS) };
+        VriComputePipelineDesc cpd{}; cpd.pipelineLayout = traceLayout;
+        cpd.shader = app.Shader(VriShaderStage_Compute, "computeMain", traceCs);
         if (c.CreateComputePipeline(app.dev, &cpd, &computePipeline) != VriResult_Success) app.Fail("CreateComputePipeline (compute trace) failed");
     }
 
@@ -304,11 +292,10 @@ int main(int argc, char** argv)
     VriDescriptorSetDesc dsd{}; dsd.registerSpace = 0; dsd.ranges = dr; dsd.rangeNum = 2;
     VriPipelineLayoutDesc dld{}; dld.descriptorSets = &dsd; dld.descriptorSetNum = 1;
     VriPipelineLayout* displayLayout = nullptr; c.CreatePipelineLayout(app.dev, &dld, &displayLayout);
-    VriShaderDesc dsh[2]{};
-    dsh[0].stage = VriShaderStage_Vertex;   dsh[0].entryPointName = "vertexMain";
-    dsh[1].stage = VriShaderStage_Fragment; dsh[1].entryPointName = "fragmentMain";
-    if (app.useDxbc) { dsh[0].bytecode = g_showTexDxbcVS; dsh[0].bytecodeSize = sizeof(g_showTexDxbcVS); dsh[1].bytecode = g_showTexDxbcPS; dsh[1].bytecodeSize = sizeof(g_showTexDxbcPS); }
-    else { dsh[0].bytecode = dsh[1].bytecode = app.useWgsl ? static_cast<const void*>(g_showTexWgsl) : static_cast<const void*>(g_showTexSpv); dsh[0].bytecodeSize = dsh[1].bytecodeSize = app.useWgsl ? sizeof(g_showTexWgsl) : sizeof(g_showTexSpv); }
+    VriShaderDesc dsh[2] = { // one SPIR-V/WGSL module covers both stages; D3D12 has separate VS/PS DXBC
+        app.Shader(VriShaderStage_Vertex,   "vertexMain",   { VRI_SHADER_BLOB(g_showTexSpv), VRI_SHADER_BLOB(g_showTexWgsl), VRI_SHADER_D3D12(g_showTexDxbcVS) }),
+        app.Shader(VriShaderStage_Fragment, "fragmentMain", { VRI_SHADER_BLOB(g_showTexSpv), VRI_SHADER_BLOB(g_showTexWgsl), VRI_SHADER_D3D12(g_showTexDxbcPS) }),
+    };
     VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
     VriGraphicsPipelineDesc pd{}; pd.pipelineLayout = displayLayout; pd.shaders = dsh; pd.shaderNum = 2;
     pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList; pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f;

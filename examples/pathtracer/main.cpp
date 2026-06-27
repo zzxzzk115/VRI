@@ -234,17 +234,13 @@ int main(int argc, char** argv)
     VriPipelineLayoutDesc tld{}; tld.descriptorSets = &tsd; tld.descriptorSetNum = 1;
     VriPipelineLayout* ptLayout = nullptr; if (c.CreatePipelineLayout(app.dev, &tld, &ptLayout) != VriResult_Success) app.Fail("CreatePipelineLayout failed");
 
-    VriComputePipelineDesc cpd{}; cpd.pipelineLayout = ptLayout; cpd.shader.stage = VriShaderStage_Compute; cpd.shader.entryPointName = "computeMain";
-#if defined(_WIN32)
-    if (app.useDxbc)
-    {
-        if (useSoftware) { cpd.shader.bytecode = g_rtPathtraceSoftwareDxilCS; cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSoftwareDxilCS); }
-        else             { cpd.shader.bytecode = g_rtPathtraceDxilCS;         cpd.shader.bytecodeSize = sizeof(g_rtPathtraceDxilCS); }
-    }
-    else
-#endif
-    if (useSoftware) { cpd.shader.bytecode = app.useWgsl ? static_cast<const void*>(g_rtPathtraceSoftwareWgsl) : static_cast<const void*>(g_rtPathtraceSoftwareSpv); cpd.shader.bytecodeSize = app.useWgsl ? sizeof(g_rtPathtraceSoftwareWgsl) : sizeof(g_rtPathtraceSoftwareSpv); }
-    else             { cpd.shader.bytecode = g_rtPathtraceSpv;         cpd.shader.bytecodeSize = sizeof(g_rtPathtraceSpv); }
+    // software BVH megakernel (GL/WebGPU/VK) or inline ray query (Metal/VK/D3D12); the example picks
+    // WHICH shader, Shader() picks the backend blob. Ray query never runs on WebGPU.
+    const vriex::ExampleApp::ShaderVariants ptCs = useSoftware
+        ? vriex::ExampleApp::ShaderVariants{ VRI_SHADER_BLOB(g_rtPathtraceSoftwareSpv), VRI_SHADER_BLOB(g_rtPathtraceSoftwareWgsl), VRI_SHADER_D3D12(g_rtPathtraceSoftwareDxilCS) }
+        : vriex::ExampleApp::ShaderVariants{ VRI_SHADER_BLOB(g_rtPathtraceSpv), nullptr, 0, VRI_SHADER_D3D12(g_rtPathtraceDxilCS) };
+    VriComputePipelineDesc cpd{}; cpd.pipelineLayout = ptLayout;
+    cpd.shader = app.Shader(VriShaderStage_Compute, "computeMain", ptCs);
     VriPipeline* ptPipeline = nullptr; if (c.CreateComputePipeline(app.dev, &cpd, &ptPipeline) != VriResult_Success) app.Fail("CreateComputePipeline failed");
 
     VriDescriptorPoolDesc pdsc{}; pdsc.descriptorSetMaxNum = 2; pdsc.accelerationStructureMaxNum = useSoftware ? 0 : 1; pdsc.storageTextureMaxNum = 1;
@@ -273,11 +269,10 @@ int main(int argc, char** argv)
     VriDescriptorSetDesc dsd{}; dsd.registerSpace = 0; dsd.ranges = dr; dsd.rangeNum = 2;
     VriPipelineLayoutDesc dld{}; dld.descriptorSets = &dsd; dld.descriptorSetNum = 1;
     VriPipelineLayout* displayLayout = nullptr; c.CreatePipelineLayout(app.dev, &dld, &displayLayout);
-    VriShaderDesc dsh[2]{};
-    dsh[0].stage = VriShaderStage_Vertex;   dsh[0].entryPointName = "vertexMain";
-    dsh[1].stage = VriShaderStage_Fragment; dsh[1].entryPointName = "fragmentMain";
-    if (app.useDxbc) { dsh[0].bytecode = g_showTexDxbcVS; dsh[0].bytecodeSize = sizeof(g_showTexDxbcVS); dsh[1].bytecode = g_showTexDxbcPS; dsh[1].bytecodeSize = sizeof(g_showTexDxbcPS); }
-    else { dsh[0].bytecode = dsh[1].bytecode = app.useWgsl ? static_cast<const void*>(g_showTexWgsl) : static_cast<const void*>(g_showTexSpv); dsh[0].bytecodeSize = dsh[1].bytecodeSize = app.useWgsl ? sizeof(g_showTexWgsl) : sizeof(g_showTexSpv); }
+    VriShaderDesc dsh[2] = { // one SPIR-V/WGSL module covers both stages; D3D12 has separate VS/PS DXBC
+        app.Shader(VriShaderStage_Vertex,   "vertexMain",   { VRI_SHADER_BLOB(g_showTexSpv), VRI_SHADER_BLOB(g_showTexWgsl), VRI_SHADER_D3D12(g_showTexDxbcVS) }),
+        app.Shader(VriShaderStage_Fragment, "fragmentMain", { VRI_SHADER_BLOB(g_showTexSpv), VRI_SHADER_BLOB(g_showTexWgsl), VRI_SHADER_D3D12(g_showTexDxbcPS) }),
+    };
     VriColorAttachmentDesc ca{}; ca.format = app.swapFormat; ca.colorWriteMask = VriColorWrite_RGBA;
     VriGraphicsPipelineDesc pd{}; pd.pipelineLayout = displayLayout; pd.shaders = dsh; pd.shaderNum = 2;
     pd.inputAssembly.topology = VriPrimitiveTopology_TriangleList; pd.rasterization.cullMode = VriCullMode_None; pd.rasterization.lineWidth = 1.0f;
