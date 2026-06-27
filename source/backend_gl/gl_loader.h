@@ -20,8 +20,11 @@
 #endif
 
 #if defined(__EMSCRIPTEN__)
-#include <GLES2/gl2ext.h>
+// clang-format off
+// Order matters: the base ES 3.0 header defines GLenum/GLint/... that gl2ext.h then uses.
 #include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
+// clang-format on
 // WebGL2's getBufferSubData is implemented by the Emscripten GL runtime but not
 // declared in <GLES3/gl3.h>; declare it so the buffer-readback path can use it.
 // (Native GLES has no glGetBufferSubData at all - see ReadBufferSubData in core_gl.cpp.)
@@ -31,8 +34,11 @@ extern "C" void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr si
 // entry points directly, so no runtime loader is needed. <GLES3/gl31.h> (ES 3.1) is a
 // superset of ES 3.0 and additionally declares the indirect-draw / compute entry points
 // the embedded path can use beyond the WebGL2 (ES 3.0) subset.
-#include <GLES2/gl2ext.h>
+// clang-format off
+// Order matters: the base ES 3.1 header defines GLenum/GLint/... that gl2ext.h then uses.
 #include <GLES3/gl31.h>
+#include <GLES2/gl2ext.h>
+// clang-format on
 #else
 #include <glad/glad.h>
 #endif

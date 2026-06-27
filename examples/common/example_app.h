@@ -604,10 +604,10 @@ namespace vriex
             // stdout (self-check + "frames presented") before the page goes away.
             emscripten_async_call(
                 [](void*) {
-                    EM_ASM({
-                        if (typeof window != = 'undefined' && window.close)
-                            window.close();
-                    });
+                    // clang-format off
+                    // Embedded JS: clang-format mangles the strict-inequality operator (!== -> != =), so keep this verbatim.
+                    EM_ASM({ if (typeof window !== 'undefined' && window.close) window.close(); });
+                    // clang-format on
                     emscripten_force_exit(0);
                 },
                 nullptr,
