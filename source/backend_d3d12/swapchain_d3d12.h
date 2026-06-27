@@ -12,8 +12,8 @@
 
 #include <vector>
 
-#include <vri/vri.h>
 #include <vri/ext/vri_ext_swapchain.h>
+#include <vri/vri.h>
 
 #include "objects_d3d12.h"
 
@@ -27,9 +27,9 @@ namespace vri::d3d12
         ComPtr<IDXGISwapChain3>    swapchain;
         std::vector<TextureD3D12*> textures; // backbuffers wrapped as VRI textures (owned)
         uint32_t                   width = 0, height = 0;
-        VriFormat                  format = VriFormat_Unknown;
+        VriFormat                  format      = VriFormat_Unknown;
         uint32_t                   bufferCount = 0;
-        bool                       vsync = true;
+        bool                       vsync       = true;
     };
 
     inline VriSwapChain* ToHandle(SwapChainD3D12* s) { return reinterpret_cast<VriSwapChain*>(s); }

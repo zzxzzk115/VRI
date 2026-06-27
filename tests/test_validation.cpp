@@ -10,7 +10,10 @@
 
 namespace
 {
-    struct MsgState { int errors = 0; };
+    struct MsgState
+    {
+        int errors = 0;
+    };
     void VRI_CALL OnMessage(void* userArg, VriMessageSeverity severity, const char* /*message*/)
     {
         if (severity == VriMessageSeverity_Error)
@@ -23,25 +26,34 @@ namespace
         const VriGraphicsAPI apis[] = {VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL};
         for (VriGraphicsAPI api : apis)
         {
-            VriDeviceCreationDesc dc{};
-            dc.graphicsAPI = api; dc.enableValidation = VRI_TRUE; dc.bestEffort = VRI_TRUE; dc.callbackInterface = cb;
-            VriDevice* dev = nullptr;
+            VriDeviceCreationDesc dc {};
+            dc.graphicsAPI       = api;
+            dc.enableValidation  = VRI_TRUE;
+            dc.bestEffort        = VRI_TRUE;
+            dc.callbackInterface = cb;
+            VriDevice* dev       = nullptr;
             if (vriCreateDevice(&dc, &dev) == VriResult_Success)
                 return dev;
         }
         return nullptr;
     }
-}
+} // namespace
 
 TEST_CASE("VRI Validation flags a draw issued outside a render pass")
 {
-    MsgState state;
-    VriCallbackInterface cb{}; cb.userArg = &state; cb.MessageCallback = OnMessage;
+    MsgState             state;
+    VriCallbackInterface cb {};
+    cb.userArg         = &state;
+    cb.MessageCallback = OnMessage;
 
     VriDevice* dev = CreateAnyValidated(&cb);
-    if (!dev) { MESSAGE("no backend available - skipped"); return; }
+    if (!dev)
+    {
+        MESSAGE("no backend available - skipped");
+        return;
+    }
 
-    VriCoreInterface c{};
+    VriCoreInterface c {};
     REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
 
     VriCommandAllocator* alloc = nullptr;
@@ -50,8 +62,10 @@ TEST_CASE("VRI Validation flags a draw issued outside a render pass")
     REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
 
     REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
-    const int before = state.errors;
-    VriDrawDesc draw{}; draw.vertexNum = 3; draw.instanceNum = 1;
+    const int   before = state.errors;
+    VriDrawDesc draw {};
+    draw.vertexNum   = 3;
+    draw.instanceNum = 1;
     c.CmdDraw(cmd, &draw); // ERROR: no active render pass -> reported + suppressed
     CHECK(state.errors > before);
     REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);

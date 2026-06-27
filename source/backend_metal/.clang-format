@@ -1,0 +1,3 @@
+# The Metal backend is Objective-C++ (.mm + ObjC headers); the root Language: Cpp config
+# cannot format it, so this backend is exempt from clang-format.
+DisableFormat: true

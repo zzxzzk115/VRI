@@ -5,8 +5,8 @@
 
 #include <vulkan/vulkan.h>
 
-#include <vri/vri.h>
 #include <vri/ext/vri_ext_swapchain.h>
+#include <vri/vri.h>
 
 #include "objects_vk.h"
 
@@ -25,9 +25,9 @@ namespace vri::vk
         VkFence                 acquireFence;
         uint32_t                currentIndex;
         // original creation request (reused on Resize)
-        VriFormat               requestedFormat;
-        uint32_t                requestedTextureNum;
-        bool                    vsync;
+        VriFormat requestedFormat;
+        uint32_t  requestedTextureNum;
+        bool      vsync;
     };
 
     inline VriSwapChain* ToHandle(SwapChainVK* s) { return reinterpret_cast<VriSwapChain*>(s); }

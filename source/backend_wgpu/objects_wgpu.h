@@ -46,9 +46,9 @@ namespace vri::wgpu
         // instead of wgpuBufferMapAsync. On the browser mapAsync forces an ASYNCIFY yield
         // (emscripten_sleep) every frame; queueWriteBuffer is synchronous, so a normal frame no longer
         // unwinds the wasm stack to await a map (also skips the async round-trip on native).
-        uint8_t*    shadow = nullptr; // non-null => use the shadow + queueWriteBuffer path
-        uint64_t    mapOffset = 0;    // current MapBuffer range, flushed on Unmap
-        uint64_t    mapLen = 0;
+        uint8_t* shadow    = nullptr; // non-null => use the shadow + queueWriteBuffer path
+        uint64_t mapOffset = 0;       // current MapBuffer range, flushed on Unmap
+        uint64_t mapLen    = 0;
     };
 
     struct TextureWGPU
@@ -67,7 +67,12 @@ namespace vri::wgpu
 
     struct DescriptorWGPU
     {
-        enum class Kind { TextureView, BufferView, Sampler } kind;
+        enum class Kind
+        {
+            TextureView,
+            BufferView,
+            Sampler
+        } kind;
         DeviceWGPU*       device;
         WGPUTextureView   view;
         WGPUTextureFormat format = WGPUTextureFormat_Undefined; // for render-pass stencil-aspect detection
@@ -86,46 +91,46 @@ namespace vri::wgpu
 
     struct PipelineLayoutWGPU
     {
-        DeviceWGPU*                            device;
-        WGPUPipelineLayout                     layout;
-        std::vector<WGPUBindGroupLayout>       bindGroupLayouts;
+        DeviceWGPU*                             device;
+        WGPUPipelineLayout                      layout;
+        std::vector<WGPUBindGroupLayout>        bindGroupLayouts;
         std::vector<std::vector<RangeInfoWGPU>> setRanges; // [set][range]
         // Push constants are emulated as a dynamic-offset uniform in a reserved bind group (group
         // == descriptorSetNum). pushBuffer is a RING: each CmdSetConstants writes the next slot and
         // binds it with a dynamic offset, so multiple per-draw push values in one pass each keep
         // their own value (a single fixed binding would collapse to the last queue-written value).
         // The buffer + bind group are created lazily in CmdSetConstants.
-        bool          hasPush = false;
-        uint32_t      pushGroup = 0;
-        uint32_t      pushSize = 0;
-        uint32_t      pushStride = 0; // per-slot stride (push size rounded up to the 256B dynamic-offset alignment)
-        uint32_t      pushCursor = 0; // next ring slot (monotonic, wraps mod the slot count)
-        WGPUBuffer    pushBuffer = nullptr;
+        bool          hasPush       = false;
+        uint32_t      pushGroup     = 0;
+        uint32_t      pushSize      = 0;
+        uint32_t      pushStride    = 0; // per-slot stride (push size rounded up to the 256B dynamic-offset alignment)
+        uint32_t      pushCursor    = 0; // next ring slot (monotonic, wraps mod the slot count)
+        WGPUBuffer    pushBuffer    = nullptr;
         WGPUBindGroup pushBindGroup = nullptr;
     };
 
     struct DescriptorSetWGPU
     {
-        DeviceWGPU*             device;
+        DeviceWGPU*               device;
         const PipelineLayoutWGPU* layout;
-        uint32_t                setIndex;
-        WGPUBindGroup           bindGroup; // (re)created on UpdateDescriptorRanges
+        uint32_t                  setIndex;
+        WGPUBindGroup             bindGroup; // (re)created on UpdateDescriptorRanges
     };
 
     struct DescriptorPoolWGPU
     {
-        DeviceWGPU*                    device; // WebGPU has no pool; owns the allocated sets
+        DeviceWGPU*                     device; // WebGPU has no pool; owns the allocated sets
         std::vector<DescriptorSetWGPU*> sets;
     };
 
     struct PipelineWGPU
     {
-        DeviceWGPU*        device;
-        WGPURenderPipeline render;
+        DeviceWGPU*         device;
+        WGPURenderPipeline  render;
         WGPUComputePipeline compute;
-        bool               isCompute;
-        bool               stencilTest = false;     // set the stencil reference on bind
-        uint32_t           stencilReference = 0;
+        bool                isCompute;
+        bool                stencilTest      = false; // set the stencil reference on bind
+        uint32_t            stencilReference = 0;
     };
 
     struct FenceWGPU
@@ -134,15 +139,15 @@ namespace vri::wgpu
         uint64_t    value; // emulated timeline
     };
 
-    inline VriQueue*           ToHandle(QueueWGPU* q)             { return reinterpret_cast<VriQueue*>(q); }
+    inline VriQueue*            ToHandle(QueueWGPU* q) { return reinterpret_cast<VriQueue*>(q); }
     inline VriCommandAllocator* ToHandle(CommandAllocatorWGPU* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
-    inline VriCommandBuffer*   ToHandle(CommandBufferWGPU* c)     { return reinterpret_cast<VriCommandBuffer*>(c); }
-    inline VriBuffer*          ToHandle(BufferWGPU* b)            { return reinterpret_cast<VriBuffer*>(b); }
-    inline VriTexture*         ToHandle(TextureWGPU* t)           { return reinterpret_cast<VriTexture*>(t); }
-    inline VriDescriptor*      ToHandle(DescriptorWGPU* d)        { return reinterpret_cast<VriDescriptor*>(d); }
-    inline VriPipelineLayout*  ToHandle(PipelineLayoutWGPU* p)    { return reinterpret_cast<VriPipelineLayout*>(p); }
-    inline VriPipeline*        ToHandle(PipelineWGPU* p)          { return reinterpret_cast<VriPipeline*>(p); }
-    inline VriFence*           ToHandle(FenceWGPU* f)             { return reinterpret_cast<VriFence*>(f); }
-    inline VriDescriptorPool*  ToHandle(DescriptorPoolWGPU* p)    { return reinterpret_cast<VriDescriptorPool*>(p); }
-    inline VriDescriptorSet*   ToHandle(DescriptorSetWGPU* s)     { return reinterpret_cast<VriDescriptorSet*>(s); }
+    inline VriCommandBuffer*    ToHandle(CommandBufferWGPU* c) { return reinterpret_cast<VriCommandBuffer*>(c); }
+    inline VriBuffer*           ToHandle(BufferWGPU* b) { return reinterpret_cast<VriBuffer*>(b); }
+    inline VriTexture*          ToHandle(TextureWGPU* t) { return reinterpret_cast<VriTexture*>(t); }
+    inline VriDescriptor*       ToHandle(DescriptorWGPU* d) { return reinterpret_cast<VriDescriptor*>(d); }
+    inline VriPipelineLayout*   ToHandle(PipelineLayoutWGPU* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
+    inline VriPipeline*         ToHandle(PipelineWGPU* p) { return reinterpret_cast<VriPipeline*>(p); }
+    inline VriFence*            ToHandle(FenceWGPU* f) { return reinterpret_cast<VriFence*>(f); }
+    inline VriDescriptorPool*   ToHandle(DescriptorPoolWGPU* p) { return reinterpret_cast<VriDescriptorPool*>(p); }
+    inline VriDescriptorSet*    ToHandle(DescriptorSetWGPU* s) { return reinterpret_cast<VriDescriptorSet*>(s); }
 } // namespace vri::wgpu

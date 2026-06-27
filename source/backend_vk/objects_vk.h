@@ -4,8 +4,8 @@
 
 #include <vector>
 
-#include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <vulkan/vulkan.h>
 
 #include <vri/vri.h>
 
@@ -30,10 +30,10 @@ namespace vri::vk
 
     struct CommandBufferVK
     {
-        DeviceVK*         device;
-        VkCommandBuffer   cmd;
+        DeviceVK*       device;
+        VkCommandBuffer cmd;
         // recording state
-        VriPipelineLayout* boundLayout;
+        VriPipelineLayout*  boundLayout;
         VkPipelineBindPoint boundBindPoint;
     };
 
@@ -47,30 +47,33 @@ namespace vri::vk
 
     struct AccelerationStructureVK
     {
-        DeviceVK*                  device;
-        VkAccelerationStructureKHR as;
-        VkBuffer                   buffer;       // backing store (ACCELERATION_STRUCTURE_STORAGE)
-        VmaAllocation              bufferAlloc;
-        VkBuffer                   scratch;      // build scratch (STORAGE | SHADER_DEVICE_ADDRESS)
-        VmaAllocation              scratchAlloc;
-        VkDeviceAddress            deviceAddress;
-        VkDeviceAddress            scratchAddress;
+        DeviceVK*                      device;
+        VkAccelerationStructureKHR     as;
+        VkBuffer                       buffer; // backing store (ACCELERATION_STRUCTURE_STORAGE)
+        VmaAllocation                  bufferAlloc;
+        VkBuffer                       scratch; // build scratch (STORAGE | SHADER_DEVICE_ADDRESS)
+        VmaAllocation                  scratchAlloc;
+        VkDeviceAddress                deviceAddress;
+        VkDeviceAddress                scratchAddress;
         VkAccelerationStructureTypeKHR type;
     };
-    inline VriAccelerationStructure* ToHandle(AccelerationStructureVK* a) { return reinterpret_cast<VriAccelerationStructure*>(a); }
+    inline VriAccelerationStructure* ToHandle(AccelerationStructureVK* a)
+    {
+        return reinterpret_cast<VriAccelerationStructure*>(a);
+    }
 
     struct MicromapVK
     {
-        DeviceVK*       device;
-        VkMicromapEXT   micromap;
-        VkBuffer        buffer;       // backing store (MICROMAP_STORAGE)
-        VmaAllocation   bufferAlloc;
-        VkBuffer        scratch;      // build scratch
-        VmaAllocation   scratchAlloc;
-        VkDeviceAddress scratchAddress;
+        DeviceVK*                  device;
+        VkMicromapEXT              micromap;
+        VkBuffer                   buffer; // backing store (MICROMAP_STORAGE)
+        VmaAllocation              bufferAlloc;
+        VkBuffer                   scratch; // build scratch
+        VmaAllocation              scratchAlloc;
+        VkDeviceAddress            scratchAddress;
         VkOpacityMicromapFormatEXT format;
-        uint32_t        subdivisionLevel;
-        uint32_t        triangleCount;
+        uint32_t                   subdivisionLevel;
+        uint32_t                   triangleCount;
     };
     inline VriMicromap* ToHandle(MicromapVK* m) { return reinterpret_cast<VriMicromap*>(m); }
 
@@ -90,20 +93,26 @@ namespace vri::vk
     // A view (texture/buffer) or a sampler.
     struct DescriptorVK
     {
-        enum class Kind { TextureView, BufferView, Sampler, AccelerationStructure } kind;
-        DeviceVK*    device;
-        VkImageView  imageView;
-        VkBufferView bufferView; // only for typed/texel buffer views
-        VkSampler    sampler;
+        enum class Kind
+        {
+            TextureView,
+            BufferView,
+            Sampler,
+            AccelerationStructure
+        } kind;
+        DeviceVK*                  device;
+        VkImageView                imageView;
+        VkBufferView               bufferView; // only for typed/texel buffer views
+        VkSampler                  sampler;
         VkAccelerationStructureKHR accel = VK_NULL_HANDLE; // only for Kind::AccelerationStructure
         // texture-view metadata (attachments, transitions)
         VkFormat           format;
         VkImageAspectFlags aspect;
         const TextureVK*   texture;
         // buffer-view metadata (constant/structured/storage buffer bindings)
-        const BufferVK*    buffer;
-        uint64_t           bufferOffset;
-        uint64_t           bufferRange;
+        const BufferVK* buffer;
+        uint64_t        bufferOffset;
+        uint64_t        bufferRange;
     };
 
     // Per-binding metadata kept so UpdateDescriptorRanges can build writes
@@ -129,7 +138,7 @@ namespace vri::vk
         // Combined push-constant stage flags + total size (0 = no push range). CmdSetConstants
         // must pass exactly these stages to vkCmdPushConstants (not VK_SHADER_STAGE_ALL).
         VkShaderStageFlags pushStages = 0;
-        uint32_t           pushSize = 0;
+        uint32_t           pushSize   = 0;
     };
 
     struct DescriptorPoolVK
@@ -166,19 +175,27 @@ namespace vri::vk
     };
 
     // ---- opaque <-> concrete casts -------------------------------------
-    template <typename T, typename H> inline T* Cast(H* h) { return reinterpret_cast<T*>(h); }
-    template <typename T, typename H> inline const T* Cast(const H* h) { return reinterpret_cast<const T*>(h); }
+    template<typename T, typename H>
+    inline T* Cast(H* h)
+    {
+        return reinterpret_cast<T*>(h);
+    }
+    template<typename T, typename H>
+    inline const T* Cast(const H* h)
+    {
+        return reinterpret_cast<const T*>(h);
+    }
 
-    inline VriQueue*           ToHandle(QueueVK* q)            { return reinterpret_cast<VriQueue*>(q); }
-    inline VriCommandAllocator* ToHandle(CommandAllocatorVK* a){ return reinterpret_cast<VriCommandAllocator*>(a); }
-    inline VriCommandBuffer*   ToHandle(CommandBufferVK* c)    { return reinterpret_cast<VriCommandBuffer*>(c); }
-    inline VriBuffer*          ToHandle(BufferVK* b)           { return reinterpret_cast<VriBuffer*>(b); }
-    inline VriTexture*         ToHandle(TextureVK* t)          { return reinterpret_cast<VriTexture*>(t); }
-    inline VriDescriptor*      ToHandle(DescriptorVK* d)       { return reinterpret_cast<VriDescriptor*>(d); }
-    inline VriPipelineLayout*  ToHandle(PipelineLayoutVK* p)   { return reinterpret_cast<VriPipelineLayout*>(p); }
-    inline VriPipeline*        ToHandle(PipelineVK* p)         { return reinterpret_cast<VriPipeline*>(p); }
-    inline VriFence*           ToHandle(FenceVK* f)            { return reinterpret_cast<VriFence*>(f); }
-    inline VriMemory*          ToHandle(MemoryVK* m)           { return reinterpret_cast<VriMemory*>(m); }
-    inline VriDescriptorPool*  ToHandle(DescriptorPoolVK* p)   { return reinterpret_cast<VriDescriptorPool*>(p); }
-    inline VriDescriptorSet*   ToHandle(DescriptorSetVK* s)    { return reinterpret_cast<VriDescriptorSet*>(s); }
+    inline VriQueue*            ToHandle(QueueVK* q) { return reinterpret_cast<VriQueue*>(q); }
+    inline VriCommandAllocator* ToHandle(CommandAllocatorVK* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
+    inline VriCommandBuffer*    ToHandle(CommandBufferVK* c) { return reinterpret_cast<VriCommandBuffer*>(c); }
+    inline VriBuffer*           ToHandle(BufferVK* b) { return reinterpret_cast<VriBuffer*>(b); }
+    inline VriTexture*          ToHandle(TextureVK* t) { return reinterpret_cast<VriTexture*>(t); }
+    inline VriDescriptor*       ToHandle(DescriptorVK* d) { return reinterpret_cast<VriDescriptor*>(d); }
+    inline VriPipelineLayout*   ToHandle(PipelineLayoutVK* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
+    inline VriPipeline*         ToHandle(PipelineVK* p) { return reinterpret_cast<VriPipeline*>(p); }
+    inline VriFence*            ToHandle(FenceVK* f) { return reinterpret_cast<VriFence*>(f); }
+    inline VriMemory*           ToHandle(MemoryVK* m) { return reinterpret_cast<VriMemory*>(m); }
+    inline VriDescriptorPool*   ToHandle(DescriptorPoolVK* p) { return reinterpret_cast<VriDescriptorPool*>(p); }
+    inline VriDescriptorSet*    ToHandle(DescriptorSetVK* s) { return reinterpret_cast<VriDescriptorSet*>(s); }
 } // namespace vri::vk

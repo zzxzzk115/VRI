@@ -7,9 +7,9 @@
 
 TEST_CASE("D3D12: device creates and reports an adapter")
 {
-    VriDeviceCreationDesc desc{};
+    VriDeviceCreationDesc desc {};
     desc.graphicsAPI = VriGraphicsAPI_D3D12;
-    desc.bestEffort = VRI_TRUE;
+    desc.bestEffort  = VRI_TRUE;
 
     VriDevice* device = nullptr;
     if (vriCreateDevice(&desc, &device) != VriResult_Success)
@@ -18,7 +18,7 @@ TEST_CASE("D3D12: device creates and reports an adapter")
         return;
     }
 
-    VriCoreInterface core{};
+    VriCoreInterface core {};
     REQUIRE(vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core) == VriResult_Success);
 
     const VriDeviceDesc* dd = core.GetDeviceDesc(device);

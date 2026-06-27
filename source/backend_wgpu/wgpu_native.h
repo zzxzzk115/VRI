@@ -10,9 +10,9 @@
 #include <webgpu/webgpu.h>
 
 #if defined(__EMSCRIPTEN__)
-#    include <emscripten.h>
+#include <emscripten.h>
 #else
-#    include <webgpu/wgpu.h>
+#include <webgpu/wgpu.h>
 #endif
 
 namespace vri::wgpu

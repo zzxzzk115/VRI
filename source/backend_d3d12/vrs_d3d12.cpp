@@ -17,14 +17,22 @@ namespace vri::d3d12
         {
             switch (r)
             {
-                case VriShadingRate_1x1: return D3D12_SHADING_RATE_1X1;
-                case VriShadingRate_1x2: return D3D12_SHADING_RATE_1X2;
-                case VriShadingRate_2x1: return D3D12_SHADING_RATE_2X1;
-                case VriShadingRate_2x2: return D3D12_SHADING_RATE_2X2;
-                case VriShadingRate_2x4: return D3D12_SHADING_RATE_2X4;
-                case VriShadingRate_4x2: return D3D12_SHADING_RATE_4X2;
-                case VriShadingRate_4x4: return D3D12_SHADING_RATE_4X4;
-                default:                 return D3D12_SHADING_RATE_1X1;
+                case VriShadingRate_1x1:
+                    return D3D12_SHADING_RATE_1X1;
+                case VriShadingRate_1x2:
+                    return D3D12_SHADING_RATE_1X2;
+                case VriShadingRate_2x1:
+                    return D3D12_SHADING_RATE_2X1;
+                case VriShadingRate_2x2:
+                    return D3D12_SHADING_RATE_2X2;
+                case VriShadingRate_2x4:
+                    return D3D12_SHADING_RATE_2X4;
+                case VriShadingRate_4x2:
+                    return D3D12_SHADING_RATE_4X2;
+                case VriShadingRate_4x4:
+                    return D3D12_SHADING_RATE_4X4;
+                default:
+                    return D3D12_SHADING_RATE_1X1;
             }
         }
 
@@ -32,19 +40,26 @@ namespace vri::d3d12
         {
             switch (c)
             {
-                case VriShadingRateCombiner_Keep:    return D3D12_SHADING_RATE_COMBINER_PASSTHROUGH;
-                case VriShadingRateCombiner_Replace: return D3D12_SHADING_RATE_COMBINER_OVERRIDE;
-                case VriShadingRateCombiner_Min:     return D3D12_SHADING_RATE_COMBINER_MIN;
-                case VriShadingRateCombiner_Max:     return D3D12_SHADING_RATE_COMBINER_MAX;
-                case VriShadingRateCombiner_Sum:     return D3D12_SHADING_RATE_COMBINER_SUM;
-                default:                             return D3D12_SHADING_RATE_COMBINER_PASSTHROUGH;
+                case VriShadingRateCombiner_Keep:
+                    return D3D12_SHADING_RATE_COMBINER_PASSTHROUGH;
+                case VriShadingRateCombiner_Replace:
+                    return D3D12_SHADING_RATE_COMBINER_OVERRIDE;
+                case VriShadingRateCombiner_Min:
+                    return D3D12_SHADING_RATE_COMBINER_MIN;
+                case VriShadingRateCombiner_Max:
+                    return D3D12_SHADING_RATE_COMBINER_MAX;
+                case VriShadingRateCombiner_Sum:
+                    return D3D12_SHADING_RATE_COMBINER_SUM;
+                default:
+                    return D3D12_SHADING_RATE_COMBINER_PASSTHROUGH;
             }
         }
 
         void VRI_CALL CmdSetShadingRate(VriCommandBuffer* cmd, const VriShadingRateDesc* desc)
         {
-            if (!desc) return;
-            CommandBufferD3D12* c = CB(cmd);
+            if (!desc)
+                return;
+            CommandBufferD3D12*                                c = CB(cmd);
             Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList5> list5;
             if (FAILED(c->list.As(&list5)))
                 return;

@@ -18,14 +18,22 @@ namespace vri::vk
         {
             switch (rate)
             {
-                case VriShadingRate_1x1: return {1, 1};
-                case VriShadingRate_1x2: return {1, 2};
-                case VriShadingRate_2x1: return {2, 1};
-                case VriShadingRate_2x2: return {2, 2};
-                case VriShadingRate_2x4: return {2, 4};
-                case VriShadingRate_4x2: return {4, 2};
-                case VriShadingRate_4x4: return {4, 4};
-                default:                 return {1, 1};
+                case VriShadingRate_1x1:
+                    return {1, 1};
+                case VriShadingRate_1x2:
+                    return {1, 2};
+                case VriShadingRate_2x1:
+                    return {2, 1};
+                case VriShadingRate_2x2:
+                    return {2, 2};
+                case VriShadingRate_2x4:
+                    return {2, 4};
+                case VriShadingRate_4x2:
+                    return {4, 2};
+                case VriShadingRate_4x4:
+                    return {4, 4};
+                default:
+                    return {1, 1};
             }
         }
 
@@ -33,22 +41,28 @@ namespace vri::vk
         {
             switch (c)
             {
-                case VriShadingRateCombiner_Keep:    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
-                case VriShadingRateCombiner_Replace: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
-                case VriShadingRateCombiner_Min:     return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MIN_KHR;
-                case VriShadingRateCombiner_Max:     return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MAX_KHR;
-                case VriShadingRateCombiner_Sum:     return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MUL_KHR; // "Sum" == accumulate; VK exposes MUL
-                default:                             return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+                case VriShadingRateCombiner_Keep:
+                    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+                case VriShadingRateCombiner_Replace:
+                    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
+                case VriShadingRateCombiner_Min:
+                    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MIN_KHR;
+                case VriShadingRateCombiner_Max:
+                    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MAX_KHR;
+                case VriShadingRateCombiner_Sum:
+                    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MUL_KHR; // "Sum" == accumulate; VK exposes MUL
+                default:
+                    return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
             }
         }
 
         void VRI_CALL CmdSetShadingRate(VriCommandBuffer* cmd, const VriShadingRateDesc* desc)
         {
-            CommandBufferVK* c = CB(cmd);
+            CommandBufferVK*                         c  = CB(cmd);
             const PFN_vkCmdSetFragmentShadingRateKHR fn = c->device->Ext().CmdSetFragmentShadingRate;
             if (!fn || !desc)
                 return;
-            const VkExtent2D size = ToFragmentSize(desc->shadingRate);
+            const VkExtent2D                         size         = ToFragmentSize(desc->shadingRate);
             const VkFragmentShadingRateCombinerOpKHR combiners[2] = {
                 ToCombiner(desc->primitiveCombiner),
                 ToCombiner(desc->attachmentCombiner),

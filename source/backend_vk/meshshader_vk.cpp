@@ -13,7 +13,7 @@ namespace vri::vk
     namespace
     {
         CommandBufferVK* CB(VriCommandBuffer* h) { return reinterpret_cast<CommandBufferVK*>(h); }
-        BufferVK*        BUF(VriBuffer* h)       { return reinterpret_cast<BufferVK*>(h); }
+        BufferVK*        BUF(VriBuffer* h) { return reinterpret_cast<BufferVK*>(h); }
 
         void VRI_CALL CmdDrawMeshTasks(VriCommandBuffer* cmd, uint32_t x, uint32_t y, uint32_t z)
         {
@@ -22,7 +22,11 @@ namespace vri::vk
                 c->device->Ext().CmdDrawMeshTasks(c->cmd, x, y, z);
         }
 
-        void VRI_CALL CmdDrawMeshTasksIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
+        void VRI_CALL CmdDrawMeshTasksIndirect(VriCommandBuffer* cmd,
+                                               VriBuffer*        buffer,
+                                               uint64_t          offset,
+                                               uint32_t          drawNum,
+                                               uint32_t          stride)
         {
             CommandBufferVK* c = CB(cmd);
             if (c->device->Ext().CmdDrawMeshTasksIndirect)

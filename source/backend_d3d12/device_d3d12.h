@@ -27,11 +27,14 @@ namespace vri::d3d12
         // Each VriQueueType has its own D3D12 engine: Graphics->DIRECT, Compute->COMPUTE,
         // Transfer->COPY. Compute/Transfer run independently of graphics; cross-queue ordering
         // is the caller's job via timeline fences (QueueSubmit wait/signal).
-        QueueD3D12*          GetQueue(VriQueueType type) { return &m_queues[type < VriQueueType_Count ? type : VriQueueType_Graphics]; }
-        uint64_t             EnabledFeatures() const { return m_enabledFeatures; }
-        void                 ReportError(const char* message) const;
+        QueueD3D12* GetQueue(VriQueueType type)
+        {
+            return &m_queues[type < VriQueueType_Count ? type : VriQueueType_Graphics];
+        }
+        uint64_t EnabledFeatures() const { return m_enabledFeatures; }
+        void     ReportError(const char* message) const;
         // Route a backend diagnostic (D3D12 InfoQueue message) to the app's callback.
-        void                 Diagnostic(VriMessageSeverity severity, const char* message) const;
+        void Diagnostic(VriMessageSeverity severity, const char* message) const;
 
         // Bump-allocate one CPU render-target-view / depth-stencil-view descriptor.
         D3D12_CPU_DESCRIPTOR_HANDLE AllocRtv();
@@ -47,23 +50,23 @@ namespace vri::d3d12
         void      FillRegistry();
         VriResult CreateDescriptorHeaps();
 
-        ComPtr<IDXGIFactory4>        m_factory;
-        ComPtr<ID3D12Device>         m_device;
-        ComPtr<ID3D12InfoQueue1>     m_infoQueue;      // debug-layer message sink (validation)
-        DWORD                        m_msgCookie = 0;  // RegisterMessageCallback token
-        ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
-        ComPtr<ID3D12DescriptorHeap> m_rtvHeap;       // CPU-only RTV heap
-        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;       // CPU-only DSV heap
-        uint32_t                     m_rtvSize = 0;    // descriptor increment
-        uint32_t                     m_rtvNext = 0;    // bump cursor
-        uint32_t                     m_dsvSize = 0;
-        uint32_t                     m_dsvNext = 0;
-        static constexpr uint32_t    kRtvHeapSize = 256;
-        static constexpr uint32_t    kDsvHeapSize = 64;
-        QueueD3D12            m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
-        uint64_t              m_enabledFeatures = 0; // granted VriFeatureBits
-        VriDeviceDesc         m_desc = {};
-        VriCallbackInterface  m_callback = {};
+        ComPtr<IDXGIFactory4>          m_factory;
+        ComPtr<ID3D12Device>           m_device;
+        ComPtr<ID3D12InfoQueue1>       m_infoQueue;            // debug-layer message sink (validation)
+        DWORD                          m_msgCookie = 0;        // RegisterMessageCallback token
+        ComPtr<ID3D12CommandSignature> m_dispatchMeshSig;      // lazy, for indirect DispatchMesh
+        ComPtr<ID3D12DescriptorHeap>   m_rtvHeap;              // CPU-only RTV heap
+        ComPtr<ID3D12DescriptorHeap>   m_dsvHeap;              // CPU-only DSV heap
+        uint32_t                       m_rtvSize          = 0; // descriptor increment
+        uint32_t                       m_rtvNext          = 0; // bump cursor
+        uint32_t                       m_dsvSize          = 0;
+        uint32_t                       m_dsvNext          = 0;
+        static constexpr uint32_t      kRtvHeapSize       = 256;
+        static constexpr uint32_t      kDsvHeapSize       = 64;
+        QueueD3D12           m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
+        uint64_t             m_enabledFeatures            = 0;  // granted VriFeatureBits
+        VriDeviceDesc        m_desc                       = {};
+        VriCallbackInterface m_callback                   = {};
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

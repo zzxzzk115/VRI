@@ -24,17 +24,19 @@ namespace vri::gl
     // which texture/renderbuffer + mip is attached where (load/clear ops are per-pass).
     struct FboKey
     {
-        static constexpr int kMaxColor = 8;
-        uint32_t colorId[kMaxColor] = {};
-        uint32_t colorMip[kMaxColor] = {};
-        uint32_t colorCount = 0;
-        uint32_t depthId = 0;
-        uint32_t depthMip = 0;
-        bool operator==(const FboKey& o) const
+        static constexpr int kMaxColor           = 8;
+        uint32_t             colorId[kMaxColor]  = {};
+        uint32_t             colorMip[kMaxColor] = {};
+        uint32_t             colorCount          = 0;
+        uint32_t             depthId             = 0;
+        uint32_t             depthMip            = 0;
+        bool                 operator==(const FboKey& o) const
         {
-            if (colorCount != o.colorCount || depthId != o.depthId || depthMip != o.depthMip) return false;
+            if (colorCount != o.colorCount || depthId != o.depthId || depthMip != o.depthMip)
+                return false;
             for (uint32_t i = 0; i < colorCount; ++i)
-                if (colorId[i] != o.colorId[i] || colorMip[i] != o.colorMip[i]) return false;
+                if (colorId[i] != o.colorId[i] || colorMip[i] != o.colorMip[i])
+                    return false;
             return true;
         }
     };
@@ -42,10 +44,16 @@ namespace vri::gl
     {
         size_t operator()(const FboKey& k) const
         {
-            size_t h = 1469598103934665603ull;
-            auto mix = [&](uint32_t v) { h = (h ^ v) * 1099511628211ull; };
-            mix(k.colorCount); mix(k.depthId); mix(k.depthMip);
-            for (uint32_t i = 0; i < k.colorCount; ++i) { mix(k.colorId[i]); mix(k.colorMip[i]); }
+            size_t h   = 1469598103934665603ull;
+            auto   mix = [&](uint32_t v) { h = (h ^ v) * 1099511628211ull; };
+            mix(k.colorCount);
+            mix(k.depthId);
+            mix(k.depthMip);
+            for (uint32_t i = 0; i < k.colorCount; ++i)
+            {
+                mix(k.colorId[i]);
+                mix(k.colorMip[i]);
+            }
             return h;
         }
     };
@@ -65,7 +73,7 @@ namespace vri::gl
         bool     bufferStorage  = false; // GL 4.4: persistent-mapped buffers
         // Immutable texture storage (glTexStorage*) is GL 4.2+ AND core in GLES3/WebGL2;
         // the lone gap is desktop GL 4.1 (macOS), which falls back to glTexImage*.
-        bool     textureStorage = true;  // default true: ES/WebGL2 baseline always has it
+        bool textureStorage = true; // default true: ES/WebGL2 baseline always has it
     };
 
     class DeviceGL final : public core::DeviceBase
@@ -81,22 +89,22 @@ namespace vri::gl
         // Shader transpile target: GLSL version + ES profile. ES (and WebGL) lack
         // glClipControl/DSA, so the same non-DSA command path serves both; the Y
         // flip is done in-shader via SPIRV-Cross flip_vert_y (see core_gl.cpp).
-        bool                 IsES() const { return m_es; }
-        uint32_t             ShaderVersion() const { return m_shaderVersion; }
-        const GlFeatures&    Features() const { return m_features; }
-        GLFWwindow*          Window() const { return m_window; } // hidden context-owning window (macOS present)
+        bool              IsES() const { return m_es; }
+        uint32_t          ShaderVersion() const { return m_shaderVersion; }
+        const GlFeatures& Features() const { return m_features; }
+        GLFWwindow*       Window() const { return m_window; } // hidden context-owning window (macOS present)
 #if defined(VRI_GL_EGL)
         // EGL handles for the windowed swapchain (build a window surface that shares this
         // device's display + config, then retarget this context to present). On Linux this
         // serves both desktop GL and native GLES.
-        void*                EglDisplay() const { return m_eglDisplay; }
-        void*                EglConfig() const { return m_eglConfig; }
-        void*                EglContext() const { return m_eglContext; }
-        void*                EglSurface() const { return m_eglSurface; }
+        void* EglDisplay() const { return m_eglDisplay; }
+        void* EglConfig() const { return m_eglConfig; }
+        void* EglContext() const { return m_eglContext; }
+        void* EglSurface() const { return m_eglSurface; }
 #endif
-        void                 ReportError(const char* message) const;
+        void ReportError(const char* message) const;
         // Route a backend diagnostic (GL KHR_debug message) to the app's callback.
-        void                 Diagnostic(VriMessageSeverity severity, const char* message) const;
+        void Diagnostic(VriMessageSeverity severity, const char* message) const;
 
         // Render-pass FBO cache. AcquireFbo returns a cached FBO for the attachment set
         // (isNew=true means the caller must configure its attachments once); textures
@@ -115,25 +123,25 @@ namespace vri::gl
         bool InitEGL(const void* nativeDisplay);
 #endif
 
-        GLFWwindow*          m_window = nullptr; // hidden context-owning window (desktop/web)
+        GLFWwindow* m_window = nullptr; // hidden context-owning window (desktop/web)
 #if defined(VRI_GL_EGL)
         // EGL handles (void* to keep <EGL/egl.h> out of this header; EGLDisplay/EGLContext/
         // EGLSurface/EGLConfig are all pointer types). m_eglConfig is kept so the windowed
         // swapchain can build a window surface compatible with this context.
-        void*                m_eglDisplay = nullptr;
-        void*                m_eglContext = nullptr;
-        void*                m_eglSurface = nullptr; // EGL_NO_SURFACE when surfaceless
-        void*                m_eglConfig  = nullptr;
+        void* m_eglDisplay = nullptr;
+        void* m_eglContext = nullptr;
+        void* m_eglSurface = nullptr; // EGL_NO_SURFACE when surfaceless
+        void* m_eglConfig  = nullptr;
 #endif
-        GLuint              m_vao = 0;           // default VAO (GL core requires one bound)
-        bool                m_es = false;        // OpenGL ES / WebGL profile
-        uint32_t            m_shaderVersion = 420; // GLSL #version for SPIRV-Cross
-        GlFeatures          m_features = {};       // detected desktop-GL capability tiers
-        std::unordered_map<FboKey, GLuint, FboKeyHash> m_fboCache; // render-pass FBOs by attachment set
-        VriGraphicsAPI      m_api = VriGraphicsAPI_OpenGL;
-        QueueGL             m_queue = {};
-        VriDeviceDesc       m_desc = {};
-        VriCallbackInterface m_callback = {};
+        GLuint                                         m_vao           = 0; // default VAO (GL core requires one bound)
+        bool                                           m_es            = false; // OpenGL ES / WebGL profile
+        uint32_t                                       m_shaderVersion = 420;   // GLSL #version for SPIRV-Cross
+        GlFeatures                                     m_features      = {};    // detected desktop-GL capability tiers
+        std::unordered_map<FboKey, GLuint, FboKeyHash> m_fboCache;              // render-pass FBOs by attachment set
+        VriGraphicsAPI                                 m_api      = VriGraphicsAPI_OpenGL;
+        QueueGL                                        m_queue    = {};
+        VriDeviceDesc                                  m_desc     = {};
+        VriCallbackInterface                           m_callback = {};
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

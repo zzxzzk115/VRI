@@ -6,9 +6,9 @@
 
 TEST_CASE("OpenGL: device creates and reports a renderer")
 {
-    VriDeviceCreationDesc desc{};
+    VriDeviceCreationDesc desc {};
     desc.graphicsAPI = VriGraphicsAPI_OpenGL;
-    desc.bestEffort = VRI_TRUE;
+    desc.bestEffort  = VRI_TRUE;
 
     VriDevice* device = nullptr;
     if (vriCreateDevice(&desc, &device) != VriResult_Success)
@@ -17,7 +17,7 @@ TEST_CASE("OpenGL: device creates and reports a renderer")
         return;
     }
 
-    VriCoreInterface core{};
+    VriCoreInterface core {};
     REQUIRE(vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core) == VriResult_Success);
 
     const VriDeviceDesc* dd = core.GetDeviceDesc(device);

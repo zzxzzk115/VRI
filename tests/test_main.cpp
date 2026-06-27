@@ -18,7 +18,7 @@ TEST_CASE("vriCreateDevice rejects null arguments")
 
 TEST_CASE("unsupported backend -> Unsupported, no leak via RAII")
 {
-    VriDeviceCreationDesc desc{};
+    VriDeviceCreationDesc desc {};
     // D3D11 has no backend implementation anywhere (the option only sets a define;
     // there is no source/backend_d3d11 and no dispatch case), so it always reports
     // Unsupported regardless of platform or which backends are enabled. (Metal can no

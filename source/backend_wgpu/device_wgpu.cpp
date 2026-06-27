@@ -15,7 +15,8 @@ namespace vri::wgpu
         {
             if (!sv.data || dstSize == 0)
             {
-                if (dstSize) dst[0] = '\0';
+                if (dstSize)
+                    dst[0] = '\0';
                 return;
             }
             size_t n = sv.length;
@@ -29,7 +30,7 @@ namespace vri::wgpu
 
         struct AdapterRequest
         {
-            bool        done = false;
+            bool        done    = false;
             WGPUAdapter adapter = nullptr;
         };
 
@@ -43,7 +44,7 @@ namespace vri::wgpu
 
         struct DeviceRequest
         {
-            bool       done = false;
+            bool       done   = false;
             WGPUDevice device = nullptr;
         };
 
@@ -62,8 +63,12 @@ namespace vri::wgpu
         void OnUncapturedError(const WGPUDevice*, WGPUErrorType type, WGPUStringView message, void* ud1, void*)
         {
             char buf[1024];
-            std::snprintf(buf, sizeof(buf), "uncaptured error (type %d): %.*s",
-                          static_cast<int>(type), static_cast<int>(message.length), message.data ? message.data : "");
+            std::snprintf(buf,
+                          sizeof(buf),
+                          "uncaptured error (type %d): %.*s",
+                          static_cast<int>(type),
+                          static_cast<int>(message.length),
+                          message.data ? message.data : "");
             if (const auto* dev = static_cast<const DeviceWGPU*>(ud1))
                 dev->Diagnostic(VriMessageSeverity_Error, buf);
             else
@@ -104,7 +109,7 @@ namespace vri::wgpu
             m_callback = *desc.callbackInterface;
 
         WGPUInstanceDescriptor instanceDesc = {};
-        m_instance = wgpuCreateInstance(&instanceDesc);
+        m_instance                          = wgpuCreateInstance(&instanceDesc);
         if (!m_instance)
         {
             ReportError("wgpuCreateInstance failed");
@@ -112,13 +117,13 @@ namespace vri::wgpu
         }
 
         // request adapter (async; pumped via ProcessEvents)
-        AdapterRequest areq;
-        WGPURequestAdapterOptions aopts = {};
-        aopts.powerPreference = WGPUPowerPreference_HighPerformance;
+        AdapterRequest            areq;
+        WGPURequestAdapterOptions aopts    = {};
+        aopts.powerPreference              = WGPUPowerPreference_HighPerformance;
         WGPURequestAdapterCallbackInfo acb = {};
-        acb.mode = kCallbackMode;
-        acb.callback = OnAdapter;
-        acb.userdata1 = &areq;
+        acb.mode                           = kCallbackMode;
+        acb.callback                       = OnAdapter;
+        acb.userdata1                      = &areq;
         wgpuInstanceRequestAdapter(m_instance, &aopts, acb);
         for (int i = 0; i < 100000 && !areq.done; ++i)
             PumpInstance(m_instance);
@@ -130,14 +135,14 @@ namespace vri::wgpu
         m_adapter = areq.adapter;
 
         // request device
-        DeviceRequest dreq;
-        WGPUDeviceDescriptor deviceDesc = {};
-        deviceDesc.uncapturedErrorCallbackInfo.callback = OnUncapturedError;
+        DeviceRequest        dreq;
+        WGPUDeviceDescriptor deviceDesc                  = {};
+        deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
-        WGPURequestDeviceCallbackInfo dcb = {};
-        dcb.mode = kCallbackMode;
-        dcb.callback = OnDevice;
-        dcb.userdata1 = &dreq;
+        WGPURequestDeviceCallbackInfo dcb                = {};
+        dcb.mode                                         = kCallbackMode;
+        dcb.callback                                     = OnDevice;
+        dcb.userdata1                                    = &dreq;
         wgpuAdapterRequestDevice(m_adapter, &deviceDesc, dcb);
         for (int i = 0; i < 100000 && !dreq.done; ++i)
             PumpInstance(m_instance);
@@ -146,10 +151,10 @@ namespace vri::wgpu
             ReportError("wgpuAdapterRequestDevice failed");
             return VriResult_Failure;
         }
-        m_device = dreq.device;
-        m_queue = wgpuDeviceGetQueue(m_device);
+        m_device          = dreq.device;
+        m_queue           = wgpuDeviceGetQueue(m_device);
         m_queueObj.device = this;
-        m_queueObj.queue = m_queue;
+        m_queueObj.queue  = m_queue;
 
         FillDeviceDesc();
         FillRegistry();
@@ -158,7 +163,7 @@ namespace vri::wgpu
 
     void DeviceWGPU::FillDeviceDesc()
     {
-        m_desc = {};
+        m_desc             = {};
         m_desc.graphicsAPI = VriGraphicsAPI_WebGPU;
 
         WGPUAdapterInfo info = {};
@@ -168,24 +173,32 @@ namespace vri::wgpu
         m_desc.adapter.vendorId = info.vendorID;
         switch (info.adapterType)
         {
-            case WGPUAdapterType_DiscreteGPU:   m_desc.adapter.type = VriAdapterType_Discrete; break;
-            case WGPUAdapterType_IntegratedGPU: m_desc.adapter.type = VriAdapterType_Integrated; break;
-            case WGPUAdapterType_CPU:           m_desc.adapter.type = VriAdapterType_Software; break;
-            default:                            m_desc.adapter.type = VriAdapterType_Unknown; break;
+            case WGPUAdapterType_DiscreteGPU:
+                m_desc.adapter.type = VriAdapterType_Discrete;
+                break;
+            case WGPUAdapterType_IntegratedGPU:
+                m_desc.adapter.type = VriAdapterType_Integrated;
+                break;
+            case WGPUAdapterType_CPU:
+                m_desc.adapter.type = VriAdapterType_Software;
+                break;
+            default:
+                m_desc.adapter.type = VriAdapterType_Unknown;
+                break;
         }
         wgpuAdapterInfoFreeMembers(info);
 
         WGPULimits limits = {};
         if (wgpuAdapterGetLimits(m_adapter, &limits) == WGPUStatus_Success)
         {
-            m_desc.texture1DMaxDim = limits.maxTextureDimension1D;
-            m_desc.texture2DMaxDim = limits.maxTextureDimension2D;
-            m_desc.texture3DMaxDim = limits.maxTextureDimension3D;
-            m_desc.textureArrayLayerMaxNum = limits.maxTextureArrayLayers;
-            m_desc.attachmentColorMaxNum = limits.maxColorAttachments;
-            m_desc.bufferMaxSize = limits.maxBufferSize;
+            m_desc.texture1DMaxDim               = limits.maxTextureDimension1D;
+            m_desc.texture2DMaxDim               = limits.maxTextureDimension2D;
+            m_desc.texture3DMaxDim               = limits.maxTextureDimension3D;
+            m_desc.textureArrayLayerMaxNum       = limits.maxTextureArrayLayers;
+            m_desc.attachmentColorMaxNum         = limits.maxColorAttachments;
+            m_desc.bufferMaxSize                 = limits.maxBufferSize;
             m_desc.constantBufferOffsetAlignment = limits.minUniformBufferOffsetAlignment;
-            m_desc.storageBufferOffsetAlignment = limits.minStorageBufferOffsetAlignment;
+            m_desc.storageBufferOffsetAlignment  = limits.minStorageBufferOffsetAlignment;
         }
         m_desc.viewportMaxNum = 1;
         for (int t = 0; t < VriQueueType_Count; ++t)
@@ -195,7 +208,7 @@ namespace vri::wgpu
         m_desc.hasComputeShader = VRI_TRUE;
         // WebGPU has no geometry or tessellation stages.
         m_desc.hasGeometryShader = VRI_FALSE;
-        m_desc.hasTessellation = VRI_FALSE;
+        m_desc.hasTessellation   = VRI_FALSE;
     }
 
     void DeviceWGPU::FillRegistry()
@@ -207,7 +220,7 @@ namespace vri::wgpu
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)
     {
         DeviceWGPU* device = new DeviceWGPU();
-        outResult = device->Init(desc);
+        outResult          = device->Init(desc);
         if (outResult != VriResult_Success)
         {
             delete device;

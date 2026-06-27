@@ -10,23 +10,24 @@ namespace vri::vk
 {
     namespace
     {
-        inline DeviceVK*       Dev(VriDevice* h)        { return reinterpret_cast<DeviceVK*>(h); }
-        inline const DeviceVK* Dev(const VriDevice* h)  { return reinterpret_cast<const DeviceVK*>(h); }
+        inline DeviceVK*       Dev(VriDevice* h) { return reinterpret_cast<DeviceVK*>(h); }
+        inline const DeviceVK* Dev(const VriDevice* h) { return reinterpret_cast<const DeviceVK*>(h); }
 
         VriResult VRI_CALL GetDeviceNativeHandles(const VriDevice* device, VriDeviceNativeHandles* out)
         {
-            if (!out) return VriResult_InvalidArgument;
-            DeviceVK* d = const_cast<DeviceVK*>(Dev(device));
+            if (!out)
+                return VriResult_InvalidArgument;
+            DeviceVK*      d   = const_cast<DeviceVK*>(Dev(device));
             const QueueVK* gfx = d->GetQueue(VriQueueType_Graphics);
 
-            *out = VriDeviceNativeHandles{};
-            out->api = VriGraphicsAPI_Vulkan;
-            out->u.vulkan.instance = d->Instance();
-            out->u.vulkan.physicalDevice = d->PhysicalDevice();
-            out->u.vulkan.device = d->Device();
-            out->u.vulkan.graphicsQueue = gfx->queue;
+            *out                                   = VriDeviceNativeHandles {};
+            out->api                               = VriGraphicsAPI_Vulkan;
+            out->u.vulkan.instance                 = d->Instance();
+            out->u.vulkan.physicalDevice           = d->PhysicalDevice();
+            out->u.vulkan.device                   = d->Device();
+            out->u.vulkan.graphicsQueue            = gfx->queue;
             out->u.vulkan.graphicsQueueFamilyIndex = gfx->familyIndex;
-            out->u.vulkan.graphicsQueueIndex = gfx->indexInFamily;
+            out->u.vulkan.graphicsQueueIndex       = gfx->indexInFamily;
             return VriResult_Success;
         }
 
@@ -47,20 +48,22 @@ namespace vri::vk
 
         VriResult VRI_CALL WrapTexture(VriDevice* device, const VriWrapTextureDesc* desc, VriTexture** out)
         {
-            if (!desc || !desc->nativeTexture) return VriResult_InvalidArgument;
+            if (!desc || !desc->nativeTexture)
+                return VriResult_InvalidArgument;
             DeviceVK* d = Dev(device);
 
-            TextureVK* t = new TextureVK{};
-            t->device = d;
-            t->image = static_cast<VkImage>(desc->nativeTexture);
+            TextureVK* t  = new TextureVK {};
+            t->device     = d;
+            t->image      = static_cast<VkImage>(desc->nativeTexture);
             t->allocation = VK_NULL_HANDLE;
-            t->format = ToVkFormat(desc->desc.format);
-            t->extent = {desc->desc.width, desc->desc.height ? desc->desc.height : 1u, desc->desc.depth ? desc->desc.depth : 1u};
-            t->mipNum = desc->desc.mipNum ? desc->desc.mipNum : 1u;
+            t->format     = ToVkFormat(desc->desc.format);
+            t->extent     = {
+                desc->desc.width, desc->desc.height ? desc->desc.height : 1u, desc->desc.depth ? desc->desc.depth : 1u};
+            t->mipNum   = desc->desc.mipNum ? desc->desc.mipNum : 1u;
             t->layerNum = desc->desc.layerNum ? desc->desc.layerNum : 1u;
-            t->type = ToVkImageType(desc->desc.type);
-            t->owned = false; // borrowed: DestroyTexture won't free it
-            *out = ToHandle(t);
+            t->type     = ToVkImageType(desc->desc.type);
+            t->owned    = false; // borrowed: DestroyTexture won't free it
+            *out        = ToHandle(t);
             return VriResult_Success;
         }
 

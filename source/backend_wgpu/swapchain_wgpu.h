@@ -3,8 +3,8 @@
 
 #include <webgpu/webgpu.h>
 
-#include <vri/vri.h>
 #include <vri/ext/vri_ext_swapchain.h>
+#include <vri/vri.h>
 
 #include "objects_wgpu.h"
 
@@ -22,8 +22,8 @@ namespace vri::wgpu
         // WebGPU hands back the current frame texture on acquire; we expose a
         // single stable VRI texture handle whose underlying WGPUTexture is
         // refreshed each AcquireNextTexture.
-        TextureWGPU       current;
-        WGPUTexture       acquired; // owned until Present
+        TextureWGPU current;
+        WGPUTexture acquired; // owned until Present
     };
 
     inline VriSwapChain* ToHandle(SwapChainWGPU* s) { return reinterpret_cast<VriSwapChain*>(s); }
