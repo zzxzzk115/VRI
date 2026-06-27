@@ -13,6 +13,22 @@ permissions:
   contents: read
 
 jobs:
+  # Enforce clang-format over source/, examples/, tests/ (one unified standard, the root
+  # .clang-format). Pinned to 20.1.0 so CI and local `clang-format` agree exactly. Generated
+  # shader headers (tests/shaders/) and the Objective-C++ Metal backend are exempt via their own
+  # DisableFormat .clang-format files; the C ABI-cleanliness file (.c) is skipped (Language: Cpp).
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install clang-format 20.1.0
+        run: pip install clang-format==20.1.0
+      - name: Check formatting (source/ examples/ tests/)
+        run: |
+          files=$(git ls-files source examples tests | grep -E '\.(cpp|cc|h|hpp)$')
+          echo "$files" | xargs clang-format --dry-run --Werror
+
   # Compile every backend and run the doctest suite. GPU backends self-skip when no
   # device is available, so this is a reliable compile-and-run gate; on Linux we
   # install Mesa's software rasterizers (lavapipe / llvmpipe) so Vulkan + GL + WebGPU
