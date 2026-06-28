@@ -1348,6 +1348,37 @@ namespace vri::vk
         {
             vkCmdDrawIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset, drawNum, stride);
         }
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer* cmd,
+                                             VriBuffer*        buffer,
+                                             uint64_t          offset,
+                                             uint32_t          drawNum,
+                                             uint32_t          stride)
+        {
+            vkCmdDrawIndexedIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset, drawNum, stride);
+        }
+        // vkCmdDraw[Indexed]IndirectCount is core Vulkan 1.2 (VRI requests 1.3) - always available.
+        void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
+                                           VriBuffer*        buffer,
+                                           uint64_t          offset,
+                                           VriBuffer*        countBuffer,
+                                           uint64_t          countOffset,
+                                           uint32_t          maxDrawNum,
+                                           uint32_t          stride)
+        {
+            vkCmdDrawIndirectCount(
+                CB(cmd)->cmd, Buf(buffer)->buffer, offset, Buf(countBuffer)->buffer, countOffset, maxDrawNum, stride);
+        }
+        void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
+                                                  VriBuffer*        buffer,
+                                                  uint64_t          offset,
+                                                  VriBuffer*        countBuffer,
+                                                  uint64_t          countOffset,
+                                                  uint32_t          maxDrawNum,
+                                                  uint32_t          stride)
+        {
+            vkCmdDrawIndexedIndirectCount(
+                CB(cmd)->cmd, Buf(buffer)->buffer, offset, Buf(countBuffer)->buffer, countOffset, maxDrawNum, stride);
+        }
 
         void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
         {
@@ -1588,6 +1619,9 @@ namespace vri::vk
             CmdDraw,
             CmdDrawIndexed,
             CmdDrawIndirect,
+            CmdDrawIndexedIndirect,
+            CmdDrawIndirectCount,
+            CmdDrawIndexedIndirectCount,
             CmdDispatch,
             CmdDispatchIndirect,
             CmdBarrier,

@@ -96,6 +96,7 @@ namespace vri::vk
         bool            m_hasCustomBorderColor    = false;
         bool            m_hasPipelineStats        = false;
         bool            m_hasCalibratedTimestamps = false;
+        bool            m_hasDrawIndirectCount    = false;
         VkTimeDomainKHR m_hostTimeDomain          = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
         ExtFunctions    m_ext                     = {};
 

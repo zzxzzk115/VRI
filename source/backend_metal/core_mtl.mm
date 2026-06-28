@@ -1144,6 +1144,17 @@ namespace vri::mtl
                               indirectBuffer:Buf(buffer)->buffer
                         indirectBufferOffset:offset + (uint64_t)i * stride];
         }
+        // Indexed-indirect (drawIndexedPrimitives:indirectBuffer:) lands in a follow-up. Metal has no
+        // count-buffer draw outside indirect command buffers, so those stay unsupported.
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        void VRI_CALL
+        CmdDrawIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
+        {
+        }
+        void VRI_CALL
+        CmdDrawIndexedIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
+        {
+        }
 
         void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
         {
@@ -1362,6 +1373,9 @@ namespace vri::mtl
             t.CmdDraw = CmdDraw;
             t.CmdDrawIndexed = CmdDrawIndexed;
             t.CmdDrawIndirect = CmdDrawIndirect;
+            t.CmdDrawIndexedIndirect      = CmdDrawIndexedIndirect;
+            t.CmdDrawIndirectCount        = CmdDrawIndirectCount;
+            t.CmdDrawIndexedIndirectCount = CmdDrawIndexedIndirectCount;
             t.CmdDispatch = CmdDispatch;
             t.CmdDispatchIndirect = CmdDispatchIndirect;
             t.CmdBarrier = CmdBarrier;

@@ -383,6 +383,9 @@ namespace vri::vk
         VkPhysicalDeviceVulkan12Features f12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         f12.timelineSemaphore                = VK_TRUE;
         f12.bufferDeviceAddress              = VK_TRUE;
+        // GPU-driven draw count (CmdDraw[Indexed]IndirectCount). Gated by a feature in 1.2+.
+        f12.drawIndirectCount  = v12Sup.drawIndirectCount;
+        m_hasDrawIndirectCount = v12Sup.drawIndirectCount == VK_TRUE;
         // Chain f12 -> (f13) or (dynRenderKhr -> sync2Khr); record where optional features append.
         void** baseTail = nullptr;
         if (useVk13Core)
@@ -782,6 +785,7 @@ namespace vri::vk
         m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasPipelineStatistics   = m_hasPipelineStats ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCalibratedTimestamps = m_hasCalibratedTimestamps ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasDrawIndirectCount    = m_hasDrawIndirectCount ? VRI_TRUE : VRI_FALSE;
         m_desc.hasConservativeRaster   = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor         = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;

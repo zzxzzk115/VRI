@@ -1586,6 +1586,15 @@ namespace vri::d3d12
                 d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
         }
         void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        // Indexed-indirect + the indirect-count variants land in a follow-up (ID3D12CommandSignature +
+        // ExecuteIndirect with a count buffer); hasDrawIndirectCount stays false until then.
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        void VRI_CALL
+        CmdDrawIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
+        {}
+        void VRI_CALL
+        CmdDrawIndexedIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
+        {}
         void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
         {
             CB(cmd)->list->Dispatch(d->x, d->y, d->z);
@@ -1742,6 +1751,9 @@ namespace vri::d3d12
             CmdDraw,
             CmdDrawIndexed,
             CmdDrawIndirect,
+            CmdDrawIndexedIndirect,
+            CmdDrawIndirectCount,
+            CmdDrawIndexedIndirectCount,
             CmdDispatch,
             CmdDispatchIndirect,
             CmdBarrier,

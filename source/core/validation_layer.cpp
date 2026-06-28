@@ -435,6 +435,49 @@ namespace vri::core
                 return;
             c->dev->core.CmdDrawIndirect(c->real, b, off, n, s);
         }
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer* cmd, VriBuffer* b, uint64_t off, uint32_t n, uint32_t s)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!InsideOk(c, "CmdDrawIndexedIndirect outside a render pass"))
+                return;
+            c->dev->core.CmdDrawIndexedIndirect(c->real, b, off, n, s);
+        }
+        void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
+                                           VriBuffer*        b,
+                                           uint64_t          off,
+                                           VriBuffer*        cb,
+                                           uint64_t          coff,
+                                           uint32_t          maxN,
+                                           uint32_t          s)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!InsideOk(c, "CmdDrawIndirectCount outside a render pass"))
+                return;
+            if (c->dev->desc.hasDrawIndirectCount == VRI_FALSE)
+            {
+                Err(c->dev, "CmdDrawIndirectCount called but VriDeviceDesc::hasDrawIndirectCount is false");
+                return;
+            }
+            c->dev->core.CmdDrawIndirectCount(c->real, b, off, cb, coff, maxN, s);
+        }
+        void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
+                                                  VriBuffer*        b,
+                                                  uint64_t          off,
+                                                  VriBuffer*        cb,
+                                                  uint64_t          coff,
+                                                  uint32_t          maxN,
+                                                  uint32_t          s)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!InsideOk(c, "CmdDrawIndexedIndirectCount outside a render pass"))
+                return;
+            if (c->dev->desc.hasDrawIndirectCount == VRI_FALSE)
+            {
+                Err(c->dev, "CmdDrawIndexedIndirectCount called but VriDeviceDesc::hasDrawIndirectCount is false");
+                return;
+            }
+            c->dev->core.CmdDrawIndexedIndirectCount(c->real, b, off, cb, coff, maxN, s);
+        }
         void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
         {
             CmdBufVal* c = CV(cmd);
@@ -797,58 +840,61 @@ namespace vri::core
         {
             VriCoreInterface t = d->core; // start from the real table (resource plane passes through)
             // control plane -> validating wrappers
-            t.GetDeviceDesc              = GetDeviceDesc;
-            t.GetFormatSupport           = GetFormatSupport;
-            t.GetQueue                   = GetQueue;
-            t.CreateCommandAllocator     = CreateCommandAllocator;
-            t.ResetCommandAllocator      = ResetCommandAllocator;
-            t.DestroyCommandAllocator    = DestroyCommandAllocator;
-            t.CreateCommandBuffer        = CreateCommandBuffer;
-            t.BeginCommandBuffer         = BeginCommandBuffer;
-            t.EndCommandBuffer           = EndCommandBuffer;
-            t.CreateBuffer               = CreateBuffer;
-            t.CreateTexture              = CreateTexture;
-            t.GetBufferMemoryDesc        = GetBufferMemoryDesc;
-            t.GetTextureMemoryDesc       = GetTextureMemoryDesc;
-            t.AllocateMemory             = AllocateMemory;
-            t.BindBufferMemory           = BindBufferMemory;
-            t.BindTextureMemory          = BindTextureMemory;
-            t.CreateBufferView           = CreateBufferView;
-            t.CreateTextureView          = CreateTextureView;
-            t.CreateSampler              = CreateSampler;
-            t.CreatePipelineLayout       = CreatePipelineLayout;
-            t.CreateGraphicsPipeline     = CreateGraphicsPipeline;
-            t.CreateComputePipeline      = CreateComputePipeline;
-            t.CreateDescriptorPool       = CreateDescriptorPool;
-            t.CreateFence                = CreateFence;
-            t.DestroyFence               = DestroyFence;
-            t.GetFenceValue              = GetFenceValue;
-            t.Wait                       = Wait;
-            t.CmdBeginRendering          = CmdBeginRendering;
-            t.CmdEndRendering            = CmdEndRendering;
-            t.CmdSetViewports            = CmdSetViewports;
-            t.CmdSetScissors             = CmdSetScissors;
-            t.CmdSetPipelineLayout       = CmdSetPipelineLayout;
-            t.CmdSetPipeline             = CmdSetPipeline;
-            t.CmdSetDescriptorSet        = CmdSetDescriptorSet;
-            t.CmdSetConstants            = CmdSetConstants;
-            t.CmdSetVertexBuffers        = CmdSetVertexBuffers;
-            t.CmdSetIndexBuffer          = CmdSetIndexBuffer;
-            t.CmdDraw                    = CmdDraw;
-            t.CmdDrawIndexed             = CmdDrawIndexed;
-            t.CmdDrawIndirect            = CmdDrawIndirect;
-            t.CmdDispatch                = CmdDispatch;
-            t.CmdDispatchIndirect        = CmdDispatchIndirect;
-            t.CmdBarrier                 = CmdBarrier;
-            t.CmdCopyBuffer              = CmdCopyBuffer;
-            t.CmdCopyTexture             = CmdCopyTexture;
-            t.CmdUploadBufferToTexture   = CmdUploadBufferToTexture;
-            t.CmdReadbackTextureToBuffer = CmdReadbackTextureToBuffer;
-            t.CmdBeginDebugGroup         = CmdBeginDebugGroup;
-            t.CmdEndDebugGroup           = CmdEndDebugGroup;
-            t.QueueSubmit                = QueueSubmit;
-            t.QueueWaitIdle              = QueueWaitIdle;
-            t.DeviceWaitIdle             = DeviceWaitIdle;
+            t.GetDeviceDesc               = GetDeviceDesc;
+            t.GetFormatSupport            = GetFormatSupport;
+            t.GetQueue                    = GetQueue;
+            t.CreateCommandAllocator      = CreateCommandAllocator;
+            t.ResetCommandAllocator       = ResetCommandAllocator;
+            t.DestroyCommandAllocator     = DestroyCommandAllocator;
+            t.CreateCommandBuffer         = CreateCommandBuffer;
+            t.BeginCommandBuffer          = BeginCommandBuffer;
+            t.EndCommandBuffer            = EndCommandBuffer;
+            t.CreateBuffer                = CreateBuffer;
+            t.CreateTexture               = CreateTexture;
+            t.GetBufferMemoryDesc         = GetBufferMemoryDesc;
+            t.GetTextureMemoryDesc        = GetTextureMemoryDesc;
+            t.AllocateMemory              = AllocateMemory;
+            t.BindBufferMemory            = BindBufferMemory;
+            t.BindTextureMemory           = BindTextureMemory;
+            t.CreateBufferView            = CreateBufferView;
+            t.CreateTextureView           = CreateTextureView;
+            t.CreateSampler               = CreateSampler;
+            t.CreatePipelineLayout        = CreatePipelineLayout;
+            t.CreateGraphicsPipeline      = CreateGraphicsPipeline;
+            t.CreateComputePipeline       = CreateComputePipeline;
+            t.CreateDescriptorPool        = CreateDescriptorPool;
+            t.CreateFence                 = CreateFence;
+            t.DestroyFence                = DestroyFence;
+            t.GetFenceValue               = GetFenceValue;
+            t.Wait                        = Wait;
+            t.CmdBeginRendering           = CmdBeginRendering;
+            t.CmdEndRendering             = CmdEndRendering;
+            t.CmdSetViewports             = CmdSetViewports;
+            t.CmdSetScissors              = CmdSetScissors;
+            t.CmdSetPipelineLayout        = CmdSetPipelineLayout;
+            t.CmdSetPipeline              = CmdSetPipeline;
+            t.CmdSetDescriptorSet         = CmdSetDescriptorSet;
+            t.CmdSetConstants             = CmdSetConstants;
+            t.CmdSetVertexBuffers         = CmdSetVertexBuffers;
+            t.CmdSetIndexBuffer           = CmdSetIndexBuffer;
+            t.CmdDraw                     = CmdDraw;
+            t.CmdDrawIndexed              = CmdDrawIndexed;
+            t.CmdDrawIndirect             = CmdDrawIndirect;
+            t.CmdDrawIndexedIndirect      = CmdDrawIndexedIndirect;
+            t.CmdDrawIndirectCount        = CmdDrawIndirectCount;
+            t.CmdDrawIndexedIndirectCount = CmdDrawIndexedIndirectCount;
+            t.CmdDispatch                 = CmdDispatch;
+            t.CmdDispatchIndirect         = CmdDispatchIndirect;
+            t.CmdBarrier                  = CmdBarrier;
+            t.CmdCopyBuffer               = CmdCopyBuffer;
+            t.CmdCopyTexture              = CmdCopyTexture;
+            t.CmdUploadBufferToTexture    = CmdUploadBufferToTexture;
+            t.CmdReadbackTextureToBuffer  = CmdReadbackTextureToBuffer;
+            t.CmdBeginDebugGroup          = CmdBeginDebugGroup;
+            t.CmdEndDebugGroup            = CmdEndDebugGroup;
+            t.QueueSubmit                 = QueueSubmit;
+            t.QueueWaitIdle               = QueueWaitIdle;
+            t.DeviceWaitIdle              = DeviceWaitIdle;
             // DestroyBuffer/MapBuffer/UnmapBuffer/GetBufferDeviceAddress/DestroyTexture/FreeMemory/
             // DestroyDescriptor/DestroyPipelineLayout/DestroyPipeline/ResetDescriptorPool/
             // DestroyDescriptorPool/AllocateDescriptorSets/UpdateDescriptorRanges/SetDebugName:

@@ -114,6 +114,12 @@ Notes:
   restores the linked program via `glProgramBinary`, skipping the GLSL compile + link). WebGPU and
   WebGL 2 expose no cache blob (their runtime caches shaders internally), so they report
   `Unsupported`.
+- **GPU-driven draw count.** `CmdDrawIndirectCount` / `CmdDrawIndexedIndirectCount` take the *number*
+  of draws from a GPU buffer (a `uint32` at an offset, clamped to `maxDrawNum`) instead of the CPU —
+  so a compute pass can decide how many draws to issue. Gated by `VriDeviceDesc::hasDrawIndirectCount`.
+  On **Vulkan** now; **Direct3D 12** (`ExecuteIndirect` with a count buffer) and **desktop OpenGL**
+  (`glMultiDraw*IndirectCount`) follow. (Plain `CmdDrawIndirect` / `CmdDrawIndexedIndirect`, with a
+  CPU-known count, are separate and more widely supported.)
 
 ## Building
 

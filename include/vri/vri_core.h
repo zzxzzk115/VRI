@@ -131,7 +131,14 @@ typedef struct VriCoreInterface
     void (VRI_CALL *CmdSetIndexBuffer)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriIndexType indexType);
     void (VRI_CALL *CmdDraw)(VriCommandBuffer* cmd, const VriDrawDesc* draw);
     void (VRI_CALL *CmdDrawIndexed)(VriCommandBuffer* cmd, const VriDrawIndexedDesc* draw);
+    /* Indirect draws read their arguments from `buffer` (one VriDrawDesc / VriDrawIndexedDesc record
+     * per draw, `stride` bytes apart). The *Count variants take the draw count from countBuffer (a
+     * uint32 at countOffset), clamped to maxDrawNum - for GPU-driven rendering where the GPU decides
+     * how many draws to issue. The *Count variants require VriDeviceDesc::hasDrawIndirectCount. */
     void (VRI_CALL *CmdDrawIndirect)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride);
+    void (VRI_CALL *CmdDrawIndexedIndirect)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride);
+    void (VRI_CALL *CmdDrawIndirectCount)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriBuffer* countBuffer, uint64_t countOffset, uint32_t maxDrawNum, uint32_t stride);
+    void (VRI_CALL *CmdDrawIndexedIndirectCount)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriBuffer* countBuffer, uint64_t countOffset, uint32_t maxDrawNum, uint32_t stride);
     void (VRI_CALL *CmdDispatch)(VriCommandBuffer* cmd, const VriDispatchDesc* dispatch);
     void (VRI_CALL *CmdDispatchIndirect)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset);
     void (VRI_CALL *CmdBarrier)(VriCommandBuffer* cmd, const VriBarrierGroupDesc* barrierGroup);

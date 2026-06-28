@@ -1956,6 +1956,16 @@ namespace vri::gl
             c->device->ReportError("CmdDrawIndirect: indirect draw is unavailable on WebGL2"); // explicit, never silent
 #endif
         }
+        // Indexed-indirect (glMultiDrawElementsIndirect) + the indirect-count variants
+        // (glMultiDraw*IndirectCount, ARB_indirect_parameters / GL 4.6) land in a follow-up;
+        // hasDrawIndirectCount stays false until then.
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        void VRI_CALL
+        CmdDrawIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
+        {}
+        void VRI_CALL
+        CmdDrawIndexedIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
+        {}
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc* d)
         {
 #if defined(VRI_GL_ES_HEADERS)
@@ -2201,73 +2211,76 @@ namespace vri::gl
 
         VriCoreInterface MakeTable()
         {
-            VriCoreInterface t           = {};
-            t.GetDeviceDesc              = GetDeviceDesc;
-            t.GetFormatSupport           = GetFormatSupport;
-            t.GetQueue                   = GetQueue;
-            t.CreateCommandAllocator     = CreateCommandAllocator;
-            t.ResetCommandAllocator      = ResetCommandAllocator;
-            t.DestroyCommandAllocator    = DestroyCommandAllocator;
-            t.CreateCommandBuffer        = CreateCommandBuffer;
-            t.BeginCommandBuffer         = BeginCommandBuffer;
-            t.EndCommandBuffer           = EndCommandBuffer;
-            t.CreateBuffer               = CreateBuffer;
-            t.DestroyBuffer              = DestroyBuffer;
-            t.MapBuffer                  = MapBuffer;
-            t.UnmapBuffer                = UnmapBuffer;
-            t.GetBufferDeviceAddress     = GetBufferDeviceAddress;
-            t.CreateTexture              = CreateTexture;
-            t.DestroyTexture             = DestroyTexture;
-            t.GetBufferMemoryDesc        = GetBufferMemoryDesc;
-            t.GetTextureMemoryDesc       = GetTextureMemoryDesc;
-            t.AllocateMemory             = AllocateMemory;
-            t.FreeMemory                 = FreeMemory;
-            t.BindBufferMemory           = BindBufferMemory;
-            t.BindTextureMemory          = BindTextureMemory;
-            t.CreateBufferView           = CreateBufferView;
-            t.CreateTextureView          = CreateTextureView;
-            t.CreateSampler              = CreateSampler;
-            t.DestroyDescriptor          = DestroyDescriptor;
-            t.CreatePipelineLayout       = CreatePipelineLayout;
-            t.DestroyPipelineLayout      = DestroyPipelineLayout;
-            t.CreateGraphicsPipeline     = CreateGraphicsPipeline;
-            t.CreateComputePipeline      = CreateComputePipeline;
-            t.DestroyPipeline            = DestroyPipeline;
-            t.CreateDescriptorPool       = CreateDescriptorPool;
-            t.ResetDescriptorPool        = ResetDescriptorPool;
-            t.DestroyDescriptorPool      = DestroyDescriptorPool;
-            t.AllocateDescriptorSets     = AllocateDescriptorSets;
-            t.UpdateDescriptorRanges     = UpdateDescriptorRanges;
-            t.CreateFence                = CreateFence;
-            t.DestroyFence               = DestroyFence;
-            t.GetFenceValue              = GetFenceValue;
-            t.Wait                       = Wait;
-            t.CmdBeginRendering          = CmdBeginRendering;
-            t.CmdEndRendering            = CmdEndRendering;
-            t.CmdSetViewports            = CmdSetViewports;
-            t.CmdSetScissors             = CmdSetScissors;
-            t.CmdSetPipelineLayout       = CmdSetPipelineLayout;
-            t.CmdSetPipeline             = CmdSetPipeline;
-            t.CmdSetDescriptorSet        = CmdSetDescriptorSet;
-            t.CmdSetConstants            = CmdSetConstants;
-            t.CmdSetVertexBuffers        = CmdSetVertexBuffers;
-            t.CmdSetIndexBuffer          = CmdSetIndexBuffer;
-            t.CmdDraw                    = CmdDraw;
-            t.CmdDrawIndexed             = CmdDrawIndexed;
-            t.CmdDrawIndirect            = CmdDrawIndirect;
-            t.CmdDispatch                = CmdDispatch;
-            t.CmdDispatchIndirect        = CmdDispatchIndirect;
-            t.CmdBarrier                 = CmdBarrier;
-            t.CmdCopyBuffer              = CmdCopyBuffer;
-            t.CmdCopyTexture             = CmdCopyTexture;
-            t.CmdUploadBufferToTexture   = CmdUploadBufferToTexture;
-            t.CmdReadbackTextureToBuffer = CmdReadbackTextureToBuffer;
-            t.CmdBeginDebugGroup         = CmdBeginDebugGroup;
-            t.CmdEndDebugGroup           = CmdEndDebugGroup;
-            t.QueueSubmit                = QueueSubmit;
-            t.QueueWaitIdle              = QueueWaitIdle;
-            t.DeviceWaitIdle             = DeviceWaitIdle;
-            t.SetDebugName               = SetDebugName;
+            VriCoreInterface t            = {};
+            t.GetDeviceDesc               = GetDeviceDesc;
+            t.GetFormatSupport            = GetFormatSupport;
+            t.GetQueue                    = GetQueue;
+            t.CreateCommandAllocator      = CreateCommandAllocator;
+            t.ResetCommandAllocator       = ResetCommandAllocator;
+            t.DestroyCommandAllocator     = DestroyCommandAllocator;
+            t.CreateCommandBuffer         = CreateCommandBuffer;
+            t.BeginCommandBuffer          = BeginCommandBuffer;
+            t.EndCommandBuffer            = EndCommandBuffer;
+            t.CreateBuffer                = CreateBuffer;
+            t.DestroyBuffer               = DestroyBuffer;
+            t.MapBuffer                   = MapBuffer;
+            t.UnmapBuffer                 = UnmapBuffer;
+            t.GetBufferDeviceAddress      = GetBufferDeviceAddress;
+            t.CreateTexture               = CreateTexture;
+            t.DestroyTexture              = DestroyTexture;
+            t.GetBufferMemoryDesc         = GetBufferMemoryDesc;
+            t.GetTextureMemoryDesc        = GetTextureMemoryDesc;
+            t.AllocateMemory              = AllocateMemory;
+            t.FreeMemory                  = FreeMemory;
+            t.BindBufferMemory            = BindBufferMemory;
+            t.BindTextureMemory           = BindTextureMemory;
+            t.CreateBufferView            = CreateBufferView;
+            t.CreateTextureView           = CreateTextureView;
+            t.CreateSampler               = CreateSampler;
+            t.DestroyDescriptor           = DestroyDescriptor;
+            t.CreatePipelineLayout        = CreatePipelineLayout;
+            t.DestroyPipelineLayout       = DestroyPipelineLayout;
+            t.CreateGraphicsPipeline      = CreateGraphicsPipeline;
+            t.CreateComputePipeline       = CreateComputePipeline;
+            t.DestroyPipeline             = DestroyPipeline;
+            t.CreateDescriptorPool        = CreateDescriptorPool;
+            t.ResetDescriptorPool         = ResetDescriptorPool;
+            t.DestroyDescriptorPool       = DestroyDescriptorPool;
+            t.AllocateDescriptorSets      = AllocateDescriptorSets;
+            t.UpdateDescriptorRanges      = UpdateDescriptorRanges;
+            t.CreateFence                 = CreateFence;
+            t.DestroyFence                = DestroyFence;
+            t.GetFenceValue               = GetFenceValue;
+            t.Wait                        = Wait;
+            t.CmdBeginRendering           = CmdBeginRendering;
+            t.CmdEndRendering             = CmdEndRendering;
+            t.CmdSetViewports             = CmdSetViewports;
+            t.CmdSetScissors              = CmdSetScissors;
+            t.CmdSetPipelineLayout        = CmdSetPipelineLayout;
+            t.CmdSetPipeline              = CmdSetPipeline;
+            t.CmdSetDescriptorSet         = CmdSetDescriptorSet;
+            t.CmdSetConstants             = CmdSetConstants;
+            t.CmdSetVertexBuffers         = CmdSetVertexBuffers;
+            t.CmdSetIndexBuffer           = CmdSetIndexBuffer;
+            t.CmdDraw                     = CmdDraw;
+            t.CmdDrawIndexed              = CmdDrawIndexed;
+            t.CmdDrawIndirect             = CmdDrawIndirect;
+            t.CmdDrawIndexedIndirect      = CmdDrawIndexedIndirect;
+            t.CmdDrawIndirectCount        = CmdDrawIndirectCount;
+            t.CmdDrawIndexedIndirectCount = CmdDrawIndexedIndirectCount;
+            t.CmdDispatch                 = CmdDispatch;
+            t.CmdDispatchIndirect         = CmdDispatchIndirect;
+            t.CmdBarrier                  = CmdBarrier;
+            t.CmdCopyBuffer               = CmdCopyBuffer;
+            t.CmdCopyTexture              = CmdCopyTexture;
+            t.CmdUploadBufferToTexture    = CmdUploadBufferToTexture;
+            t.CmdReadbackTextureToBuffer  = CmdReadbackTextureToBuffer;
+            t.CmdBeginDebugGroup          = CmdBeginDebugGroup;
+            t.CmdEndDebugGroup            = CmdEndDebugGroup;
+            t.QueueSubmit                 = QueueSubmit;
+            t.QueueWaitIdle               = QueueWaitIdle;
+            t.DeviceWaitIdle              = DeviceWaitIdle;
+            t.SetDebugName                = SetDebugName;
             return t;
         }
 
