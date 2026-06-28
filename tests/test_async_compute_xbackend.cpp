@@ -21,8 +21,8 @@
 #include <cstdint>
 #include <string>
 
-#include "shaders/compute_fill_dxbc.h" // g_computeFillDxbcCS (Direct3D 12)
-#include "shaders/compute_fill_spv.h"  // g_computeFillSpv    (Vulkan / OpenGL / Metal via SPIR-V)
+#include "shaders/tests/compute_fill_dxbc.h" // g_computeFillDxbcCS (Direct3D 12)
+#include "shaders/tests/compute_fill_spv.h"  // g_computeFillSpv    (Vulkan / OpenGL / Metal via SPIR-V)
 
 namespace
 {

@@ -11,8 +11,8 @@
 
 #include <cstdint>
 
-#include "common/shaders/triangle_spv.h"  // g_triangleSpv  (solid red triangle, SV_VertexID)
-#include "common/shaders/triangle_wgsl.h" // g_triangleWgsl
+#include "shaders/common/triangle_spv.h"  // g_triangleSpv  (solid red triangle, SV_VertexID)
+#include "shaders/common/triangle_wgsl.h" // g_triangleWgsl
 
 namespace
 {

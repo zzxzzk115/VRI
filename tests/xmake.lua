@@ -9,8 +9,7 @@ target("vri-tests")
     add_deps("vri")
     add_packages("doctest")
 
-    -- test-only shaders are included relative as "shaders/X.h"; shaders shared with the examples
-    -- live under common/shaders and are included as "common/shaders/X.h" via this root includedir.
+    -- shaders are included as "shaders/<owner>/X.h" (tests/ or common/) from the repo root.
     add_includedirs("$(projectdir)")
 
     add_files("test_main.cpp")

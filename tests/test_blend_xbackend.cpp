@@ -10,8 +10,8 @@
 #include <cstdlib>
 #include <utility>
 
-#include "shaders/triangle_ubo_spv.h"  // g_triangleUboSpv  (color from a UBO)
-#include "shaders/triangle_ubo_wgsl.h" // g_triangleUboWgsl
+#include "shaders/tests/triangle_ubo_spv.h"  // g_triangleUboSpv  (color from a UBO)
+#include "shaders/tests/triangle_ubo_wgsl.h" // g_triangleUboWgsl
 
 namespace
 {

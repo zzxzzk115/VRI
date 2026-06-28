@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/triangle_ubo_dxbc.h" // g_triangleUboDxbcVS + g_triangleUboDxbcPS
+#include "shaders/tests/triangle_ubo_dxbc.h" // g_triangleUboDxbcVS + g_triangleUboDxbcPS
 
 namespace
 {

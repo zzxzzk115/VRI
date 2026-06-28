@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/rt_triangle_spv.h"
+#include "shaders/tests/rt_triangle_spv.h"
 
 namespace
 {

@@ -8,8 +8,8 @@
 
 #include <cstdint>
 
-#include "shaders/bordercolor_dxbc.h" // g_bordercolorDxbcVS / PS  (D3D12)
-#include "shaders/bordercolor_spv.h"  // g_bordercolorSpv          (Vulkan)
+#include "shaders/tests/bordercolor_dxbc.h" // g_bordercolorDxbcVS / PS  (D3D12)
+#include "shaders/tests/bordercolor_spv.h"  // g_bordercolorSpv          (Vulkan)
 
 namespace
 {

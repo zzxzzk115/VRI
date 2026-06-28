@@ -12,7 +12,7 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_tess_spv.h" // g_triangleTessSpv (vertex/hull/domain/fragment; SPIR-V only)
+#include "shaders/tests/triangle_tess_spv.h" // g_triangleTessSpv (vertex/hull/domain/fragment; SPIR-V only)
 
 namespace
 {

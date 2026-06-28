@@ -8,8 +8,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_tex_spv.h"  // g_triangleTexSpv  (Vulkan + OpenGL via SPIRV-Cross)
-#include "shaders/triangle_tex_wgsl.h" // g_triangleTexWgsl (WebGPU)
+#include "shaders/tests/triangle_tex_spv.h"  // g_triangleTexSpv  (Vulkan + OpenGL via SPIRV-Cross)
+#include "shaders/tests/triangle_tex_wgsl.h" // g_triangleTexWgsl (WebGPU)
 
 namespace
 {

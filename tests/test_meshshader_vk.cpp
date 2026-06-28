@@ -10,8 +10,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_mesh_spv.h" // g_triangleMeshSpv (mesh entry only)
-#include "common/shaders/triangle_spv.h"      // g_triangleSpv     (reuse its fragmentMain)
+#include "shaders/common/triangle_spv.h"     // g_triangleSpv     (reuse its fragmentMain)
+#include "shaders/tests/triangle_mesh_spv.h" // g_triangleMeshSpv (mesh entry only)
 
 namespace
 {

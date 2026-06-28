@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "common/shaders/triangle_wgsl.h" // g_triangleWgsl (const char[], vertexMain + fragmentMain)
+#include "shaders/common/triangle_wgsl.h" // g_triangleWgsl (const char[], vertexMain + fragmentMain)
 
 namespace
 {

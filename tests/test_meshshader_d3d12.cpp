@@ -9,8 +9,8 @@
 
 #include <cstdint>
 
-#include "shaders/mesh_frag_dxil.h"     // g_meshFragDxilPS     (no-input red PS)
-#include "shaders/triangle_mesh_dxil.h" // g_triangleMeshDxilMS (mesh entry)
+#include "shaders/tests/mesh_frag_dxil.h"     // g_meshFragDxilPS     (no-input red PS)
+#include "shaders/tests/triangle_mesh_dxil.h" // g_triangleMeshDxilMS (mesh entry)
 
 namespace
 {

@@ -9,9 +9,9 @@
 
 #include <cstdint>
 
-#include "shaders/compute_fill_dxbc.h" // g_computeFillDxbcCS (Direct3D 12)
-#include "shaders/compute_fill_spv.h"  // g_computeFillSpv  (Vulkan + OpenGL via SPIRV-Cross)
-#include "shaders/compute_fill_wgsl.h" // g_computeFillWgsl (WebGPU)
+#include "shaders/tests/compute_fill_dxbc.h" // g_computeFillDxbcCS (Direct3D 12)
+#include "shaders/tests/compute_fill_spv.h"  // g_computeFillSpv  (Vulkan + OpenGL via SPIRV-Cross)
+#include "shaders/tests/compute_fill_wgsl.h" // g_computeFillWgsl (WebGPU)
 
 namespace
 {

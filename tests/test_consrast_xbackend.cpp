@@ -10,8 +10,8 @@
 
 #include <cstdint>
 
-#include "shaders/consrast_dxbc.h" // g_consrastDxbcVS / PS  (D3D12)
-#include "shaders/consrast_spv.h"  // g_consrastSpv          (Vulkan)
+#include "shaders/tests/consrast_dxbc.h" // g_consrastDxbcVS / PS  (D3D12)
+#include "shaders/tests/consrast_spv.h"  // g_consrastSpv          (Vulkan)
 
 namespace
 {

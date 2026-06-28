@@ -14,12 +14,12 @@
 #include "../cube/ktx.h"
 #include "../cube/mat4.h"
 
-#include "examples/shaders/composite_dxbc.h" // g_compositeDxbcVS / PS
-#include "examples/shaders/composite_spv.h"  // g_compositeSpv
-#include "examples/shaders/composite_wgsl.h" // g_compositeWgsl
-#include "examples/shaders/offscreen_dxbc.h" // g_offscreenDxbcVS / PS (D3D12)
-#include "examples/shaders/offscreen_spv.h"  // g_offscreenSpv  (Vulkan + OpenGL)
-#include "examples/shaders/offscreen_wgsl.h" // g_offscreenWgsl (WebGPU)
+#include "shaders/examples/composite_dxbc.h" // g_compositeDxbcVS / PS
+#include "shaders/examples/composite_spv.h"  // g_compositeSpv
+#include "shaders/examples/composite_wgsl.h" // g_compositeWgsl
+#include "shaders/examples/offscreen_dxbc.h" // g_offscreenDxbcVS / PS (D3D12)
+#include "shaders/examples/offscreen_spv.h"  // g_offscreenSpv  (Vulkan + OpenGL)
+#include "shaders/examples/offscreen_wgsl.h" // g_offscreenWgsl (WebGPU)
 
 namespace
 {

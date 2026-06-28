@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "shaders/triangle_tex_spv.h"  // g_triangleTexSpv
-#include "shaders/triangle_tex_wgsl.h" // g_triangleTexWgsl
+#include "shaders/tests/triangle_tex_spv.h"  // g_triangleTexSpv
+#include "shaders/tests/triangle_tex_wgsl.h" // g_triangleTexWgsl
 
 namespace
 {

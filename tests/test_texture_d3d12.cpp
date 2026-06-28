@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_tex_dxbc.h" // g_triangleTexDxbcVS + g_triangleTexDxbcPS
+#include "shaders/tests/triangle_tex_dxbc.h" // g_triangleTexDxbcVS + g_triangleTexDxbcPS
 
 namespace
 {

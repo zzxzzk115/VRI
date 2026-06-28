@@ -12,9 +12,9 @@
 #include "ktx.h"
 #include "mat4.h"
 
-#include "common/shaders/cube_dxbc.h" // g_cubeDxbcVS / PS (D3D12)
-#include "common/shaders/cube_spv.h"  // g_cubeSpv  (Vulkan + OpenGL)
-#include "common/shaders/cube_wgsl.h" // g_cubeWgsl (WebGPU)
+#include "shaders/common/cube_dxbc.h" // g_cubeDxbcVS / PS (D3D12)
+#include "shaders/common/cube_spv.h"  // g_cubeSpv  (Vulkan + OpenGL)
+#include "shaders/common/cube_wgsl.h" // g_cubeWgsl (WebGPU)
 
 namespace
 {

@@ -29,14 +29,14 @@ task("shaders")
             if os.mtime(m) > os.mtime(exe) then exe = m end
         end
 
-        -- Shaders are split by owner: source/shaders (library-internal, e.g. the built-in ImGui
-        -- renderer), examples/shaders (example-only), tests/shaders (test-only), and common/shaders
-        -- (shared by tests + examples). Each header is emitted next to its .slang.
+        -- All shaders live under shaders/, split by owner: lib (library-internal, e.g. the built-in
+        -- ImGui renderer), examples (example-only), tests (test-only), and common (shared by tests +
+        -- examples). Each header is emitted next to its .slang.
         local dirs = {
-            path.join(os.projectdir(), "source", "shaders"),
-            path.join(os.projectdir(), "examples", "shaders"),
-            path.join(os.projectdir(), "tests", "shaders"),
-            path.join(os.projectdir(), "common", "shaders"),
+            path.join(os.projectdir(), "shaders", "lib"),
+            path.join(os.projectdir(), "shaders", "examples"),
+            path.join(os.projectdir(), "shaders", "tests"),
+            path.join(os.projectdir(), "shaders", "common"),
         }
         local slangs = {}
         for _, d in ipairs(dirs) do

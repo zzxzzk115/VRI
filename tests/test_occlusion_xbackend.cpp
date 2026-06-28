@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <cstring>
 
-#include "common/shaders/triangle_dxbc.h" // g_triangleDxbcVS + g_triangleDxbcPS (D3D12)
-#include "common/shaders/triangle_spv.h"  // g_triangleSpv (Vulkan + OpenGL via SPIRV-Cross)
+#include "shaders/common/triangle_dxbc.h" // g_triangleDxbcVS + g_triangleDxbcPS (D3D12)
+#include "shaders/common/triangle_spv.h"  // g_triangleSpv (Vulkan + OpenGL via SPIRV-Cross)
 
 namespace
 {

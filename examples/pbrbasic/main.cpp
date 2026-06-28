@@ -13,9 +13,9 @@
 
 #include "../cube/mat4.h"
 
-#include "examples/shaders/pbr_dxbc.h" // g_pbrDxbcVS / PS (D3D12)
-#include "examples/shaders/pbr_spv.h"  // g_pbrSpv  (Vulkan + OpenGL)
-#include "examples/shaders/pbr_wgsl.h" // g_pbrWgsl (WebGPU)
+#include "shaders/examples/pbr_dxbc.h" // g_pbrDxbcVS / PS (D3D12)
+#include "shaders/examples/pbr_spv.h"  // g_pbrSpv  (Vulkan + OpenGL)
+#include "shaders/examples/pbr_wgsl.h" // g_pbrWgsl (WebGPU)
 
 namespace
 {

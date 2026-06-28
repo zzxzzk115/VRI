@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_gs_spv.h" // g_triangleGsSpv (vertex/geometry/fragment; SPIR-V only)
+#include "shaders/tests/triangle_gs_spv.h" // g_triangleGsSpv (vertex/geometry/fragment; SPIR-V only)
 
 namespace
 {

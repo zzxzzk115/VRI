@@ -7,9 +7,9 @@
 
 #include <cmath>
 
-#include "examples/shaders/pushconst_dxbc.h" // g_pushconstDxbcVS / PS (D3D12)
-#include "examples/shaders/pushconst_spv.h"  // g_pushconstSpv  (Vulkan + OpenGL)
-#include "examples/shaders/pushconst_wgsl.h" // g_pushconstWgsl (WebGPU)
+#include "shaders/examples/pushconst_dxbc.h" // g_pushconstDxbcVS / PS (D3D12)
+#include "shaders/examples/pushconst_spv.h"  // g_pushconstSpv  (Vulkan + OpenGL)
+#include "shaders/examples/pushconst_wgsl.h" // g_pushconstWgsl (WebGPU)
 
 namespace
 {

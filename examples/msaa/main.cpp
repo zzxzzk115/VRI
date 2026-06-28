@@ -11,12 +11,12 @@
 #include <cstring>
 #include <vector>
 
-#include "examples/shaders/msaa_dxbc.h"     // g_msaaDxbcVS / PS (D3D12)
-#include "examples/shaders/msaa_spv.h"      // g_msaaSpv  (Vulkan + OpenGL)
-#include "examples/shaders/msaa_wgsl.h"     // g_msaaWgsl (WebGPU)
-#include "examples/shaders/show_tex_dxbc.h" // g_showTexDxbcVS / PS
-#include "examples/shaders/show_tex_spv.h"  // g_showTexSpv  (fullscreen composite)
-#include "examples/shaders/show_tex_wgsl.h" // g_showTexWgsl
+#include "shaders/examples/msaa_dxbc.h"     // g_msaaDxbcVS / PS (D3D12)
+#include "shaders/examples/msaa_spv.h"      // g_msaaSpv  (Vulkan + OpenGL)
+#include "shaders/examples/msaa_wgsl.h"     // g_msaaWgsl (WebGPU)
+#include "shaders/examples/show_tex_dxbc.h" // g_showTexDxbcVS / PS
+#include "shaders/examples/show_tex_spv.h"  // g_showTexSpv  (fullscreen composite)
+#include "shaders/examples/show_tex_wgsl.h" // g_showTexWgsl
 
 namespace
 {

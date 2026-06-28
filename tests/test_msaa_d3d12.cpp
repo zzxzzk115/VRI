@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-#include "common/shaders/triangle_dxbc.h" // g_triangleDxbcVS + g_triangleDxbcPS (solid red)
+#include "shaders/common/triangle_dxbc.h" // g_triangleDxbcVS + g_triangleDxbcPS (solid red)
 
 namespace
 {

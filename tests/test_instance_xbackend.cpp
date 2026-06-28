@@ -8,8 +8,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_inst_spv.h"  // g_triangleInstSpv
-#include "shaders/triangle_inst_wgsl.h" // g_triangleInstWgsl
+#include "shaders/tests/triangle_inst_spv.h"  // g_triangleInstSpv
+#include "shaders/tests/triangle_inst_wgsl.h" // g_triangleInstWgsl
 
 namespace
 {

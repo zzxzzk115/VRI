@@ -13,9 +13,9 @@
 
 #include "../examples/cube/mat4.h"
 
-#include "common/shaders/cube_inst_dxbc.h" // g_cubeInstDxbcVS / PS
-#include "common/shaders/cube_inst_spv.h"  // g_cubeInstSpv
-#include "common/shaders/cube_inst_wgsl.h" // g_cubeInstWgsl
+#include "shaders/common/cube_inst_dxbc.h" // g_cubeInstDxbcVS / PS
+#include "shaders/common/cube_inst_spv.h"  // g_cubeInstSpv
+#include "shaders/common/cube_inst_wgsl.h" // g_cubeInstWgsl
 
 namespace
 {

@@ -16,12 +16,12 @@
 
 #include "../cube/mat4.h"
 
-#include "examples/shaders/stencil_fill_dxbc.h"    // g_stencilFillDxbcVS / PS
-#include "examples/shaders/stencil_fill_spv.h"     // g_stencilFillSpv
-#include "examples/shaders/stencil_fill_wgsl.h"    // g_stencilFillWgsl
-#include "examples/shaders/stencil_outline_dxbc.h" // g_stencilOutlineDxbcVS / PS
-#include "examples/shaders/stencil_outline_spv.h"  // g_stencilOutlineSpv
-#include "examples/shaders/stencil_outline_wgsl.h" // g_stencilOutlineWgsl
+#include "shaders/examples/stencil_fill_dxbc.h"    // g_stencilFillDxbcVS / PS
+#include "shaders/examples/stencil_fill_spv.h"     // g_stencilFillSpv
+#include "shaders/examples/stencil_fill_wgsl.h"    // g_stencilFillWgsl
+#include "shaders/examples/stencil_outline_dxbc.h" // g_stencilOutlineDxbcVS / PS
+#include "shaders/examples/stencil_outline_spv.h"  // g_stencilOutlineSpv
+#include "shaders/examples/stencil_outline_wgsl.h" // g_stencilOutlineWgsl
 
 namespace
 {

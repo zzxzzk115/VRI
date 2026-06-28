@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/rayquery_dxil.h" // g_rayqueryDxilCS  (D3D12)
-#include "shaders/rayquery_spv.h"  // g_rayquerySpv     (Vulkan)
+#include "shaders/tests/rayquery_dxil.h" // g_rayqueryDxilCS  (D3D12)
+#include "shaders/tests/rayquery_spv.h"  // g_rayquerySpv     (Vulkan)
 
 namespace
 {

@@ -17,10 +17,10 @@
 #include <cstring>
 #include <vector>
 
-#include "examples/shaders/arraytex_spv.h"            // g_arraytexSpv  (OpenGL fallback)
-#include "examples/shaders/arraytex_wgsl.h"           // g_arraytexWgsl (WebGPU/WebGL2 fallback)
-#include "examples/shaders/descriptorindexing_dxbc.h" // g_descriptorindexingDxbcVS / PS (D3D12)
-#include "examples/shaders/descriptorindexing_spv.h"  // g_descriptorindexingSpv  (Vulkan)
+#include "shaders/examples/arraytex_spv.h"            // g_arraytexSpv  (OpenGL fallback)
+#include "shaders/examples/arraytex_wgsl.h"           // g_arraytexWgsl (WebGPU/WebGL2 fallback)
+#include "shaders/examples/descriptorindexing_dxbc.h" // g_descriptorindexingDxbcVS / PS (D3D12)
+#include "shaders/examples/descriptorindexing_spv.h"  // g_descriptorindexingSpv  (Vulkan)
 
 namespace
 {

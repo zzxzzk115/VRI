@@ -15,12 +15,12 @@
 
 #include "../cube/mat4.h"
 
-#include "examples/shaders/shadow_depth_dxbc.h" // g_shadowDepthDxbcVS / PS (D3D12)
-#include "examples/shaders/shadow_depth_spv.h"  // g_shadowDepthSpv  (Vulkan + OpenGL)
-#include "examples/shaders/shadow_depth_wgsl.h" // g_shadowDepthWgsl (WebGPU)
-#include "examples/shaders/shadow_scene_dxbc.h" // g_shadowSceneDxbcVS / PS
-#include "examples/shaders/shadow_scene_spv.h"  // g_shadowSceneSpv
-#include "examples/shaders/shadow_scene_wgsl.h" // g_shadowSceneWgsl
+#include "shaders/examples/shadow_depth_dxbc.h" // g_shadowDepthDxbcVS / PS (D3D12)
+#include "shaders/examples/shadow_depth_spv.h"  // g_shadowDepthSpv  (Vulkan + OpenGL)
+#include "shaders/examples/shadow_depth_wgsl.h" // g_shadowDepthWgsl (WebGPU)
+#include "shaders/examples/shadow_scene_dxbc.h" // g_shadowSceneDxbcVS / PS
+#include "shaders/examples/shadow_scene_spv.h"  // g_shadowSceneSpv
+#include "shaders/examples/shadow_scene_wgsl.h" // g_shadowSceneWgsl
 
 namespace
 {

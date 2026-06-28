@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/rt_triangle_dxil.h" // g_rtTriangleDxilRGEN / MISS / CHIT
+#include "shaders/tests/rt_triangle_dxil.h" // g_rtTriangleDxilRGEN / MISS / CHIT
 
 namespace
 {

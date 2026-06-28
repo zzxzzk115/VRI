@@ -10,8 +10,8 @@
 
 #include <cstdint>
 
-#include "shaders/barycentric_dxil.h" // g_barycentricDxilVS / PS (D3D12)
-#include "shaders/barycentric_spv.h"  // g_barycentricSpv         (Vulkan)
+#include "shaders/tests/barycentric_dxil.h" // g_barycentricDxilVS / PS (D3D12)
+#include "shaders/tests/barycentric_spv.h"  // g_barycentricSpv         (Vulkan)
 
 namespace
 {

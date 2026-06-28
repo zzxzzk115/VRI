@@ -9,8 +9,8 @@
 
 #include <cstdint>
 
-#include "shaders/wave_dxil.h" // g_waveDxilCS  (D3D12)
-#include "shaders/wave_spv.h"  // g_waveSpv     (Vulkan)
+#include "shaders/tests/wave_dxil.h" // g_waveDxilCS  (D3D12)
+#include "shaders/tests/wave_spv.h"  // g_waveSpv     (Vulkan)
 
 namespace
 {

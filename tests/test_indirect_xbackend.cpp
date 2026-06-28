@@ -9,8 +9,8 @@
 
 #include <cstdint>
 
-#include "common/shaders/triangle_spv.h"  // g_triangleSpv  (solid red, procedural)
-#include "common/shaders/triangle_wgsl.h" // g_triangleWgsl
+#include "shaders/common/triangle_spv.h"  // g_triangleSpv  (solid red, procedural)
+#include "shaders/common/triangle_wgsl.h" // g_triangleWgsl
 
 namespace
 {

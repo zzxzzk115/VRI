@@ -7,8 +7,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_vbuf_spv.h"  // g_triangleVbufSpv  (Vulkan + OpenGL via SPIRV-Cross)
-#include "shaders/triangle_vbuf_wgsl.h" // g_triangleVbufWgsl (WebGPU)
+#include "shaders/tests/triangle_vbuf_spv.h"  // g_triangleVbufSpv  (Vulkan + OpenGL via SPIRV-Cross)
+#include "shaders/tests/triangle_vbuf_wgsl.h" // g_triangleVbufWgsl (WebGPU)
 
 namespace
 {

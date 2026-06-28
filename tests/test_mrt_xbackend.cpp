@@ -7,8 +7,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_mrt_spv.h"  // g_triangleMrtSpv  (SV_Target0 red, SV_Target1 blue)
-#include "shaders/triangle_mrt_wgsl.h" // g_triangleMrtWgsl
+#include "shaders/tests/triangle_mrt_spv.h"  // g_triangleMrtSpv  (SV_Target0 red, SV_Target1 blue)
+#include "shaders/tests/triangle_mrt_wgsl.h" // g_triangleMrtWgsl
 
 namespace
 {

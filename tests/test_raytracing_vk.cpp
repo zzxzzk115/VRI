@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/rt_triangle_spv.h" // g_rtTriangleSpv (raygen/miss/closesthit)
+#include "shaders/tests/rt_triangle_spv.h" // g_rtTriangleSpv (raygen/miss/closesthit)
 
 namespace
 {

@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/triangle_vbuf_dxbc.h" // g_triangleVbufDxbcVS + g_triangleVbufDxbcPS
+#include "shaders/tests/triangle_vbuf_dxbc.h" // g_triangleVbufDxbcVS + g_triangleVbufDxbcPS
 
 namespace
 {

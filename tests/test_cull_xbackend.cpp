@@ -11,8 +11,8 @@
 #include <cstdint>
 #include <utility>
 
-#include "shaders/triangle_vbuf_spv.h"  // g_triangleVbufSpv  (position.xyz + color)
-#include "shaders/triangle_vbuf_wgsl.h" // g_triangleVbufWgsl
+#include "shaders/tests/triangle_vbuf_spv.h"  // g_triangleVbufSpv  (position.xyz + color)
+#include "shaders/tests/triangle_vbuf_wgsl.h" // g_triangleVbufWgsl
 
 namespace
 {

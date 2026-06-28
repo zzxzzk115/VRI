@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-#include "shaders/bindless_tex_spv.h" // g_bindlessTexSpv
+#include "shaders/tests/bindless_tex_spv.h" // g_bindlessTexSpv
 
 namespace
 {

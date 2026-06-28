@@ -8,8 +8,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_ubo_spv.h"  // g_triangleUboSpv  (Vulkan + OpenGL via SPIRV-Cross)
-#include "shaders/triangle_ubo_wgsl.h" // g_triangleUboWgsl (WebGPU)
+#include "shaders/tests/triangle_ubo_spv.h"  // g_triangleUboSpv  (Vulkan + OpenGL via SPIRV-Cross)
+#include "shaders/tests/triangle_ubo_wgsl.h" // g_triangleUboWgsl (WebGPU)
 
 namespace
 {

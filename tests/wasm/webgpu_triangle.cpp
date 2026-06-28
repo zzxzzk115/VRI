@@ -12,8 +12,8 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "shaders/compute_fill_wgsl.h" // g_computeFillWgsl (out[i] = i + 100)
-#include "common/shaders/triangle_wgsl.h"     // g_triangleWgsl (solid red)
+#include "shaders/common/triangle_wgsl.h"    // g_triangleWgsl (solid red)
+#include "shaders/tests/compute_fill_wgsl.h" // g_computeFillWgsl (out[i] = i + 100)
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
