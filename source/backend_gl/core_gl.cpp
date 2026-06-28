@@ -2097,6 +2097,31 @@ namespace vri::gl
 #endif
         }
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // GL is ordered on one context
+        void VRI_CALL
+        CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(VRI_GL_ES_HEADERS)
+            BufferGL*        b  = Buf(buffer);
+            const GLsizeiptr sz = size ? static_cast<GLsizeiptr>(size) : static_cast<GLsizeiptr>(b->size - offset);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
+            // R32UI source replicates the uint32 across the range (glClearBufferSubData, GL 4.3).
+            glClearBufferSubData(GL_COPY_WRITE_BUFFER,
+                                 GL_R32UI,
+                                 static_cast<GLintptr>(offset),
+                                 sz,
+                                 GL_RED_INTEGER,
+                                 GL_UNSIGNED_INT,
+                                 &value);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+#else
+            (void)buffer;
+            (void)offset;
+            (void)size;
+            (void)value;
+            c->device->ReportError("CmdClearStorageBuffer: glClearBufferSubData is unavailable on WebGL2/GLES");
+#endif
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             // Keep an element-class buffer on GL_ELEMENT_ARRAY_BUFFER so WebGL never
@@ -2382,6 +2407,7 @@ namespace vri::gl
             t.DeviceWaitIdle              = DeviceWaitIdle;
             t.SetDebugName                = SetDebugName;
             t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
+            t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             return t;
         }
 

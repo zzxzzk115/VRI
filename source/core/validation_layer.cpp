@@ -510,6 +510,19 @@ namespace vri::core
                 return;
             c->dev->core.CmdCopyBuffer(c->real, dst, src, r);
         }
+        void VRI_CALL
+        CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!OutsideOk(c, "CmdClearStorageBuffer must be outside a render pass"))
+                return;
+            if (c->dev->desc.hasClearStorageBuffer == VRI_FALSE)
+            {
+                Err(c->dev, "CmdClearStorageBuffer called but VriDeviceDesc::hasClearStorageBuffer is false");
+                return;
+            }
+            c->dev->core.CmdClearStorageBuffer(c->real, buffer, offset, size, value);
+        }
         void VRI_CALL CmdCopyTexture(VriCommandBuffer*         cmd,
                                      VriTexture*               dst,
                                      VriTexture*               src,
@@ -892,6 +905,7 @@ namespace vri::core
             t.CmdDispatchIndirect         = CmdDispatchIndirect;
             t.CmdBarrier                  = CmdBarrier;
             t.CmdCopyBuffer               = CmdCopyBuffer;
+            t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             t.CmdCopyTexture              = CmdCopyTexture;
             t.CmdUploadBufferToTexture    = CmdUploadBufferToTexture;
             t.CmdReadbackTextureToBuffer  = CmdReadbackTextureToBuffer;

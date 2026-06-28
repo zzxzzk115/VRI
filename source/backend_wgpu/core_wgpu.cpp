@@ -1157,6 +1157,11 @@ namespace vri::wgpu
 
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // WebGPU auto-synchronizes
 
+        // WebGPU's clearBuffer only zeroes; an arbitrary-value storage fill is unsupported here.
+        void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer*, uint64_t, uint64_t, uint32_t)
+        {
+            CB(cmd)->device->ReportError("CmdClearStorageBuffer: unsupported on WebGPU");
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             CommandBufferWGPU* c = CB(cmd);
@@ -1383,6 +1388,7 @@ namespace vri::wgpu
             t.DeviceWaitIdle              = DeviceWaitIdle;
             t.SetDebugName                = SetDebugName;
             t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
+            t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             return t;
         }
 

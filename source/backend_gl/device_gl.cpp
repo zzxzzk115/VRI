@@ -506,6 +506,8 @@ namespace vri::gl
         m_desc.timestampPeriodNanoseconds = timerOk ? 1.0f : 0.0f;
         // GPU-driven draw count via glMultiDraw*IndirectCount (ARB_indirect_parameters, core 4.6).
         m_desc.hasDrawIndirectCount = (!m_es && (major > 4 || (major == 4 && minor >= 6))) ? VRI_TRUE : VRI_FALSE;
+        // Storage-buffer clear via glClearBufferSubData (ARB_clear_buffer_object, core 4.3).
+        m_desc.hasClearStorageBuffer = (!m_es && (major > 4 || (major == 4 && minor >= 3))) ? VRI_TRUE : VRI_FALSE;
 #endif
     }
 

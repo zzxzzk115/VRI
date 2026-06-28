@@ -1663,6 +1663,13 @@ namespace vri::d3d12
             CB(cmd)->list->Dispatch(d->x, d->y, d->z);
         }
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
+        // D3D12 has no direct buffer fill; a value-clear needs ClearUnorderedAccessViewUint (a UAV in
+        // a shader-visible heap) - a follow-up. Diagnose rather than silently no-op.
+        void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer*, uint64_t, uint64_t, uint32_t)
+        {
+            CB(cmd)->device->ReportError(
+                "CmdClearStorageBuffer: not yet implemented on D3D12 (needs ClearUnorderedAccessView)");
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             // Buffers implicitly promote from COMMON to COPY_DEST on a direct queue. Record that
@@ -1831,6 +1838,7 @@ namespace vri::d3d12
             DeviceWaitIdle,
             SetDebugName,
             GetVideoMemoryInfo,
+            CmdClearStorageBuffer,
         };
         return &t;
     }

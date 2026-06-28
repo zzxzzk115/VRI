@@ -158,6 +158,12 @@ typedef struct VriCoreInterface
     /* Live video-memory budget/usage for a memory location (Device = VRAM, others = system).
      * Returns VriResult_Unsupported where the backend can't report it (e.g. WebGPU, OpenGL). */
     VriResult (VRI_CALL *GetVideoMemoryInfo)(const VriDevice* device, VriMemoryLocation location, VriVideoMemoryInfo* out);
+
+    /* Fill a storage (UAV/SSBO) buffer region with a repeated uint32, outside a render pass - e.g.
+     * to reset an atomic counter or accumulation buffer before a compute pass. `size` 0 = to the end.
+     * The caller barriers the buffer (CopyDestinationWrite-style) around the clear. Backends without a
+     * direct buffer fill (Direct3D 12, WebGPU, Metal) diagnose rather than silently no-op. */
+    void (VRI_CALL *CmdClearStorageBuffer)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value);
 } VriCoreInterface;
 
 VRI_EXTERN_C_END

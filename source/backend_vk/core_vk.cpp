@@ -1475,6 +1475,11 @@ namespace vri::vk
             c->device->Ext().CmdPipelineBarrier2(c->cmd, &dep);
         }
 
+        void VRI_CALL
+        CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
+        {
+            vkCmdFillBuffer(CB(cmd)->cmd, Buf(buffer)->buffer, offset, size ? size : VK_WHOLE_SIZE, value);
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*        cmd,
                                     VriBuffer*               dst,
                                     VriBuffer*               src,
@@ -1669,6 +1674,7 @@ namespace vri::vk
             DeviceWaitIdle,
             SetDebugName,
             GetVideoMemoryInfo,
+            CmdClearStorageBuffer,
         };
     } // namespace
 

@@ -1190,6 +1190,11 @@ namespace vri::mtl
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // Metal auto-tracks hazards
 
         // ---- copies (blit encoder) -----------------------------------------
+        // Metal's blit fillBuffer fills a single byte, not an arbitrary uint32; unsupported here.
+        void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer*, uint64_t, uint64_t, uint32_t)
+        {
+            CB(cmd)->device->ReportError("CmdClearStorageBuffer: unsupported on Metal");
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             CommandBufferMTL* c = CB(cmd);
@@ -1400,8 +1405,9 @@ namespace vri::mtl
             t.QueueSubmit = QueueSubmit;
             t.QueueWaitIdle = QueueWaitIdle;
             t.DeviceWaitIdle = DeviceWaitIdle;
-            t.SetDebugName       = SetDebugName;
-            t.GetVideoMemoryInfo = GetVideoMemoryInfo;
+            t.SetDebugName          = SetDebugName;
+            t.GetVideoMemoryInfo    = GetVideoMemoryInfo;
+            t.CmdClearStorageBuffer = CmdClearStorageBuffer;
             return t;
         }
 
