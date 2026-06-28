@@ -1,5 +1,6 @@
 #include "device_gl.h"
 #include "core_gl.h"
+#include "query_gl.h"
 #include "swapchain_gl.h"
 
 #if defined(VRI_GL_EGL)
@@ -493,6 +494,14 @@ namespace vri::gl
         m_desc.hasComputeShader  = computeOk ? VRI_TRUE : VRI_FALSE;
         m_desc.hasGeometryShader = m_es ? VRI_FALSE : VRI_TRUE; // GLES has no geometry shaders
         m_desc.hasTessellation   = m_es ? VRI_FALSE : VRI_TRUE; // desktop GL only (GLES3/WebGL2 has none)
+        // Desktop GL has native timer queries (ARB_timer_query, core 3.3; ticks are nanoseconds).
+        // Require GL 4.4 so CmdCopyQueries can resolve into a buffer via a query buffer object
+        // (ARB_query_buffer_object, core 4.4). GLES/WebGL lack a core timer query entirely.
+#if !defined(VRI_GL_ES_HEADERS)
+        const bool timerOk                = !m_es && (major > 4 || (major == 4 && minor >= 4));
+        m_desc.hasTimestampQueries        = timerOk ? VRI_TRUE : VRI_FALSE;
+        m_desc.timestampPeriodNanoseconds = timerOk ? 1.0f : 0.0f;
+#endif
     }
 
     void DeviceGL::DetectFeatures()
@@ -524,6 +533,7 @@ namespace vri::gl
         // Presentation: Win32 WGL (desktop) + Web canvas (Emscripten). Other desktop
         // platforms register the interface but report Unsupported at CreateSwapChain.
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceGL(), sizeof(VriSwapChainInterface));
+        m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceGL(), sizeof(VriQueryInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

@@ -253,6 +253,13 @@ namespace vri::gl
         uint64_t  value;
     };
 
+    struct QueryPoolGL
+    {
+        DeviceGL*           device;
+        std::vector<GLuint> ids; // one GL query object per timestamp slot
+    };
+    inline VriQueryPool* ToHandle(QueryPoolGL* q) { return reinterpret_cast<VriQueryPool*>(q); }
+
     inline VriQueue*            ToHandle(QueueGL* q) { return reinterpret_cast<VriQueue*>(q); }
     inline VriCommandAllocator* ToHandle(CommandAllocatorGL* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
     inline VriCommandBuffer*    ToHandle(CommandBufferGL* c) { return reinterpret_cast<VriCommandBuffer*>(c); }

@@ -119,6 +119,8 @@ int main()
         desc.graphicsAPI = VriGraphicsAPI_D3D12;
     else if (apiEnv && std::strcmp(apiEnv, "webgpu") == 0)
         desc.graphicsAPI = VriGraphicsAPI_WebGPU;
+    else if (apiEnv && std::strcmp(apiEnv, "opengl") == 0)
+        desc.graphicsAPI = VriGraphicsAPI_OpenGL;
     desc.enableValidation = VRI_TRUE;
     desc.bestEffort       = VRI_TRUE;
     VriDevice* dev        = nullptr;

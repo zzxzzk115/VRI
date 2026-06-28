@@ -49,7 +49,8 @@ namespace
     }
 
     // Records 2 timestamps around a buffer copy and verifies the GPU clock advanced.
-    void RunTimestamp(VriGraphicsAPI api, const char* name)
+    // strictNonzero is relaxed for software/immediate-mode backends whose clock may read 0.
+    void RunTimestamp(VriGraphicsAPI api, const char* name, bool strictNonzero = true)
     {
         Dev d;
         if (!Init(d, api))
@@ -122,7 +123,8 @@ namespace
         std::memcpy(ticks, mapped, sizeof(ticks));
         c.UnmapBuffer(readback);
 
-        CHECK(ticks[0] > 0);         // GPU clock is running
+        if (strictNonzero)
+            CHECK(ticks[0] > 0);     // GPU clock is running
         CHECK(ticks[1] >= ticks[0]); // monotonic across the copy
         const double elapsedMs = static_cast<double>(ticks[1] - ticks[0]) * dd->timestampPeriodNanoseconds / 1.0e6;
         CHECK(elapsedMs >= 0.0);
@@ -143,3 +145,10 @@ TEST_CASE("Query pool: Vulkan timestamps advance across GPU work") { RunTimestam
 TEST_CASE("Query pool: D3D12 timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_D3D12, "D3D12"); }
 
 TEST_CASE("Query pool: WebGPU timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_WebGPU, "WebGPU"); }
+
+// Desktop GL only (GLES/WebGL report no timestamp support and self-skip). Software GL clocks
+// may read 0, so only monotonicity is required here.
+TEST_CASE("Query pool: OpenGL timestamps advance across GPU work")
+{
+    RunTimestamp(VriGraphicsAPI_OpenGL, "OpenGL", /*strictNonzero*/ false);
+}
