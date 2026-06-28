@@ -89,6 +89,7 @@ namespace vri::vk
         bool         m_hasConservativeRaster = false;
         bool         m_hasBarycentric        = false;
         bool         m_hasCustomBorderColor  = false;
+        bool         m_hasPipelineStats      = false;
         ExtFunctions m_ext                   = {};
 
         VriDeviceDesc        m_desc     = {};

@@ -93,8 +93,9 @@ Notes:
   features; browser WebGPU timestamps are pass-scoped and not yet wired), and **desktop OpenGL 4.4+**
   (`glQueryCounter` + a query buffer object; GLES/WebGL have no core timer query). **Occlusion
   queries** (samples-passed) are also supported on Vulkan + D3D12 + desktop OpenGL (WebGPU's
-  occlusion binds the query set at pass-begin, which this API doesn't express). Pipeline-statistics
-  query types are a planned addition.
+  occlusion binds the query set at pass-begin, which this API doesn't express), and
+  **pipeline-statistics queries** (per-stage invocation counts, a portable `VriPipelineStatistics`
+  struct) on Vulkan + D3D12.
 
 ## Building
 

@@ -19,11 +19,25 @@ namespace vri::d3d12
         {
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
-            DeviceD3D12*          d         = Dev(device);
-            const bool            occlusion = desc->type == VriQueryType_Occlusion;
-            D3D12_QUERY_HEAP_DESC hd        = {};
-            hd.Type  = occlusion ? D3D12_QUERY_HEAP_TYPE_OCCLUSION : D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-            hd.Count = desc->queryCount;
+            DeviceD3D12*          d  = Dev(device);
+            D3D12_QUERY_HEAP_DESC hd = {};
+            hd.Count                 = desc->queryCount;
+            D3D12_QUERY_TYPE qt      = D3D12_QUERY_TYPE_TIMESTAMP;
+            switch (desc->type)
+            {
+                case VriQueryType_Occlusion:
+                    hd.Type = D3D12_QUERY_HEAP_TYPE_OCCLUSION;
+                    qt      = D3D12_QUERY_TYPE_OCCLUSION;
+                    break;
+                case VriQueryType_PipelineStatistics:
+                    hd.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
+                    qt      = D3D12_QUERY_TYPE_PIPELINE_STATISTICS;
+                    break;
+                default:
+                    hd.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+                    qt      = D3D12_QUERY_TYPE_TIMESTAMP;
+                    break;
+            }
 
             QueryPoolD3D12* q = new QueryPoolD3D12 {};
             if (FAILED(d->Device()->CreateQueryHeap(&hd, IID_PPV_ARGS(&q->heap))))
@@ -33,7 +47,7 @@ namespace vri::d3d12
                 return VriResult_Failure;
             }
             q->device    = d;
-            q->queryType = occlusion ? D3D12_QUERY_TYPE_OCCLUSION : D3D12_QUERY_TYPE_TIMESTAMP;
+            q->queryType = qt;
             q->type      = desc->type;
             q->count     = desc->queryCount;
             *out         = ToHandle(q);
@@ -46,7 +60,11 @@ namespace vri::d3d12
                 delete QP(pool);
         }
 
-        uint32_t VRI_CALL GetQuerySize(const VriQueryPool*) { return sizeof(uint64_t); }
+        uint32_t VRI_CALL GetQuerySize(const VriQueryPool* pool)
+        {
+            const QueryPoolD3D12* q = reinterpret_cast<const QueryPoolD3D12*>(pool);
+            return q->type == VriQueryType_PipelineStatistics ? sizeof(VriPipelineStatistics) : sizeof(uint64_t);
+        }
 
         // D3D12 needs no reset: each EndQuery overwrites and ResolveQueryData reads the latest.
         void VRI_CALL CmdResetQueries(VriCommandBuffer*, VriQueryPool*, uint32_t, uint32_t) {}

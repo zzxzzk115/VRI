@@ -28,6 +28,10 @@ namespace vri::gl
             DeviceGL* d = Dev(device);
             if (d->Desc().hasTimestampQueries == VRI_FALSE)
                 return VriResult_Unsupported;
+            // Pipeline statistics on GL need one query object per stat (separate targets) -- a
+            // follow-up; timestamps + occlusion are single-object queries.
+            if (desc->type == VriQueryType_PipelineStatistics)
+                return VriResult_Unsupported;
             QueryPoolGL* q = new QueryPoolGL {};
             q->device      = d;
             q->ids.resize(desc->queryCount);

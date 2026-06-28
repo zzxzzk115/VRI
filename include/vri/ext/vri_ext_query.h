@@ -29,10 +29,30 @@ typedef struct VriQueryPool VriQueryPool;
 
 typedef enum VriQueryType
 {
-    VriQueryType_Timestamp = 0, /* GPU clock tick (scale by timestampPeriodNanoseconds) */
-    VriQueryType_Occlusion = 1, /* samples that passed depth/stencil between Begin/End */
-    VriQueryType_MaxEnum   = 0x7fffffff
+    VriQueryType_Timestamp          = 0, /* GPU clock tick (scale by timestampPeriodNanoseconds) */
+    VriQueryType_Occlusion          = 1, /* samples that passed depth/stencil between Begin/End */
+    VriQueryType_PipelineStatistics = 2, /* per-stage invocation counts (VriPipelineStatistics) */
+    VriQueryType_MaxEnum            = 0x7fffffff
 } VriQueryType;
+
+/* PipelineStatistics result: one VriPipelineStatistics (each GetQuerySize == sizeof this).
+ * The field order is the portable one shared by Vulkan (all stats enabled) and D3D12. A stage
+ * that does not run (no geometry/tessellation/compute in the draw) reports 0. Check
+ * VriDeviceDesc::hasPipelineStatistics; not supported on OpenGL/WebGPU (CreateQueryPool fails). */
+typedef struct VriPipelineStatistics
+{
+    uint64_t inputVertices;
+    uint64_t inputPrimitives;
+    uint64_t vertexShaderInvocations;
+    uint64_t geometryShaderInvocations;
+    uint64_t geometryShaderPrimitives;
+    uint64_t clippingInvocations;
+    uint64_t clippingPrimitives;
+    uint64_t fragmentShaderInvocations;
+    uint64_t tessControlShaderPatches;        /* D3D12 hull-shader invocations */
+    uint64_t tessEvaluationShaderInvocations; /* D3D12 domain-shader invocations */
+    uint64_t computeShaderInvocations;
+} VriPipelineStatistics;
 
 typedef struct VriQueryPoolDesc
 {
@@ -44,7 +64,8 @@ typedef struct VriQueryInterface
 {
     VriResult (VRI_CALL *CreateQueryPool)(VriDevice* device, const VriQueryPoolDesc* desc, VriQueryPool** outPool);
     void      (VRI_CALL *DestroyQueryPool)(VriQueryPool* pool);
-    /* Bytes one query occupies in the CmdCopyQueries destination buffer (8 for both types). */
+    /* Bytes one query occupies in the CmdCopyQueries destination buffer: 8 for timestamp /
+     * occlusion, sizeof(VriPipelineStatistics) for pipeline statistics. */
     uint32_t  (VRI_CALL *GetQuerySize)(const VriQueryPool* pool);
 
     /* Reset [offset, offset+num) before (re)writing. REQUIRED on Vulkan; a no-op on D3D12. */

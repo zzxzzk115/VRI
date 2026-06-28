@@ -40,6 +40,7 @@ target("vri-tests")
     add_files("test_instancing_xbackend.cpp") -- per-instance vertex stream (instanced matrices)
     add_files("test_query_xbackend.cpp")      -- GPU timestamp query pools (VK + D3D12 + WebGPU + GL)
     add_files("test_occlusion_xbackend.cpp")  -- occlusion queries (VK + D3D12 + GL)
+    add_files("test_pipelinestats_xbackend.cpp") -- pipeline-statistics queries (VK + D3D12)
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

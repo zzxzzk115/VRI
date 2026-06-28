@@ -19,12 +19,32 @@ namespace vri::vk
         {
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
-            DeviceVK*   d  = Dev(device);
-            VkQueryType vt = desc->type == VriQueryType_Occlusion ? VK_QUERY_TYPE_OCCLUSION : VK_QUERY_TYPE_TIMESTAMP;
-
+            DeviceVK*             d  = Dev(device);
             VkQueryPoolCreateInfo ci = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-            ci.queryType             = vt;
             ci.queryCount            = desc->queryCount;
+            if (desc->type == VriQueryType_Occlusion)
+                ci.queryType = VK_QUERY_TYPE_OCCLUSION;
+            else if (desc->type == VriQueryType_PipelineStatistics)
+            {
+                if (d->Desc().hasPipelineStatistics == VRI_FALSE)
+                    return VriResult_Unsupported;
+                ci.queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS;
+                // All 11 statistics, in the bit order that matches VriPipelineStatistics / D3D12.
+                ci.pipelineStatistics = VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_CONTROL_SHADER_PATCHES_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_EVALUATION_SHADER_INVOCATIONS_BIT |
+                                        VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
+            }
+            else
+                ci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            const VkQueryType vt = ci.queryType;
 
             VkQueryPool pool = VK_NULL_HANDLE;
             if (vkCreateQueryPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
@@ -42,7 +62,11 @@ namespace vri::vk
             delete q;
         }
 
-        uint32_t VRI_CALL GetQuerySize(const VriQueryPool*) { return sizeof(uint64_t); }
+        uint32_t VRI_CALL GetQuerySize(const VriQueryPool* pool)
+        {
+            const QueryPoolVK* q = reinterpret_cast<const QueryPoolVK*>(pool);
+            return q->type == VK_QUERY_TYPE_PIPELINE_STATISTICS ? sizeof(VriPipelineStatistics) : sizeof(uint64_t);
+        }
 
         void VRI_CALL CmdResetQueries(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num)
         {
@@ -73,13 +97,15 @@ namespace vri::vk
                                      uint64_t          dstOffset)
         {
             // WAIT_BIT so the copy blocks on the queries' availability; 64_BIT for uint64 results.
+            const VkDeviceSize stride =
+                QP(pool)->type == VK_QUERY_TYPE_PIPELINE_STATISTICS ? sizeof(VriPipelineStatistics) : sizeof(uint64_t);
             vkCmdCopyQueryPoolResults(Cmd(cmd)->cmd,
                                       QP(pool)->pool,
                                       offset,
                                       num,
                                       Buf(dstBuffer)->buffer,
                                       dstOffset,
-                                      sizeof(uint64_t),
+                                      stride,
                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
         }
 

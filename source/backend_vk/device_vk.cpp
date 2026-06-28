@@ -403,9 +403,11 @@ namespace vri::vk
         VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         features2.pNext                     = &f11;
         // Legacy graphics stages + non-solid fill: enable when the GPU supports them.
-        features2.features.geometryShader     = baseSup.geometryShader;
-        features2.features.tessellationShader = baseSup.tessellationShader;
-        features2.features.fillModeNonSolid   = baseSup.fillModeNonSolid; // polygonMode Line/Point
+        features2.features.geometryShader          = baseSup.geometryShader;
+        features2.features.tessellationShader      = baseSup.tessellationShader;
+        features2.features.fillModeNonSolid        = baseSup.fillModeNonSolid;        // polygonMode Line/Point
+        features2.features.pipelineStatisticsQuery = baseSup.pipelineStatisticsQuery; // pipeline-statistics queries
+        m_hasPipelineStats                         = baseSup.pipelineStatisticsQuery;
 
         std::vector<const char*> extensions;
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -769,6 +771,7 @@ namespace vri::vk
         m_desc.hasOpacityMicromap     = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery            = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasExternalMemory      = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasPipelineStatistics  = m_hasPipelineStats ? VRI_TRUE : VRI_FALSE;
         m_desc.hasConservativeRaster  = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor         = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;
