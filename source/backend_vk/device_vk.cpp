@@ -404,7 +404,25 @@ namespace vri::vk
         // SV_VertexID/SV_InstanceID (base-vertex aware), so enable it by default.
         VkPhysicalDeviceVulkan11Features f11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
         f11.shaderDrawParameters             = VK_TRUE;
-        f11.pNext                            = &f12;
+        // Multiview (single-pass layered rendering for VR stereo): enable when supported, expose the
+        // view-count limit. Core 1.1 -- queried/enabled via VkPhysicalDeviceVulkan11Features::multiview.
+        {
+            VkPhysicalDeviceVulkan11Features mv11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+            VkPhysicalDeviceFeatures2        mvq  = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+            mvq.pNext                             = &mv11;
+            vkGetPhysicalDeviceFeatures2(m_physicalDevice, &mvq);
+            if (mv11.multiview)
+            {
+                f11.multiview                               = VK_TRUE;
+                m_hasMultiview                              = true;
+                VkPhysicalDeviceMultiviewProperties mvProps = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES};
+                VkPhysicalDeviceProperties2         p2      = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+                p2.pNext                                    = &mvProps;
+                vkGetPhysicalDeviceProperties2(m_physicalDevice, &p2);
+                m_maxViewCount = mvProps.maxMultiviewViewCount;
+            }
+        }
+        f11.pNext = &f12;
 
         VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         features2.pNext                     = &f11;
@@ -796,6 +814,8 @@ namespace vri::vk
         m_desc.hasDrawIndirectCount    = m_hasDrawIndirectCount ? VRI_TRUE : VRI_FALSE;
         m_desc.hasClearStorageBuffer   = VRI_TRUE; // vkCmdFillBuffer is core Vulkan
         m_desc.hasClearStorageTexture  = VRI_TRUE; // vkCmdClearColorImage is core Vulkan
+        m_desc.hasMultiview            = m_hasMultiview ? VRI_TRUE : VRI_FALSE;
+        m_desc.maxViewCount            = m_hasMultiview ? m_maxViewCount : 0u;
         m_desc.hasConservativeRaster   = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor         = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;

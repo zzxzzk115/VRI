@@ -99,6 +99,8 @@ namespace vri::vk
         bool            m_hasCalibratedTimestamps = false;
         bool            m_hasDrawIndirectCount    = false;
         bool            m_hasMemoryBudget         = false;
+        bool            m_hasMultiview            = false;
+        uint32_t        m_maxViewCount            = 0;
         VkTimeDomainKHR m_hostTimeDomain          = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
         ExtFunctions    m_ext                     = {};
 

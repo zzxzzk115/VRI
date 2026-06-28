@@ -66,6 +66,7 @@ How each feature is supported on each backend:
 | Fragment-shader barycentrics | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Multiview (single-pass stereo) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GPU timestamp queries | ✅ | ✅ | ❌ | 🟡 | 🟡 | ❌ | ❌ |
 | Occlusion queries | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
@@ -107,6 +108,12 @@ Notes:
   struct) on Vulkan + D3D12 + desktop OpenGL 4.6 (via `ARB_pipeline_statistics_query`, one GL query
   object per stat), and **calibrated timestamps** (a correlated GPU+CPU clock pair, for aligning GPU
   spans with a CPU trace) on Vulkan + D3D12.
+- **Multiview** (single-pass layered rendering) renders to several layers of an array target in one
+  pass, selected by a `viewMask` on both the graphics pipeline (`VriOutputMergerDesc::viewMask`) and
+  the render pass (`VriAttachmentsDesc::viewMask`); the shader reads the per-view index via
+  `SV_ViewID` (→ SPIR-V `gl_ViewIndex`). This is the basis of single-pass VR stereo. Implemented on
+  **Vulkan** (core 1.1 multiview); exposed via `VriDeviceDesc::hasMultiview` + `maxViewCount`. D3D12
+  ViewInstancing and desktop-GL `OVR_multiview` are documented follow-ups.
 - **Built-in Dear ImGui renderer** (`ext/vri_ext_imgui.h`, `VRI_INTERFACE_IMGUI`) draws ImGui
   through VRI's own core interface, so a single renderer covers every backend with no per-backend
   `imgui_impl_*` and it flows through the validation layer for free. VRI does **not** depend on or

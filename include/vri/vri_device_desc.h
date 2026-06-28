@@ -83,6 +83,8 @@ typedef struct VriDeviceDesc
     VriBool        hasDrawIndirectCount;       /* CmdDraw[Indexed]IndirectCount (GPU-driven draw count) */
     VriBool        hasClearStorageBuffer;      /* CmdClearStorageBuffer (fill a storage buffer with a uint32) */
     VriBool        hasClearStorageTexture;     /* CmdClearStorageTexture (clear a storage texture to a color) */
+    VriBool        hasMultiview;               /* single-pass layered rendering via viewMask (VR stereo) */
+    uint32_t       maxViewCount;               /* max simultaneous views in a viewMask (0 if no multiview) */
     float          timestampPeriodNanoseconds; /* nanoseconds per timestamp tick (0 if unsupported) */
     uint32_t       subgroupSize;     /* lanes per subgroup/wave (0 if unknown) */
 

@@ -909,6 +909,8 @@ namespace vri::vk
             VkPipelineRenderingCreateInfo rendering = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
             rendering.colorAttachmentCount          = static_cast<uint32_t>(colorFormats.size());
             rendering.pColorAttachmentFormats       = colorFormats.data();
+            // Multiview: the pipeline's viewMask must match the render pass's (VkRenderingInfo::viewMask).
+            rendering.viewMask = desc->outputMerger.viewMask;
             if (desc->outputMerger.depthStencilFormat != VriFormat_Unknown)
             {
                 const VkFormat dsf              = ToVkFormat(desc->outputMerger.depthStencilFormat);

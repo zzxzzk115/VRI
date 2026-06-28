@@ -51,6 +51,7 @@ target("vri-tests")
     add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)
+    add_files("test_multiview_xbackend.cpp") -- multiview single-pass layered rendering (viewMask)
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

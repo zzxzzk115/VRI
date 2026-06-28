@@ -121,6 +121,8 @@ typedef struct VriOutputMergerDesc
     const VriColorAttachmentDesc* colors;
     uint32_t                      colorNum;
     VriFormat                     depthStencilFormat; /* Unknown = none */
+    uint32_t                      viewMask;           /* multiview; 0 = single view. Must match the
+                                                       * render's VriAttachmentsDesc::viewMask. */
 } VriOutputMergerDesc;
 
 typedef struct VriMultisampleDesc
