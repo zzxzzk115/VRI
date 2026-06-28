@@ -46,6 +46,7 @@ target("vri-tests")
     add_files("test_pipelinestats_xbackend.cpp") -- pipeline-statistics queries (VK + D3D12)
     add_files("test_ascompaction_xbackend.cpp") -- ray-tracing AS compaction (VK + D3D12)
     add_files("test_imgui_xbackend.cpp")      -- built-in Dear ImGui renderer (VRI_INTERFACE_IMGUI)
+    add_files("test_pipelinecache_xbackend.cpp") -- serializable pipeline cache (VK VkPipelineCache)
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

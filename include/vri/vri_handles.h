@@ -23,6 +23,7 @@ typedef struct VriDescriptorSet VriDescriptorSet;
 typedef struct VriDescriptorPool VriDescriptorPool;
 typedef struct VriPipelineLayout VriPipelineLayout;
 typedef struct VriPipeline      VriPipeline;
+typedef struct VriPipelineCache VriPipelineCache; /* ext/vri_ext_pipeline_cache.h */
 typedef struct VriMemory        VriMemory;
 typedef struct VriFence         VriFence;
 typedef struct VriSwapChain     VriSwapChain;

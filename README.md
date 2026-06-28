@@ -104,6 +104,12 @@ Notes:
   link Dear ImGui: the application owns the ImGui environment (context, input, `NewFrame`) and each
   frame hands VRI a backend-neutral, flattened `VriImguiDrawData` (so no ImGui types cross into
   VRI). The examples' control panel is drawn with it.
+- **Pipeline cache** (`ext/vri_ext_pipeline_cache.h`, `VRI_INTERFACE_PIPELINE_CACHE`) lets the
+  driver reuse work (shader compilation, PSO assembly) across pipeline creations and across runs:
+  pass a cache in `VriGraphicsPipelineDesc::pipelineCache`, serialize it on exit
+  (`GetPipelineCacheData`), and seed the next launch (`CreatePipelineCache`) for fast warm startup.
+  A stale or foreign blob is detected and ignored, so seeding is always safe. On **Vulkan**
+  (`VkPipelineCache`); **Direct3D 12** (`ID3D12PipelineLibrary`) is the next step.
 
 ## Building
 

@@ -147,12 +147,16 @@ typedef struct VriGraphicsPipelineDesc
     VriMultisampleDesc          multisample;
     VriDepthStencilDesc         depthStencil;
     VriOutputMergerDesc         outputMerger;
+    /* Optional warm-creation cache from VRI_INTERFACE_PIPELINE_CACHE; NULL = none. */
+    VriPipelineCache*           pipelineCache;
 } VriGraphicsPipelineDesc;
 
 typedef struct VriComputePipelineDesc
 {
     VriPipelineLayout* pipelineLayout;
     VriShaderDesc      shader;
+    /* Optional warm-creation cache from VRI_INTERFACE_PIPELINE_CACHE; NULL = none. */
+    VriPipelineCache*  pipelineCache;
 } VriComputePipelineDesc;
 
 VRI_EXTERN_C_END

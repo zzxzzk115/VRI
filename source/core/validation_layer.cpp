@@ -67,12 +67,13 @@ namespace vri::core
             VriCoreInterface            table; // the validating table handed to the app
             VriSwapChainInterface       swap;  // the backend's real swapchain table (if supported)
             bool                        hasSwap = false;
-            VriShadingRateInterface     vrs;      // the backend's real VRS table (if supported)
-            VriMeshShaderInterface      mesh;     // the backend's real mesh-shader table (if supported)
-            VriRayTracingInterface      rt;       // the backend's real ray-tracing table (if supported)
-            VriOpacityMicromapInterface omm;      // the backend's real OMM table (if supported)
-            VriExternalInterface        external; // the backend's real external-memory table (if supported)
-            VriQueryInterface           query;    // the backend's real query-pool table (if supported)
+            VriShadingRateInterface     vrs;           // the backend's real VRS table (if supported)
+            VriMeshShaderInterface      mesh;          // the backend's real mesh-shader table (if supported)
+            VriRayTracingInterface      rt;            // the backend's real ray-tracing table (if supported)
+            VriOpacityMicromapInterface omm;           // the backend's real OMM table (if supported)
+            VriExternalInterface        external;      // the backend's real external-memory table (if supported)
+            VriQueryInterface           query;         // the backend's real query-pool table (if supported)
+            VriPipelineCacheInterface   pipelineCache; // the backend's real pipeline-cache table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>  queues;
             std::vector<CmdBufVal*> cmds;
@@ -782,6 +783,16 @@ namespace vri::core
             return DV(device)->query.GetCalibratedTimestamps(DV(device)->real, out);
         }
 
+        // ---- pipeline cache (only CreatePipelineCache takes the device; the cache handle is the
+        // raw backend object, so Destroy/GetData pass through unwrapped) ----
+        VriResult VRI_CALL PipelineCacheCreate(VriDevice*         device,
+                                               const void*        initialData,
+                                               size_t             initialSize,
+                                               VriPipelineCache** out)
+        {
+            return DV(device)->pipelineCache.CreatePipelineCache(DV(device)->real, initialData, initialSize, out);
+        }
+
         void BuildTable(DeviceVal* d)
         {
             VriCoreInterface t = d->core; // start from the real table (resource plane passes through)
@@ -1019,6 +1030,20 @@ namespace vri::core
             w.CmdCopyQueries                      = QueryCmdCopyQueries;
             w.GetCalibratedTimestamps             = QueryGetCalibratedTimestamps;
             *static_cast<VriQueryInterface*>(out) = w;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_PIPELINE_CACHE))
+        {
+            if (size != sizeof(VriPipelineCacheInterface))
+                return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(
+                VRI_INTERFACE_PIPELINE_CACHE, sizeof(d->pipelineCache), &d->pipelineCache);
+            if (r != VriResult_Success)
+                return r;
+            // DestroyPipelineCache / GetPipelineCacheData take the raw cache handle -> pass through.
+            VriPipelineCacheInterface w                   = d->pipelineCache;
+            w.CreatePipelineCache                         = PipelineCacheCreate;
+            *static_cast<VriPipelineCacheInterface*>(out) = w;
             return VriResult_Success;
         }
         return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);

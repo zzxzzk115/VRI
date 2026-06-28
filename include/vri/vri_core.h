@@ -56,6 +56,7 @@ VRI_API VriResult VRI_CALL vriGetInterface(const VriDevice* device,
 #define VRI_INTERFACE_EXTERNAL   "VriExternalInterface"
 #define VRI_INTERFACE_QUERY      "VriQueryInterface"
 #define VRI_INTERFACE_IMGUI      "VriImguiInterface"
+#define VRI_INTERFACE_PIPELINE_CACHE "VriPipelineCacheInterface"
 
 /* ---- core interface (function table) ---------------------------------- */
 

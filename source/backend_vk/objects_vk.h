@@ -192,6 +192,18 @@ namespace vri::vk
     };
     inline VriQueryPool* ToHandle(QueryPoolVK* q) { return reinterpret_cast<VriQueryPool*>(q); }
 
+    struct PipelineCacheVK
+    {
+        DeviceVK*       device;
+        VkPipelineCache cache;
+    };
+    inline VriPipelineCache* ToHandle(PipelineCacheVK* p) { return reinterpret_cast<VriPipelineCache*>(p); }
+    // The VkPipelineCache to seed a create with (VK_NULL_HANDLE when the desc has none).
+    inline VkPipelineCache PipeCache(VriPipelineCache* h)
+    {
+        return h ? reinterpret_cast<PipelineCacheVK*>(h)->cache : VK_NULL_HANDLE;
+    }
+
     // ---- opaque <-> concrete casts -------------------------------------
     template<typename T, typename H>
     inline T* Cast(H* h)

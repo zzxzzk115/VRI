@@ -34,5 +34,6 @@
 #include "ext/vri_ext_external.h"
 #include "ext/vri_ext_query.h"
 #include "ext/vri_ext_imgui.h"
+#include "ext/vri_ext_pipeline_cache.h"
 
 #endif /* VRI_H */

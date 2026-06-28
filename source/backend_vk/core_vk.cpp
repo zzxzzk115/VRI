@@ -903,7 +903,7 @@ namespace vri::vk
             ci.layout              = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : VK_NULL_HANDLE;
 
             VkPipeline pipeline = VK_NULL_HANDLE;
-            VkResult   vr       = vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline);
+            VkResult   vr = vkCreateGraphicsPipelines(dev, PipeCache(desc->pipelineCache), 1, &ci, nullptr, &pipeline);
 
             for (VkShaderModule m : modules)
                 vkDestroyShaderModule(dev, m, nullptr);
@@ -931,7 +931,7 @@ namespace vri::vk
             ci.layout                      = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : VK_NULL_HANDLE;
 
             VkPipeline pipeline = VK_NULL_HANDLE;
-            VkResult   vr       = vkCreateComputePipelines(dev, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline);
+            VkResult   vr = vkCreateComputePipelines(dev, PipeCache(desc->pipelineCache), 1, &ci, nullptr, &pipeline);
             vkDestroyShaderModule(dev, m, nullptr);
             if (vr != VK_SUCCESS)
                 return VriResult_Failure;

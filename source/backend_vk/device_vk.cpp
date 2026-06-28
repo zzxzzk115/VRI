@@ -4,6 +4,7 @@
 #include "interop_vk.h"
 #include "meshshader_vk.h"
 #include "omm_vk.h"
+#include "pipeline_cache_vk.h"
 #include "query_vk.h"
 #include "rt_vk.h"
 #include "swapchain_vk.h"
@@ -919,6 +920,8 @@ namespace vri::vk
         m_registry.Register(VRI_INTERFACE_INTEROP, GetInteropInterfaceVK(), sizeof(VriInteropInterface));
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceVK(), sizeof(VriQueryInterface));
         m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
+        m_registry.Register(
+            VRI_INTERFACE_PIPELINE_CACHE, GetPipelineCacheInterfaceVK(), sizeof(VriPipelineCacheInterface));
         // Optional interfaces: registered only when the backing feature was granted,
         // so vriGetInterface returns Unsupported on adapters/runs that lack it.
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
