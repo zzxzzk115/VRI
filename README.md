@@ -68,6 +68,13 @@ How each feature is supported on each backend:
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GPU timestamp queries | ✅ | ✅ | ❌ | 🟡 | 🟡 | ❌ | ❌ |
+| Occlusion queries | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Pipeline-statistics queries | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Calibrated GPU+CPU timestamps | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Pipeline cache | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Indirect draw count (GPU-driven) | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Video memory budget | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Built-in Dear ImGui renderer | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 Notes:
 
