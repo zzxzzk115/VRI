@@ -1,5 +1,6 @@
 #include "device_d3d12.h"
 #include "core_d3d12.h"
+#include "external_d3d12.h"
 #include "meshshader_d3d12.h"
 #include "omm_d3d12.h"
 #include "rt_d3d12.h"
@@ -280,6 +281,11 @@ namespace vri::d3d12
         if ((requested & VriFeature_LowLatency) && fail("low-latency not implemented on D3D12"))
             return VriResult_Unsupported;
 
+        // External memory/fence export: D3D12 shared handles (CreateSharedHandle) are always
+        // available on Windows, so grant whenever requested.
+        if (requested & VriFeature_ExternalMemory)
+            granted |= VriFeature_ExternalMemory;
+
         m_enabledFeatures = granted;
         return VriResult_Success;
     }
@@ -347,6 +353,7 @@ namespace vri::d3d12
         m_desc.hasOpacityMicromap     = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery            = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasBindless            = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasExternalMemory      = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).
@@ -389,6 +396,8 @@ namespace vri::d3d12
         if (m_enabledFeatures & VriFeature_OpacityMicromap)
             m_registry.Register(
                 VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceD3D12(), sizeof(VriOpacityMicromapInterface));
+        if (m_enabledFeatures & VriFeature_ExternalMemory)
+            m_registry.Register(VRI_INTERFACE_EXTERNAL, GetExternalInterfaceD3D12(), sizeof(VriExternalInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

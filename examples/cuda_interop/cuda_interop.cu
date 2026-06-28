@@ -13,14 +13,28 @@
 
 namespace
 {
-    // Match the platform-bound handle types VRI exports (Win32 on Windows, fd elsewhere).
+    // Pick the CUDA import types matching what VRI exported (Vulkan opaque vs D3D12 shared).
+    cudaExternalMemoryHandleType MemType(int kind)
+    {
+        if (kind == CUDA_INTEROP_KIND_D3D12)
+            return cudaExternalMemoryHandleTypeD3D12Resource;
 #if defined(_WIN32)
-    constexpr cudaExternalMemoryHandleType    kMemType = cudaExternalMemoryHandleTypeOpaqueWin32;
-    constexpr cudaExternalSemaphoreHandleType kSemType = cudaExternalSemaphoreHandleTypeTimelineSemaphoreWin32;
+        return cudaExternalMemoryHandleTypeOpaqueWin32;
 #else
-    constexpr cudaExternalMemoryHandleType    kMemType = cudaExternalMemoryHandleTypeOpaqueFd;
-    constexpr cudaExternalSemaphoreHandleType kSemType = cudaExternalSemaphoreHandleTypeTimelineSemaphoreFd;
+        return cudaExternalMemoryHandleTypeOpaqueFd;
 #endif
+    }
+
+    cudaExternalSemaphoreHandleType SemType(int kind)
+    {
+        if (kind == CUDA_INTEROP_KIND_D3D12)
+            return cudaExternalSemaphoreHandleTypeD3D12Fence;
+#if defined(_WIN32)
+        return cudaExternalSemaphoreHandleTypeTimelineSemaphoreWin32;
+#else
+        return cudaExternalSemaphoreHandleTypeTimelineSemaphoreFd;
+#endif
+    }
 
     bool Check(cudaError_t e, const char* what)
     {
@@ -77,7 +91,8 @@ extern "C" int cudaInteropPrintDevice(void)
     return 0;
 }
 
-extern "C" int cudaInteropRun(void*    memHandle,
+extern "C" int cudaInteropRun(int      handleKind,
+                              void*    memHandle,
                               uint64_t allocSize,
                               void*    semHandle,
                               uint32_t elementCount,
@@ -87,7 +102,7 @@ extern "C" int cudaInteropRun(void*    memHandle,
     // ---- import the VRI buffer's backing memory as a CUDA device pointer ----
     cudaExternalMemory_t         extMem = nullptr;
     cudaExternalMemoryHandleDesc memDesc {};
-    memDesc.type  = kMemType;
+    memDesc.type  = MemType(handleKind);
     memDesc.size  = allocSize;
     memDesc.flags = cudaExternalMemoryDedicated; // VRI exports dedicated allocations
     SetMemHandle(memDesc, memHandle);
@@ -108,7 +123,7 @@ extern "C" int cudaInteropRun(void*    memHandle,
     // ---- import the VRI timeline fence as a CUDA external semaphore ----
     cudaExternalSemaphore_t         extSem = nullptr;
     cudaExternalSemaphoreHandleDesc semDesc {};
-    semDesc.type = kSemType;
+    semDesc.type = SemType(handleKind);
     SetSemHandle(semDesc, semHandle);
     if (!Check(cudaImportExternalSemaphore(&extSem, &semDesc), "cudaImportExternalSemaphore"))
     {

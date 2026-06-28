@@ -19,13 +19,15 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <vector>
+#include <cstdlib>
+#include <cstring>
 
 #if defined(_WIN32)
 #include <windows.h>
 namespace
 {
-    constexpr VriExternalHandleType kHandleType = VriExternalHandleType_OpaqueWin32;
+    // Vulkan exports OPAQUE_WIN32 on Windows; the opaque memory + semaphore handle type.
+    constexpr VriExternalHandleType kVkHandleType = VriExternalHandleType_OpaqueWin32;
     void                            CloseExported(void* h)
     {
         if (h)
@@ -36,7 +38,7 @@ namespace
 #include <unistd.h>
 namespace
 {
-    constexpr VriExternalHandleType kHandleType = VriExternalHandleType_OpaqueFd;
+    constexpr VriExternalHandleType kVkHandleType = VriExternalHandleType_OpaqueFd;
     void                            CloseExported(void* h) { ::close(static_cast<int>(reinterpret_cast<intptr_t>(h))); }
 } // namespace
 #endif
@@ -80,15 +82,25 @@ int main()
     }
 
     // ---- 1. VRI device with external-memory export enabled ----
+    // CUDA interop is wired on Vulkan and D3D12; pick with VRI_API=vulkan|d3d12 (default vulkan).
+    const char* apiEnv   = std::getenv("VRI_API");
+    const bool  useD3D12 = apiEnv && (std::strcmp(apiEnv, "d3d12") == 0 || std::strcmp(apiEnv, "D3D12") == 0);
+
+    // The handle flavor + CUDA import kind differ per backend: Vulkan exports one OPAQUE type
+    // for both memory and fences; D3D12 exports a shared resource for memory and a shared fence.
+    const VriExternalHandleType memHandleType   = useD3D12 ? VriExternalHandleType_D3D12Resource : kVkHandleType;
+    const VriExternalHandleType fenceHandleType = useD3D12 ? VriExternalHandleType_D3D12Fence : kVkHandleType;
+    const int                   cudaHandleKind  = useD3D12 ? CUDA_INTEROP_KIND_D3D12 : CUDA_INTEROP_KIND_VULKAN;
+
     App                   app;
     VriDeviceCreationDesc desc {};
-    desc.graphicsAPI      = VriGraphicsAPI_Vulkan; // CUDA interop is wired on Vulkan
+    desc.graphicsAPI      = useD3D12 ? VriGraphicsAPI_D3D12 : VriGraphicsAPI_Vulkan;
     desc.enableValidation = VRI_TRUE;
     desc.bestEffort       = VRI_TRUE;
     desc.enabledFeatures  = VriFeature_ExternalMemory;
     if (vriCreateDevice(&desc, &app.device) != VriResult_Success)
     {
-        std::printf("Failed to create a Vulkan device.\n");
+        std::printf("Failed to create a %s device.\n", useD3D12 ? "D3D12" : "Vulkan");
         return 1;
     }
     if (vriGetInterface(app.device, VRI_INTERFACE_CORE, sizeof(app.core), &app.core) != VriResult_Success)
@@ -120,13 +132,13 @@ int main()
     sharedDesc.size           = bufSize;
     sharedDesc.usage          = VriBufferUsage_StorageBuffer | VriBufferUsage_TransferSrc | VriBufferUsage_TransferDst;
     sharedDesc.memoryLocation = VriMemoryLocation_Device;
-    if (ext.CreateExportableBuffer(dev, &sharedDesc, kHandleType, &shared) != VriResult_Success)
+    if (ext.CreateExportableBuffer(dev, &sharedDesc, memHandleType, &shared) != VriResult_Success)
     {
         std::printf("CreateExportableBuffer failed.\n");
         return 1;
     }
     VriFence* fenceShared = nullptr; // the VRI <-> CUDA timeline
-    if (ext.CreateExportableFence(dev, 0, kHandleType, &fenceShared) != VriResult_Success)
+    if (ext.CreateExportableFence(dev, 0, fenceHandleType, &fenceShared) != VriResult_Success)
     {
         std::printf("CreateExportableFence failed.\n");
         return 1;
@@ -195,23 +207,25 @@ int main()
 
     // ---- export the OS handles and hand them to CUDA ----
     VriExternalMemoryInfo memInfo {};
-    if (ext.GetBufferMemoryHandle(dev, shared, kHandleType, &memInfo) != VriResult_Success)
+    if (ext.GetBufferMemoryHandle(dev, shared, memHandleType, &memInfo) != VriResult_Success)
     {
         std::printf("GetBufferMemoryHandle failed.\n");
         return 1;
     }
     void* semHandle = nullptr;
-    if (ext.GetFenceHandle(dev, fenceShared, kHandleType, &semHandle) != VriResult_Success)
+    if (ext.GetFenceHandle(dev, fenceShared, fenceHandleType, &semHandle) != VriResult_Success)
     {
         std::printf("GetFenceHandle failed.\n");
         return 1;
     }
 
-    std::printf("Exported buffer handle (%llu-byte allocation) + fence handle; handing to CUDA...\n",
+    std::printf("[%s] exported buffer handle (%llu-byte allocation) + fence handle; handing to CUDA...\n",
+                useD3D12 ? "D3D12" : "Vulkan",
                 static_cast<unsigned long long>(memInfo.size));
 
     // CUDA: wait fence==1 -> kernel x[i]=x[i]*2+1 -> signal fence=2
-    const int cudaRc = cudaInteropRun(memInfo.handle, memInfo.size, semHandle, kCount, /*wait*/ 1, /*signal*/ 2);
+    const int cudaRc =
+        cudaInteropRun(cudaHandleKind, memInfo.handle, memInfo.size, semHandle, kCount, /*wait*/ 1, /*signal*/ 2);
 
     // the caller owns the exported handles (CUDA duplicated what it needed)
     CloseExported(memInfo.handle);

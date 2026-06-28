@@ -70,6 +70,7 @@ target("vri-tests")
         add_files("test_meshshader_d3d12.cpp")-- mesh shaders (DispatchMesh, DXIL)
         add_files("test_raytracing_d3d12.cpp")-- DXR ray tracing (state object + AS + DispatchRays)
         add_files("test_omm_d3d12.cpp")       -- opacity micromap: explicit "unsupported" contract
+        add_files("test_external_d3d12.cpp")  -- external memory/fence export (CUDA interop seam)
     end
     if has_config("vri_backend_metal") then
         add_files("test_meshshader_mtl.cpp")  -- mesh shaders (MTLMeshRenderPipeline, MSL via SPIRV-Cross)

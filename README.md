@@ -66,7 +66,7 @@ How each feature is supported on each backend:
 | Fragment-shader barycentrics | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| External memory / interop (CUDA) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 Notes:
 
@@ -82,7 +82,9 @@ Notes:
   memory and for timeline fences (`ext/vri_ext_external.h`), so a **CUDA** kernel — or OptiX,
   NVENC, another process, or another graphics API — can import the same memory and timeline.
   VRI itself does **not** depend on CUDA; it only produces the handles the consumer imports.
-  Implemented on Vulkan today; Direct3D 12 (shared handles) is planned.
+  Implemented on **Vulkan** (`VK_KHR_external_memory/semaphore`) and **Direct3D 12** (shared
+  committed resources + shared fences); the opt-in `example-cuda-interop` runs on both
+  (`VRI_API=vulkan|d3d12`).
 
 ## Building
 

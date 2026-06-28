@@ -33,13 +33,20 @@
 
 VRI_EXTERN_C_BEGIN
 
-/* OS handle flavor to export. Mirrors VK_EXTERNAL_*_HANDLE_TYPE_OPAQUE_* and maps to
- * CUDA's cudaExternalMemoryHandleType / cudaExternalSemaphoreHandleType. */
+/* OS handle flavor to export. Maps to CUDA's cudaExternalMemoryHandleType /
+ * cudaExternalSemaphoreHandleType. The valid value depends on the backend:
+ *   - Vulkan exports OPAQUE handles (OpaqueWin32 on Windows, OpaqueFd elsewhere) for both
+ *     memory and fences.
+ *   - D3D12 exports a shared committed resource (D3D12Resource) for buffer/texture memory and
+ *     a shared ID3D12Fence (D3D12Fence) for fences -- distinct CUDA import types, so they are
+ *     distinct values here. Both are NT HANDLEs the caller owns and CloseHandle()s. */
 typedef enum VriExternalHandleType
 {
-    VriExternalHandleType_OpaqueWin32 = 1, /* Win32 HANDLE (default on Windows) */
-    VriExternalHandleType_OpaqueFd    = 2, /* POSIX fd (default on Linux) */
-    VriExternalHandleType_MaxEnum     = 0x7fffffff
+    VriExternalHandleType_OpaqueWin32  = 1, /* Vulkan: Win32 HANDLE */
+    VriExternalHandleType_OpaqueFd     = 2, /* Vulkan: POSIX fd */
+    VriExternalHandleType_D3D12Resource = 3, /* D3D12: shared committed resource (memory calls) */
+    VriExternalHandleType_D3D12Fence    = 4, /* D3D12: shared ID3D12Fence (fence calls) */
+    VriExternalHandleType_MaxEnum       = 0x7fffffff
 } VriExternalHandleType;
 
 /* Everything cudaExternalMemoryHandleDesc needs to import the exported allocation. */

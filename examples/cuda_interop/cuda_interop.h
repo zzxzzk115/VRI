@@ -23,18 +23,24 @@ extern "C"
     /* Print the selected CUDA device's name + compute capability. Returns 0 on success. */
     int cudaInteropPrintDevice(void);
 
+/* Which kind of handle VRI exported, so CUDA picks the matching import type. */
+#define CUDA_INTEROP_KIND_VULKAN 0 /* Vulkan OPAQUE_WIN32/FD memory + timeline semaphore */
+#define CUDA_INTEROP_KIND_D3D12 1  /* D3D12 shared resource + shared ID3D12Fence */
+
     /*
      * Import a VRI-exported buffer + timeline fence, then on a CUDA stream:
      *   wait(fence == waitValue)  ->  kernel: x[i] = x[i] * 2 + 1  ->  signal(fence = signalValue)
      * and block until the stream finishes. The OS handles stay owned by the caller (it closes
      * them after this returns). Returns 0 on success, non-zero (a cudaError_t) on failure.
      *
+     *   handleKind  : CUDA_INTEROP_KIND_* (Vulkan opaque vs D3D12 shared)
      *   memHandle   : VriExternalMemoryInfo::handle (Win32 HANDLE / fd)
      *   allocSize   : VriExternalMemoryInfo::size (total backing allocation)
      *   semHandle   : exported timeline-fence handle
      *   elementCount: number of uint32_t elements CUDA should transform
      */
-    int cudaInteropRun(void*    memHandle,
+    int cudaInteropRun(int      handleKind,
+                       void*    memHandle,
                        uint64_t allocSize,
                        void*    semHandle,
                        uint32_t elementCount,
