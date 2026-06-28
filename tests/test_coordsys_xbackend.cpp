@@ -9,8 +9,8 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_spv.h"  // g_triangleSpv  (Vulkan, solid red)
-#include "shaders/triangle_wgsl.h" // g_triangleWgsl (WebGPU, solid red)
+#include "common/shaders/triangle_spv.h"  // g_triangleSpv  (Vulkan, solid red)
+#include "common/shaders/triangle_wgsl.h" // g_triangleWgsl (WebGPU, solid red)
 
 namespace
 {

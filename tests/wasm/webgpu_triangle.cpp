@@ -13,7 +13,7 @@
 #include <cstdio>
 
 #include "shaders/compute_fill_wgsl.h" // g_computeFillWgsl (out[i] = i + 100)
-#include "shaders/triangle_wgsl.h"     // g_triangleWgsl (solid red)
+#include "common/shaders/triangle_wgsl.h"     // g_triangleWgsl (solid red)
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>

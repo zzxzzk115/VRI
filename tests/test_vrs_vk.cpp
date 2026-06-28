@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_spv.h"
+#include "common/shaders/triangle_spv.h"
 
 namespace
 {

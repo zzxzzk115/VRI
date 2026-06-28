@@ -5,7 +5,7 @@ target("example-triangle")
 
     add_deps("vri")
 
-    -- for the shared Slang-compiled SPIR-V header under tests/shaders
+    -- example/common/shared shaders are included as <bucket>/shaders/X.h from the repo root
     add_includedirs("$(projectdir)")
 
     add_files("main.cpp")

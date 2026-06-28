@@ -17,7 +17,7 @@
 #include "shaders/compute_fill_spv.h"  // g_computeFillSpv  (used only for the negative compute check)
 #include "shaders/triangle_inst_spv.h" // g_triangleInstSpv (instanced draw)
 #include "shaders/triangle_mrt_spv.h"  // g_triangleMrtSpv  (two render targets)
-#include "shaders/triangle_spv.h"      // g_triangleSpv     (solid red, vertex-id only)
+#include "common/shaders/triangle_spv.h"      // g_triangleSpv     (solid red, vertex-id only)
 #include "shaders/triangle_tex_spv.h"  // g_triangleTexSpv  (color sampled from a texture)
 #include "shaders/triangle_ubo_spv.h"  // g_triangleUboSpv  (color from a UBO descriptor)
 #include "shaders/triangle_vbuf_spv.h" // g_triangleVbufSpv (vertex buffer + indexed draw)

@@ -25,12 +25,12 @@
 #include "../cube/ktx.h"
 #include "../cube/mat4.h"
 
-#include "tests/shaders/deferred_light_dxbc.h" // g_deferredLightDxbcVS / PS
-#include "tests/shaders/deferred_light_spv.h"  // g_deferredLightSpv
-#include "tests/shaders/deferred_light_wgsl.h" // g_deferredLightWgsl
-#include "tests/shaders/deferred_mrt_dxbc.h"   // g_deferredMrtDxbcVS / PS (D3D12)
-#include "tests/shaders/deferred_mrt_spv.h"    // g_deferredMrtSpv    (Vulkan + OpenGL)
-#include "tests/shaders/deferred_mrt_wgsl.h"   // g_deferredMrtWgsl   (WebGPU)
+#include "examples/shaders/deferred_light_dxbc.h" // g_deferredLightDxbcVS / PS
+#include "examples/shaders/deferred_light_spv.h"  // g_deferredLightSpv
+#include "examples/shaders/deferred_light_wgsl.h" // g_deferredLightWgsl
+#include "examples/shaders/deferred_mrt_dxbc.h"   // g_deferredMrtDxbcVS / PS (D3D12)
+#include "examples/shaders/deferred_mrt_spv.h"    // g_deferredMrtSpv    (Vulkan + OpenGL)
+#include "examples/shaders/deferred_mrt_wgsl.h"   // g_deferredMrtWgsl   (WebGPU)
 
 namespace
 {

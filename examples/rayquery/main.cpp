@@ -17,15 +17,15 @@
 #include <cstring>
 #include <vector>
 
-#include "tests/shaders/rt_software_spv.h"  // g_rtSoftwareSpv  (compute; desktop GL via SPIR-V)
-#include "tests/shaders/rt_software_wgsl.h" // g_rtSoftwareWgsl (WebGPU)
-#include "tests/shaders/show_tex_dxbc.h"    // g_showTexDxbcVS / PS
-#include "tests/shaders/show_tex_spv.h"     // g_showTexSpv     (display: sample the result)
-#include "tests/shaders/show_tex_wgsl.h"    // g_showTexWgsl
+#include "examples/shaders/rt_software_spv.h"  // g_rtSoftwareSpv  (compute; desktop GL via SPIR-V)
+#include "examples/shaders/rt_software_wgsl.h" // g_rtSoftwareWgsl (WebGPU)
+#include "examples/shaders/show_tex_dxbc.h"    // g_showTexDxbcVS / PS
+#include "examples/shaders/show_tex_spv.h"     // g_showTexSpv     (display: sample the result)
+#include "examples/shaders/show_tex_wgsl.h"    // g_showTexWgsl
 #if !defined(__EMSCRIPTEN__)
-#include "tests/shaders/rt_rayquery_dxil.h" // g_rtRayqueryDxilCS (D3D12 hardware ray query)
-#include "tests/shaders/rt_rayquery_spv.h"  // g_rtRayquerySpv    (Vulkan hardware ray query)
-#include "tests/shaders/rt_software_dxbc.h" // g_rtSoftwareDxbcCS (D3D12 software fallback)
+#include "examples/shaders/rt_rayquery_dxil.h" // g_rtRayqueryDxilCS (D3D12 hardware ray query)
+#include "examples/shaders/rt_rayquery_spv.h"  // g_rtRayquerySpv    (Vulkan hardware ray query)
+#include "examples/shaders/rt_software_dxbc.h" // g_rtSoftwareDxbcCS (D3D12 software fallback)
 #endif
 
 namespace

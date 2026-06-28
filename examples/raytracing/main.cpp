@@ -24,17 +24,17 @@
 #include <cstring>
 #include <vector>
 
-#include "tests/shaders/rt_gltf_rayquery_spv.h"  // g_rtGltfRayquerySpv  (Metal/VK: inline ray query CS)
-#include "tests/shaders/rt_gltf_software_spv.h"  // g_rtGltfSoftwareSpv  (compute BVH fallback, GL/VK)
-#include "tests/shaders/rt_gltf_software_wgsl.h" // g_rtGltfSoftwareWgsl (compute BVH fallback, WebGPU)
-#include "tests/shaders/rt_gltf_spv.h"           // g_rtGltfSpv          (Vulkan: raygen/miss/closesthit)
-#include "tests/shaders/show_tex_dxbc.h"         // g_showTexDxbcVS / PS
-#include "tests/shaders/show_tex_spv.h"          // g_showTexSpv         (display: sample the result)
-#include "tests/shaders/show_tex_wgsl.h"         // g_showTexWgsl        (WebGPU display)
+#include "examples/shaders/rt_gltf_rayquery_spv.h"  // g_rtGltfRayquerySpv  (Metal/VK: inline ray query CS)
+#include "examples/shaders/rt_gltf_software_spv.h"  // g_rtGltfSoftwareSpv  (compute BVH fallback, GL/VK)
+#include "examples/shaders/rt_gltf_software_wgsl.h" // g_rtGltfSoftwareWgsl (compute BVH fallback, WebGPU)
+#include "examples/shaders/rt_gltf_spv.h"           // g_rtGltfSpv          (Vulkan: raygen/miss/closesthit)
+#include "examples/shaders/show_tex_dxbc.h"         // g_showTexDxbcVS / PS
+#include "examples/shaders/show_tex_spv.h"          // g_showTexSpv         (display: sample the result)
+#include "examples/shaders/show_tex_wgsl.h"         // g_showTexWgsl        (WebGPU display)
 #if defined(_WIN32)
-#include "tests/shaders/rt_gltf_dxil.h"          // g_rtGltfDxilRGEN/MISS/CHIT (D3D12 DXR library, per stage)
-#include "tests/shaders/rt_gltf_rayquery_dxil.h" // g_rtGltfRayqueryDxilCS     (D3D12 inline ray query CS)
-#include "tests/shaders/rt_gltf_software_dxil.h" // g_rtGltfSoftwareDxilCS      (D3D12 compute BVH fallback)
+#include "examples/shaders/rt_gltf_dxil.h"          // g_rtGltfDxilRGEN/MISS/CHIT (D3D12 DXR library, per stage)
+#include "examples/shaders/rt_gltf_rayquery_dxil.h" // g_rtGltfRayqueryDxilCS     (D3D12 inline ray query CS)
+#include "examples/shaders/rt_gltf_software_dxil.h" // g_rtGltfSoftwareDxilCS      (D3D12 compute BVH fallback)
 #endif
 
 #if !defined(VRI_GLTF_MODEL_PATH)

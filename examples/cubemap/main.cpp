@@ -16,12 +16,12 @@
 
 #include "../cube/mat4.h"
 
-#include "tests/shaders/skybox_dxbc.h"         // g_skyboxDxbcVS / PS
-#include "tests/shaders/skybox_reflect_dxbc.h" // g_skyboxReflectDxbcVS / PS
-#include "tests/shaders/skybox_reflect_spv.h"  // g_skyboxReflectSpv
-#include "tests/shaders/skybox_reflect_wgsl.h" // g_skyboxReflectWgsl
-#include "tests/shaders/skybox_spv.h"          // g_skyboxSpv
-#include "tests/shaders/skybox_wgsl.h"         // g_skyboxWgsl
+#include "examples/shaders/skybox_dxbc.h"         // g_skyboxDxbcVS / PS
+#include "examples/shaders/skybox_reflect_dxbc.h" // g_skyboxReflectDxbcVS / PS
+#include "examples/shaders/skybox_reflect_spv.h"  // g_skyboxReflectSpv
+#include "examples/shaders/skybox_reflect_wgsl.h" // g_skyboxReflectWgsl
+#include "examples/shaders/skybox_spv.h"          // g_skyboxSpv
+#include "examples/shaders/skybox_wgsl.h"         // g_skyboxWgsl
 
 namespace
 {

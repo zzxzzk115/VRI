@@ -13,9 +13,9 @@
 
 #include "../examples/cube/mat4.h"
 
-#include "shaders/cube_dxbc.h" // g_cubeDxbcVS / PS     (D3D12)
-#include "shaders/cube_spv.h"  // g_cubeSpv             (Vulkan + OpenGL)
-#include "shaders/cube_wgsl.h" // g_cubeWgsl            (WebGPU)
+#include "common/shaders/cube_dxbc.h" // g_cubeDxbcVS / PS     (D3D12)
+#include "common/shaders/cube_spv.h"  // g_cubeSpv             (Vulkan + OpenGL)
+#include "common/shaders/cube_wgsl.h" // g_cubeWgsl            (WebGPU)
 
 namespace
 {

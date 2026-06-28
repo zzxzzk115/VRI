@@ -6,9 +6,9 @@
 #include "../common/example_app.h"
 
 // Slang-authored triangle, compiled offline to per-target blobs (see `xmake shaders`).
-#include "tests/shaders/triangle_dxbc.h" // g_triangleDxbcVS/PS (Direct3D 12, per stage)
-#include "tests/shaders/triangle_spv.h"  // g_triangleSpv      (Vulkan + OpenGL via SPIRV-Cross)
-#include "tests/shaders/triangle_wgsl.h" // g_triangleWgsl     (WebGPU)
+#include "common/shaders/triangle_dxbc.h" // g_triangleDxbcVS/PS (Direct3D 12, per stage)
+#include "common/shaders/triangle_spv.h"  // g_triangleSpv      (Vulkan + OpenGL via SPIRV-Cross)
+#include "common/shaders/triangle_wgsl.h" // g_triangleWgsl     (WebGPU)
 
 int main(int, char**)
 {

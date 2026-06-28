@@ -25,7 +25,7 @@
 
 namespace vriex
 {
-    // Must match the Vertex struct in tests/shaders/rt_gltf.slang (32 bytes, tightly packed).
+    // Must match the Vertex struct in examples/shaders/rt_gltf.slang (32 bytes, tightly packed).
     struct GltfVertex
     {
         float pos[3];

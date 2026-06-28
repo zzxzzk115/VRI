@@ -9,6 +9,10 @@ target("vri-tests")
     add_deps("vri")
     add_packages("doctest")
 
+    -- test-only shaders are included relative as "shaders/X.h"; shaders shared with the examples
+    -- live under common/shaders and are included as "common/shaders/X.h" via this root includedir.
+    add_includedirs("$(projectdir)")
+
     add_files("test_main.cpp")
     add_files("test_api_usage.cpp")
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse

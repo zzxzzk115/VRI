@@ -8,14 +8,14 @@
 #include <cstring>
 #include <utility>
 
-#include "tests/shaders/compute_plasma_dxbc.h" // g_computePlasmaDxbcCS (D3D12)
-#include "tests/shaders/compute_plasma_spv.h"  // g_computePlasmaSpv  (compute; Vulkan/OpenGL)
-#include "tests/shaders/compute_plasma_wgsl.h" // g_computePlasmaWgsl (WebGPU)
-#include "tests/shaders/gen_plasma_spv.h"      // g_genPlasmaSpv  (WebGL2 fragment fallback)
-#include "tests/shaders/gen_plasma_wgsl.h"     // g_genPlasmaWgsl (the fallback never runs on D3D12)
-#include "tests/shaders/show_tex_dxbc.h"       // g_showTexDxbcVS / PS
-#include "tests/shaders/show_tex_spv.h"        // g_showTexSpv  (display: sample the result)
-#include "tests/shaders/show_tex_wgsl.h"       // g_showTexWgsl
+#include "examples/shaders/compute_plasma_dxbc.h" // g_computePlasmaDxbcCS (D3D12)
+#include "examples/shaders/compute_plasma_spv.h"  // g_computePlasmaSpv  (compute; Vulkan/OpenGL)
+#include "examples/shaders/compute_plasma_wgsl.h" // g_computePlasmaWgsl (WebGPU)
+#include "examples/shaders/gen_plasma_spv.h"      // g_genPlasmaSpv  (WebGL2 fragment fallback)
+#include "examples/shaders/gen_plasma_wgsl.h"     // g_genPlasmaWgsl (the fallback never runs on D3D12)
+#include "examples/shaders/show_tex_dxbc.h"       // g_showTexDxbcVS / PS
+#include "examples/shaders/show_tex_spv.h"        // g_showTexSpv  (display: sample the result)
+#include "examples/shaders/show_tex_wgsl.h"       // g_showTexWgsl
 
 namespace
 {

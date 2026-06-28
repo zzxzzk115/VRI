@@ -13,9 +13,9 @@
 #include "../cube/ktx.h"
 #include "../cube/mat4.h"
 
-#include "tests/shaders/normalmap_dxbc.h" // g_normalmapDxbcVS / PS (D3D12)
-#include "tests/shaders/normalmap_spv.h"  // g_normalmapSpv  (Vulkan + OpenGL)
-#include "tests/shaders/normalmap_wgsl.h" // g_normalmapWgsl (WebGPU)
+#include "examples/shaders/normalmap_dxbc.h" // g_normalmapDxbcVS / PS (D3D12)
+#include "examples/shaders/normalmap_spv.h"  // g_normalmapSpv  (Vulkan + OpenGL)
+#include "examples/shaders/normalmap_wgsl.h" // g_normalmapWgsl (WebGPU)
 
 namespace
 {

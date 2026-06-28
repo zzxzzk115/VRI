@@ -29,16 +29,30 @@ task("shaders")
             if os.mtime(m) > os.mtime(exe) then exe = m end
         end
 
-        local dir = path.join(os.projectdir(), "tests", "shaders")
-        local slangs = os.files(path.join(dir, "*.slang"))
+        -- Shaders are split by owner: source/shaders (library-internal, e.g. the built-in ImGui
+        -- renderer), examples/shaders (example-only), tests/shaders (test-only), and common/shaders
+        -- (shared by tests + examples). Each header is emitted next to its .slang.
+        local dirs = {
+            path.join(os.projectdir(), "source", "shaders"),
+            path.join(os.projectdir(), "examples", "shaders"),
+            path.join(os.projectdir(), "tests", "shaders"),
+            path.join(os.projectdir(), "common", "shaders"),
+        }
+        local slangs = {}
+        for _, d in ipairs(dirs) do
+            for _, s in ipairs(os.files(path.join(d, "*.slang"))) do
+                table.insert(slangs, s)
+            end
+        end
         if #slangs == 0 then
-            cprint("${yellow}[shaders]${clear} no .slang files under %s", dir)
+            cprint("${yellow}[shaders]${clear} no .slang files found")
             return
         end
 
         local stem = camel
         for _, slang in ipairs(slangs) do
             local base = path.basename(slang)
+            local dir  = path.directory(slang) -- emit each header beside its .slang
             -- SPIR-V (Vulkan) + WGSL (WebGPU) from the same Slang source
             local spvHeader = path.join(dir, base .. "_spv.h")
             local spvVar = "g_" .. stem(base) .. "Spv"

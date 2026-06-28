@@ -19,15 +19,15 @@
 #include <cstring>
 #include <vector>
 
-#include "tests/shaders/rt_pathtrace_software_spv.h"  // g_rtPathtraceSoftwareSpv (compute BVH fallback, GL/VK)
-#include "tests/shaders/rt_pathtrace_software_wgsl.h" // g_rtPathtraceSoftwareWgsl (compute BVH fallback, WebGPU)
-#include "tests/shaders/rt_pathtrace_spv.h"           // g_rtPathtraceSpv (Metal/VK inline ray-query megakernel)
-#include "tests/shaders/show_tex_dxbc.h"
-#include "tests/shaders/show_tex_spv.h"
-#include "tests/shaders/show_tex_wgsl.h" // g_showTexWgsl (WebGPU display)
+#include "examples/shaders/rt_pathtrace_software_spv.h"  // g_rtPathtraceSoftwareSpv (compute BVH fallback, GL/VK)
+#include "examples/shaders/rt_pathtrace_software_wgsl.h" // g_rtPathtraceSoftwareWgsl (compute BVH fallback, WebGPU)
+#include "examples/shaders/rt_pathtrace_spv.h"           // g_rtPathtraceSpv (Metal/VK inline ray-query megakernel)
+#include "examples/shaders/show_tex_dxbc.h"
+#include "examples/shaders/show_tex_spv.h"
+#include "examples/shaders/show_tex_wgsl.h" // g_showTexWgsl (WebGPU display)
 #if defined(_WIN32)
-#include "tests/shaders/rt_pathtrace_dxil.h"          // g_rtPathtraceDxilCS (D3D12 inline)
-#include "tests/shaders/rt_pathtrace_software_dxil.h" // g_rtPathtraceSoftwareDxilCS (D3D12 compute BVH)
+#include "examples/shaders/rt_pathtrace_dxil.h"          // g_rtPathtraceDxilCS (D3D12 inline)
+#include "examples/shaders/rt_pathtrace_software_dxil.h" // g_rtPathtraceSoftwareDxilCS (D3D12 compute BVH)
 #endif
 
 #if !defined(VRI_GLTF_MODEL_PATH)

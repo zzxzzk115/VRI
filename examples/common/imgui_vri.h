@@ -13,9 +13,9 @@
 
 #include <cstring>
 
-#include "tests/shaders/imgui_dxbc.h" // g_imguiDxbcVS / PS (D3D12)
-#include "tests/shaders/imgui_spv.h"  // g_imguiSpv  (Vulkan + OpenGL)
-#include "tests/shaders/imgui_wgsl.h" // g_imguiWgsl (WebGPU)
+#include "source/shaders/imgui_dxbc.h" // g_imguiDxbcVS / PS (D3D12)
+#include "source/shaders/imgui_spv.h"  // g_imguiSpv  (Vulkan + OpenGL)
+#include "source/shaders/imgui_wgsl.h" // g_imguiWgsl (WebGPU)
 
 namespace vriex
 {

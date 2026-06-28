@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "shaders/triangle_spv.h"
+#include "common/shaders/triangle_spv.h"
 #include "shaders/triangle_ubo_spv.h"
 
 namespace
