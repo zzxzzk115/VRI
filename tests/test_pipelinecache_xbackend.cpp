@@ -1,8 +1,10 @@
 // Pipeline-cache round-trip (VRI_INTERFACE_PIPELINE_CACHE). Create an empty cache, build a
 // pipeline through it (populating the cache), serialize the cache, seed a fresh cache with the
 // blob, and build another pipeline from it. Also feed a garbage blob to confirm a stale/foreign
-// seed is ignored rather than failing. Backends without a cache concept report Unsupported and the
-// test self-skips. Currently exercised on Vulkan (VkPipelineCache); D3D12 follows.
+// seed is ignored rather than failing. Backends without a cache concept (OpenGL/WebGPU) report
+// Unsupported and the test self-skips; so does an adapter that lacks pipeline-library support (e.g.
+// the WARP software adapter in CI). Exercised on Vulkan (VkPipelineCache) + D3D12
+// (ID3D12PipelineLibrary).
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -11,20 +13,35 @@
 #include <vector>
 
 #include "shaders/common/triangle_spv.h" // g_triangleSpv (vertex + fragment, no descriptors)
+#if defined(_WIN32)
+#include "shaders/common/triangle_dxbc.h" // g_triangleDxbcVS / g_triangleDxbcPS (D3D12)
+#endif
 
 namespace
 {
+    struct Shaders
+    {
+        const void* vs;
+        size_t      vsSize;
+        const void* ps;
+        size_t      psSize;
+    };
+
     // Build a minimal vertex-id triangle pipeline through `cache`; returns true on success.
-    bool MakePipeline(const VriCoreInterface& c, VriDevice* dev, VriPipelineLayout* layout, VriPipelineCache* cache)
+    bool MakePipeline(const VriCoreInterface& c,
+                      VriDevice*              dev,
+                      VriPipelineLayout*      layout,
+                      VriPipelineCache*       cache,
+                      const Shaders&          s)
     {
         VriShaderDesc sh[2] {};
         sh[0].stage          = VriShaderStage_Vertex;
-        sh[0].bytecode       = g_triangleSpv;
-        sh[0].bytecodeSize   = sizeof(g_triangleSpv);
+        sh[0].bytecode       = s.vs;
+        sh[0].bytecodeSize   = s.vsSize;
         sh[0].entryPointName = "vertexMain";
         sh[1].stage          = VriShaderStage_Fragment;
-        sh[1].bytecode       = g_triangleSpv;
-        sh[1].bytecodeSize   = sizeof(g_triangleSpv);
+        sh[1].bytecode       = s.ps;
+        sh[1].bytecodeSize   = s.psSize;
         sh[1].entryPointName = "fragmentMain";
         VriColorAttachmentDesc ca {};
         ca.format         = VriFormat_RGBA8_UNORM;
@@ -47,7 +64,7 @@ namespace
         return true;
     }
 
-    void Check(VriGraphicsAPI api, const char* name)
+    void Check(VriGraphicsAPI api, const char* name, const Shaders& s)
     {
         VriDeviceCreationDesc dc {};
         dc.graphicsAPI      = api;
@@ -76,9 +93,17 @@ namespace
 
         // 1) empty cache -> build a pipeline through it -> the cache now has content.
         VriPipelineCache* cache = nullptr;
-        REQUIRE(pc.CreatePipelineCache(dev, nullptr, 0, &cache) == VriResult_Success);
+        const VriResult   cr    = pc.CreatePipelineCache(dev, nullptr, 0, &cache);
+        if (cr == VriResult_Unsupported) // adapter without pipeline-library support (e.g. WARP)
+        {
+            MESSAGE("[" << name << "] pipeline cache unsupported on this adapter - skipped");
+            c.DestroyPipelineLayout(layout);
+            vriDestroyDevice(dev);
+            return;
+        }
+        REQUIRE(cr == VriResult_Success);
         REQUIRE(cache != nullptr);
-        CHECK(MakePipeline(c, dev, layout, cache));
+        CHECK(MakePipeline(c, dev, layout, cache, s));
 
         // 2) serialize (size query, then fetch).
         size_t sz = 0;
@@ -92,7 +117,7 @@ namespace
         // 3) seed a fresh cache with the blob and build another pipeline from it.
         VriPipelineCache* warm = nullptr;
         REQUIRE(pc.CreatePipelineCache(dev, blob.data(), blob.size(), &warm) == VriResult_Success);
-        CHECK(MakePipeline(c, dev, layout, warm));
+        CHECK(MakePipeline(c, dev, layout, warm, s));
 
         // 4) a garbage seed must be ignored, not fatal (empty cache returned).
         const uint8_t     junk[16] = {0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
@@ -111,8 +136,11 @@ namespace
 
 TEST_CASE("Pipeline cache: serialize + reseed round-trip")
 {
-    Check(VriGraphicsAPI_Vulkan, "Vulkan");
-    Check(VriGraphicsAPI_D3D12, "D3D12");
-    Check(VriGraphicsAPI_OpenGL, "OpenGL");
-    Check(VriGraphicsAPI_WebGPU, "WebGPU");
+    const Shaders spv {g_triangleSpv, sizeof(g_triangleSpv), g_triangleSpv, sizeof(g_triangleSpv)};
+    Check(VriGraphicsAPI_Vulkan, "Vulkan", spv);
+    Check(VriGraphicsAPI_OpenGL, "OpenGL", spv);
+#if defined(_WIN32)
+    const Shaders dxbc {g_triangleDxbcVS, sizeof(g_triangleDxbcVS), g_triangleDxbcPS, sizeof(g_triangleDxbcPS)};
+    Check(VriGraphicsAPI_D3D12, "D3D12", dxbc);
+#endif
 }

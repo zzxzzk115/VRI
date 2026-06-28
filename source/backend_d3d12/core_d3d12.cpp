@@ -807,7 +807,8 @@ namespace vri::d3d12
                 d->ReportError("CreateRootSignature failed");
                 return VriResult_Failure;
             }
-            *out = ToHandle(l);
+            l->rootSigHash = Fnv1a(blob->GetBufferPointer(), blob->GetBufferSize());
+            *out           = ToHandle(l);
             return VriResult_Success;
         }
         void VRI_CALL DestroyPipelineLayout(VriPipelineLayout* layout)
@@ -973,6 +974,50 @@ namespace vri::d3d12
             return VriResult_Success;
         }
 
+        // ---- pipeline-cache PSO names ----
+        // ID3D12PipelineLibrary keys pipelines by name. We derive a stable name from the pipeline's
+        // full logical definition (shader bytecode + root-signature hash + fixed-function state) so a
+        // serialized cache reloaded next run keys the same pipeline back to the same blob.
+        std::wstring HexName(uint64_t h)
+        {
+            wchar_t       buf[17];
+            const wchar_t hex[] = L"0123456789abcdef";
+            for (int i = 0; i < 16; ++i)
+                buf[15 - i] = hex[(h >> (i * 4)) & 0xf];
+            buf[16] = 0;
+            return buf;
+        }
+        std::wstring GraphicsPsoName(const VriGraphicsPipelineDesc*            desc,
+                                     const PipelineLayoutD3D12*                layout,
+                                     const D3D12_GRAPHICS_PIPELINE_STATE_DESC& pd)
+        {
+            uint64_t h = layout ? layout->rootSigHash : 0;
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+                h = Fnv1a(desc->shaders[i].bytecode, desc->shaders[i].bytecodeSize, h);
+            h = Fnv1a(&pd.BlendState, sizeof(pd.BlendState), h);
+            h = Fnv1a(&pd.SampleMask, sizeof(pd.SampleMask), h);
+            h = Fnv1a(&pd.RasterizerState, sizeof(pd.RasterizerState), h);
+            h = Fnv1a(&pd.DepthStencilState, sizeof(pd.DepthStencilState), h);
+            h = Fnv1a(&pd.IBStripCutValue, sizeof(pd.IBStripCutValue), h);
+            h = Fnv1a(&pd.PrimitiveTopologyType, sizeof(pd.PrimitiveTopologyType), h);
+            h = Fnv1a(&pd.NumRenderTargets, sizeof(pd.NumRenderTargets), h);
+            h = Fnv1a(pd.RTVFormats, sizeof(pd.RTVFormats), h);
+            h = Fnv1a(&pd.DSVFormat, sizeof(pd.DSVFormat), h);
+            h = Fnv1a(&pd.SampleDesc, sizeof(pd.SampleDesc), h);
+            for (UINT i = 0; i < pd.InputLayout.NumElements; ++i)
+            {
+                const D3D12_INPUT_ELEMENT_DESC& e = pd.InputLayout.pInputElementDescs[i];
+                h = Fnv1a(e.SemanticName, std::strlen(e.SemanticName) + 1, h); // pointer -> hash content
+                h = Fnv1a(&e.SemanticIndex, sizeof(e.SemanticIndex), h);
+                h = Fnv1a(&e.Format, sizeof(e.Format), h);
+                h = Fnv1a(&e.InputSlot, sizeof(e.InputSlot), h);
+                h = Fnv1a(&e.AlignedByteOffset, sizeof(e.AlignedByteOffset), h);
+                h = Fnv1a(&e.InputSlotClass, sizeof(e.InputSlotClass), h);
+                h = Fnv1a(&e.InstanceDataStepRate, sizeof(e.InstanceDataStepRate), h);
+            }
+            return HexName(h);
+        }
+
         VriResult VRI_CALL CreateGraphicsPipeline(VriDevice*                     device,
                                                   const VriGraphicsPipelineDesc* desc,
                                                   VriPipeline**                  out)
@@ -1135,11 +1180,26 @@ namespace vri::d3d12
             p->topology       = ToD3DTopology(desc->inputAssembly.topology, desc->tessellation.patchControlPoints);
             p->stencilEnabled = desc->depthStencil.stencilTest != VRI_FALSE;
             p->stencilRef     = desc->depthStencil.front.reference;
-            if (FAILED(d->Device()->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&p->pso))))
+
+            // Pipeline cache: load a matching PSO from the library, else create it and store it.
+            PipelineCacheD3D12* cache = desc->pipelineCache ? PipeCache(desc->pipelineCache) : nullptr;
+            HRESULT             hr    = E_FAIL;
+            std::wstring        name;
+            if (cache && cache->lib)
             {
-                delete p;
-                d->ReportError("CreateGraphicsPipelineState failed");
-                return VriResult_Failure;
+                name = GraphicsPsoName(desc, layout, pd);
+                hr   = cache->lib->LoadGraphicsPipeline(name.c_str(), &pd, IID_PPV_ARGS(&p->pso));
+            }
+            if (FAILED(hr))
+            {
+                if (FAILED(d->Device()->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&p->pso))))
+                {
+                    delete p;
+                    d->ReportError("CreateGraphicsPipelineState failed");
+                    return VriResult_Failure;
+                }
+                if (cache && cache->lib)
+                    cache->lib->StorePipeline(name.c_str(), p->pso.Get()); // E_INVALIDARG = already stored
             }
             *out = ToHandle(p);
             return VriResult_Success;
@@ -1157,11 +1217,27 @@ namespace vri::d3d12
             p->device                                = d;
             p->rootSig                               = layout->rootSig.Get();
             p->isCompute                             = true;
-            if (FAILED(d->Device()->CreateComputePipelineState(&pd, IID_PPV_ARGS(&p->pso))))
+
+            PipelineCacheD3D12* cache = desc->pipelineCache ? PipeCache(desc->pipelineCache) : nullptr;
+            HRESULT             hr    = E_FAIL;
+            std::wstring        name;
+            if (cache && cache->lib)
             {
-                delete p;
-                d->ReportError("CreateComputePipelineState failed");
-                return VriResult_Failure;
+                uint64_t h = layout ? layout->rootSigHash : 0;
+                h          = Fnv1a(desc->shader.bytecode, desc->shader.bytecodeSize, h);
+                name       = HexName(h);
+                hr         = cache->lib->LoadComputePipeline(name.c_str(), &pd, IID_PPV_ARGS(&p->pso));
+            }
+            if (FAILED(hr))
+            {
+                if (FAILED(d->Device()->CreateComputePipelineState(&pd, IID_PPV_ARGS(&p->pso))))
+                {
+                    delete p;
+                    d->ReportError("CreateComputePipelineState failed");
+                    return VriResult_Failure;
+                }
+                if (cache && cache->lib)
+                    cache->lib->StorePipeline(name.c_str(), p->pso.Get());
             }
             *out = ToHandle(p);
             return VriResult_Success;

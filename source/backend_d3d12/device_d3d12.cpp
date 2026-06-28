@@ -3,6 +3,7 @@
 #include "external_d3d12.h"
 #include "meshshader_d3d12.h"
 #include "omm_d3d12.h"
+#include "pipeline_cache_d3d12.h"
 #include "query_d3d12.h"
 #include "rt_d3d12.h"
 #include "swapchain_d3d12.h"
@@ -43,12 +44,27 @@ namespace vri::d3d12
         // D3D12 debug-layer messages -> the app callback (ID3D12InfoQueue1, Win10 SDK 20348+).
         void CALLBACK D3D12MessageCallback(D3D12_MESSAGE_CATEGORY /*category*/,
                                            D3D12_MESSAGE_SEVERITY severity,
-                                           D3D12_MESSAGE_ID /*id*/,
-                                           LPCSTR description,
-                                           void*  context)
+                                           D3D12_MESSAGE_ID       id,
+                                           LPCSTR                 description,
+                                           void*                  context)
         {
             if (severity == D3D12_MESSAGE_SEVERITY_INFO || severity == D3D12_MESSAGE_SEVERITY_MESSAGE)
                 return; // info/message is too chatty
+            // Expected ID3D12PipelineLibrary control flow, not errors: a cache miss on LoadPipeline
+            // (we then create + store), re-storing an already-cached PSO, and rejecting a stale or
+            // foreign serialized blob (we start the cache empty). The pipeline-cache ext relies on
+            // these, so the debug layer's warnings about them are noise here.
+            switch (id)
+            {
+                case D3D12_MESSAGE_ID_LOADPIPELINE_NAMENOTFOUND:
+                case D3D12_MESSAGE_ID_STOREPIPELINE_DUPLICATENAME:
+                case D3D12_MESSAGE_ID_CREATEPIPELINELIBRARY_DRIVERVERSIONMISMATCH:
+                case D3D12_MESSAGE_ID_CREATEPIPELINELIBRARY_ADAPTERVERSIONMISMATCH:
+                case D3D12_MESSAGE_ID_CREATEPIPELINELIBRARY_INVALIDLIBRARYBLOB:
+                    return;
+                default:
+                    break;
+            }
             const auto* dev = static_cast<const DeviceD3D12*>(context);
             if (!dev)
                 return;
@@ -401,6 +417,8 @@ namespace vri::d3d12
                             sizeof(VriSwapChainInterface)); // DXGI flip-model present
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceD3D12(), sizeof(VriQueryInterface));
         m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
+        m_registry.Register(
+            VRI_INTERFACE_PIPELINE_CACHE, GetPipelineCacheInterfaceD3D12(), sizeof(VriPipelineCacheInterface));
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)

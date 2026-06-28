@@ -109,7 +109,8 @@ Notes:
   pass a cache in `VriGraphicsPipelineDesc::pipelineCache`, serialize it on exit
   (`GetPipelineCacheData`), and seed the next launch (`CreatePipelineCache`) for fast warm startup.
   A stale or foreign blob is detected and ignored, so seeding is always safe. On **Vulkan**
-  (`VkPipelineCache`); **Direct3D 12** (`ID3D12PipelineLibrary`) is the next step.
+  (`VkPipelineCache`) and **Direct3D 12** (`ID3D12PipelineLibrary`, keyed by a stable hash of each
+  pipeline's definition).
 
 ## Building
 

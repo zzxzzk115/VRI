@@ -177,6 +177,26 @@ namespace vri::d3d12
     };
     inline VriQueryPool* ToHandle(QueryPoolD3D12* q) { return reinterpret_cast<VriQueryPool*>(q); }
 
+    // 64-bit FNV-1a, used to derive stable pipeline-cache PSO names from shader bytecode + state.
+    inline uint64_t Fnv1a(const void* data, size_t size, uint64_t seed = 0xcbf29ce484222325ull)
+    {
+        const auto* p = static_cast<const unsigned char*>(data);
+        for (size_t i = 0; i < size; ++i)
+            seed = (seed ^ p[i]) * 0x100000001b3ull;
+        return seed;
+    }
+
+    struct PipelineCacheD3D12
+    {
+        DeviceD3D12*                  device = nullptr;
+        ComPtr<ID3D12PipelineLibrary> lib;
+        // D3D12 requires the blob passed to CreatePipelineLibrary to stay alive for the library's
+        // lifetime, so the seed is copied and held here.
+        std::vector<uint8_t> seed;
+    };
+    inline VriPipelineCache*   ToHandle(PipelineCacheD3D12* p) { return reinterpret_cast<VriPipelineCache*>(p); }
+    inline PipelineCacheD3D12* PipeCache(VriPipelineCache* h) { return reinterpret_cast<PipelineCacheD3D12*>(h); }
+
     struct PipelineLayoutD3D12
     {
         DeviceD3D12*                    device = nullptr;
@@ -187,6 +207,9 @@ namespace vri::d3d12
         bool     hasPush       = false;
         uint32_t pushRootParam = 0;
         uint32_t push32Count   = 0;
+        // Stable hash of the serialized root signature, folded into the pipeline-cache PSO name so
+        // a cached pipeline is keyed by its full definition (not a per-run pointer).
+        uint64_t rootSigHash = 0;
 
         const LayoutBindingD3D12* Find(uint32_t set, uint32_t binding) const
         {
