@@ -144,6 +144,9 @@ namespace vri::gl
     {
         DeviceGL*                    device;
         std::vector<LayoutBindingGL> bindings;
+        // Stable hash of the binding layout, folded into the pipeline-cache key (the layout drives
+        // SPIRV-Cross's binding remap, so it changes the linked program / its binary).
+        uint64_t hash = 0;
 
         const LayoutBindingGL* Find(uint32_t set, uint32_t binding) const
         {
@@ -153,6 +156,32 @@ namespace vri::gl
             return nullptr;
         }
     };
+
+    // 64-bit FNV-1a, used to derive a stable pipeline-cache key from shader bytecode + layout.
+    inline uint64_t Fnv1a(const void* data, size_t size, uint64_t seed = 0xcbf29ce484222325ull)
+    {
+        const auto* p = static_cast<const unsigned char*>(data);
+        for (size_t i = 0; i < size; ++i)
+            seed = (seed ^ p[i]) * 0x100000001b3ull;
+        return seed;
+    }
+
+    // A serialized GL program binary (the linked program; see ARB_get_program_binary).
+    struct ProgramBinaryGL
+    {
+        GLenum               format = 0;
+        std::vector<uint8_t> data;
+    };
+
+    // Pipeline cache = a key -> program-binary map. Populated as pipelines are created (each store is
+    // a glGetProgramBinary), serialized via GetPipelineCacheData, reseeded via CreatePipelineCache.
+    struct PipelineCacheGL
+    {
+        DeviceGL*                                     device = nullptr;
+        std::unordered_map<uint64_t, ProgramBinaryGL> entries;
+    };
+    inline VriPipelineCache* ToHandle(PipelineCacheGL* p) { return reinterpret_cast<VriPipelineCache*>(p); }
+    inline PipelineCacheGL*  PipeCacheGL(VriPipelineCache* h) { return reinterpret_cast<PipelineCacheGL*>(h); }
 
     struct DescriptorPoolGL
     {

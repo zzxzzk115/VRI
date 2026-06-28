@@ -109,8 +109,11 @@ Notes:
   pass a cache in `VriGraphicsPipelineDesc::pipelineCache`, serialize it on exit
   (`GetPipelineCacheData`), and seed the next launch (`CreatePipelineCache`) for fast warm startup.
   A stale or foreign blob is detected and ignored, so seeding is always safe. On **Vulkan**
-  (`VkPipelineCache`) and **Direct3D 12** (`ID3D12PipelineLibrary`, keyed by a stable hash of each
-  pipeline's definition).
+  (`VkPipelineCache`), **Direct3D 12** (`ID3D12PipelineLibrary`, keyed by a stable hash of each
+  pipeline's definition), and **desktop OpenGL** (emulated with program binaries — a cache hit
+  restores the linked program via `glProgramBinary`, skipping the GLSL compile + link). WebGPU and
+  WebGL 2 expose no cache blob (their runtime caches shaders internally), so they report
+  `Unsupported`.
 
 ## Building
 

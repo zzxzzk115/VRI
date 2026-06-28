@@ -1,10 +1,10 @@
 // Pipeline-cache round-trip (VRI_INTERFACE_PIPELINE_CACHE). Create an empty cache, build a
 // pipeline through it (populating the cache), serialize the cache, seed a fresh cache with the
 // blob, and build another pipeline from it. Also feed a garbage blob to confirm a stale/foreign
-// seed is ignored rather than failing. Backends without a cache concept (OpenGL/WebGPU) report
-// Unsupported and the test self-skips; so does an adapter that lacks pipeline-library support (e.g.
-// the WARP software adapter in CI). Exercised on Vulkan (VkPipelineCache) + D3D12
-// (ID3D12PipelineLibrary).
+// seed is ignored rather than failing. Backends without a cache concept (WebGPU, WebGL2) report
+// Unsupported and the test self-skips; so does an adapter that lacks support (the WARP software
+// adapter in CI, or a GL driver without program binaries). Exercised on Vulkan (VkPipelineCache),
+// D3D12 (ID3D12PipelineLibrary), and desktop OpenGL (program binaries).
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>

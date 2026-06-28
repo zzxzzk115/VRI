@@ -851,12 +851,101 @@ namespace vri::gl
                     l->bindings.push_back(b);
                 }
             }
+            for (const LayoutBindingGL& b : l->bindings)
+            {
+                l->hash = Fnv1a(&b.set, sizeof(b.set), l->hash);
+                l->hash = Fnv1a(&b.binding, sizeof(b.binding), l->hash);
+                l->hash = Fnv1a(&b.type, sizeof(b.type), l->hash);
+                l->hash = Fnv1a(&b.glUnit, sizeof(b.glUnit), l->hash);
+            }
             *out = ToHandle(l);
             return VriResult_Success;
         }
         void VRI_CALL DestroyPipelineLayout(VriPipelineLayout* layout)
         {
             delete reinterpret_cast<PipelineLayoutGL*>(layout);
+        }
+
+        struct GlslStage
+        {
+            GLenum      gl;
+            std::string src;
+        };
+
+        // Link a program from the transpiled GLSL stages, reusing the pipeline cache when present:
+        // a cache hit restores the linked program via glProgramBinary (skipping compile + link); a
+        // miss compiles + links and stores the resulting binary. Returns 0 on failure. The cache is
+        // desktop-GL only (program binaries are absent on GLES/WebGL2), so on those builds this just
+        // compiles + links (cache is always null there).
+        GLuint AcquireProgram(DeviceGL* d, PipelineCacheGL* cache, uint64_t key, const std::vector<GlslStage>& stages)
+        {
+#if !defined(VRI_GL_ES_HEADERS)
+            if (cache)
+            {
+                auto it = cache->entries.find(key);
+                if (it != cache->entries.end())
+                {
+                    GLuint prog = glCreateProgram();
+                    glProgramBinary(
+                        prog, it->second.format, it->second.data.data(), static_cast<GLsizei>(it->second.data.size()));
+                    GLint ok = 0;
+                    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+                    if (ok)
+                        return prog;       // hit: skipped SPIR-V compile + link
+                    glDeleteProgram(prog); // stale / incompatible binary -> fall back to a normal build
+                }
+            }
+#endif
+            GLuint              program = glCreateProgram();
+            std::vector<GLuint> shaders;
+            for (const GlslStage& s : stages)
+            {
+                GLuint sh = CompileShader(d, s.gl, s.src);
+                if (!sh)
+                {
+                    for (GLuint x : shaders)
+                        glDeleteShader(x);
+                    glDeleteProgram(program);
+                    return 0;
+                }
+                glAttachShader(program, sh);
+                shaders.push_back(sh);
+            }
+#if !defined(VRI_GL_ES_HEADERS)
+            if (cache)
+                glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE); // before link
+#endif
+            glLinkProgram(program);
+            for (GLuint sh : shaders)
+            {
+                glDetachShader(program, sh);
+                glDeleteShader(sh);
+            }
+            GLint linked = 0;
+            glGetProgramiv(program, GL_LINK_STATUS, &linked);
+            if (!linked)
+            {
+                char log[2048] = {};
+                glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+                d->ReportError(log);
+                glDeleteProgram(program);
+                return 0;
+            }
+#if !defined(VRI_GL_ES_HEADERS)
+            if (cache)
+            {
+                GLint len = 0;
+                glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &len);
+                if (len > 0)
+                {
+                    ProgramBinaryGL pb;
+                    pb.data.resize(static_cast<size_t>(len));
+                    glGetProgramBinary(program, len, nullptr, &pb.format, pb.data.data());
+                    cache->entries[key] = std::move(pb);
+                }
+            }
+#endif
+            return program;
         }
 
         VriResult VRI_CALL CreateGraphicsPipeline(VriDevice*                     device,
@@ -907,131 +996,77 @@ namespace vri::gl
 
             std::vector<CombinedSamplerGL> combined;
             std::vector<PushMemberGL>      pushMembers;
-            GLuint                         vs = 0, fs = 0, gs = 0, tcs = 0, tes = 0;
+            // Transpile each stage to GLSL (this also fills the draw-time reflection: combined
+            // samplers + push-constant members). The compile + link is then done once, by
+            // AcquireProgram, which may instead restore a cached program binary.
+            std::vector<GlslStage> glslStages;
+            bool                   hasVS = false, hasFS = false;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
-                const VriShaderDesc& s = desc->shaders[i];
+                const VriShaderDesc& s  = desc->shaders[i];
+                GLenum               gl = GL_VERTEX_SHADER;
+                spv::ExecutionModel  em = spv::ExecutionModelVertex;
                 if (s.stage == VriShaderStage_Vertex)
-                    vs = CompileShader(d,
-                                       GL_VERTEX_SHADER,
-                                       SpirvToGlsl(d,
-                                                   layout,
-                                                   s.bytecode,
-                                                   s.bytecodeSize,
-                                                   s.entryPointName,
-                                                   spv::ExecutionModelVertex,
-                                                   &combined,
-                                                   &pushMembers,
-                                                   bIn(s.stage),
-                                                   bOut(s.stage)));
+                {
+                    gl    = GL_VERTEX_SHADER;
+                    em    = spv::ExecutionModelVertex;
+                    hasVS = true;
+                }
                 else if (s.stage == VriShaderStage_Fragment)
-                    fs = CompileShader(d,
-                                       GL_FRAGMENT_SHADER,
-                                       SpirvToGlsl(d,
-                                                   layout,
-                                                   s.bytecode,
-                                                   s.bytecodeSize,
-                                                   s.entryPointName,
-                                                   spv::ExecutionModelFragment,
-                                                   &combined,
-                                                   &pushMembers,
-                                                   bIn(s.stage),
-                                                   bOut(s.stage)));
+                {
+                    gl    = GL_FRAGMENT_SHADER;
+                    em    = spv::ExecutionModelFragment;
+                    hasFS = true;
+                }
 #if !defined(VRI_GL_ES_HEADERS) // geometry/tessellation shaders are desktop-only (absent in GLES3/WebGL2 headers)
                 else if (s.stage == VriShaderStage_Geometry)
-                    gs = CompileShader(d,
-                                       GL_GEOMETRY_SHADER,
-                                       SpirvToGlsl(d,
-                                                   layout,
-                                                   s.bytecode,
-                                                   s.bytecodeSize,
-                                                   s.entryPointName,
-                                                   spv::ExecutionModelGeometry,
-                                                   &combined,
-                                                   nullptr,
-                                                   bIn(s.stage),
-                                                   bOut(s.stage)));
+                {
+                    gl = GL_GEOMETRY_SHADER;
+                    em = spv::ExecutionModelGeometry;
+                }
                 else if (s.stage == VriShaderStage_TessControl)
-                    tcs = CompileShader(d,
-                                        GL_TESS_CONTROL_SHADER,
-                                        SpirvToGlsl(d,
-                                                    layout,
-                                                    s.bytecode,
-                                                    s.bytecodeSize,
-                                                    s.entryPointName,
-                                                    spv::ExecutionModelTessellationControl,
-                                                    &combined,
-                                                    nullptr,
-                                                    bIn(s.stage),
-                                                    bOut(s.stage)));
+                {
+                    gl = GL_TESS_CONTROL_SHADER;
+                    em = spv::ExecutionModelTessellationControl;
+                }
                 else if (s.stage == VriShaderStage_TessEval)
-                    tes = CompileShader(d,
-                                        GL_TESS_EVALUATION_SHADER,
-                                        SpirvToGlsl(d,
-                                                    layout,
-                                                    s.bytecode,
-                                                    s.bytecodeSize,
-                                                    s.entryPointName,
-                                                    spv::ExecutionModelTessellationEvaluation,
-                                                    &combined,
-                                                    nullptr,
-                                                    bIn(s.stage),
-                                                    bOut(s.stage)));
+                {
+                    gl = GL_TESS_EVALUATION_SHADER;
+                    em = spv::ExecutionModelTessellationEvaluation;
+                }
 #endif
+                else
+                    continue;
+                // Push constants are gathered from the vertex + fragment stages only (matching the
+                // original build); other stages pass null.
+                const bool  takesPush = (s.stage == VriShaderStage_Vertex || s.stage == VriShaderStage_Fragment);
+                std::string glsl      = SpirvToGlsl(d,
+                                               layout,
+                                               s.bytecode,
+                                               s.bytecodeSize,
+                                               s.entryPointName,
+                                               em,
+                                               &combined,
+                                               takesPush ? &pushMembers : nullptr,
+                                               bIn(s.stage),
+                                               bOut(s.stage));
+                if (glsl.empty()) // SPIRV-Cross transpile error
+                    return VriResult_Failure;
+                glslStages.push_back({gl, std::move(glsl)});
             }
-            auto deleteStages = [&] {
-                if (vs)
-                    glDeleteShader(vs);
-                if (fs)
-                    glDeleteShader(fs);
-                if (gs)
-                    glDeleteShader(gs);
-                if (tcs)
-                    glDeleteShader(tcs);
-                if (tes)
-                    glDeleteShader(tes);
-            };
-            if (!vs || !fs)
-            {
-                deleteStages();
+            if (!hasVS || !hasFS)
                 return VriResult_Failure;
-            }
-            GLuint program = glCreateProgram();
-            glAttachShader(program, vs);
-            glAttachShader(program, fs);
-            if (gs)
-                glAttachShader(program, gs);
-            if (tcs)
-                glAttachShader(program, tcs);
-            if (tes)
-                glAttachShader(program, tes);
-            glLinkProgram(program);
-            glDetachShader(program, vs);
-            glDetachShader(program, fs);
-            if (gs)
-                glDetachShader(program, gs);
-            if (tcs)
-                glDetachShader(program, tcs);
-            if (tes)
-                glDetachShader(program, tes);
-            glDeleteShader(vs);
-            glDeleteShader(fs);
-            if (gs)
-                glDeleteShader(gs);
-            if (tcs)
-                glDeleteShader(tcs);
-            if (tes)
-                glDeleteShader(tes);
-            GLint ok = 0;
-            glGetProgramiv(program, GL_LINK_STATUS, &ok);
-            if (!ok)
+
+            uint64_t key = layout ? layout->hash : 0;
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
             {
-                char log[2048] = {};
-                glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-                d->ReportError(log);
-                glDeleteProgram(program);
-                return VriResult_Failure;
+                key = Fnv1a(&desc->shaders[i].stage, sizeof(desc->shaders[i].stage), key);
+                key = Fnv1a(desc->shaders[i].bytecode, desc->shaders[i].bytecodeSize, key);
             }
+            GLuint program =
+                AcquireProgram(d, desc->pipelineCache ? PipeCacheGL(desc->pipelineCache) : nullptr, key, glslStages);
+            if (!program)
+                return VriResult_Failure;
 
             // Assign each uniform block its flattened binding point. Portable across
             // desktop GL and ESSL 300 / WebGL2 (which can't use layout(binding=)).
@@ -1203,32 +1238,22 @@ namespace vri::gl
 #else
             const PipelineLayoutGL*        layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
             std::vector<CombinedSamplerGL> combined; // sampled textures used by the compute kernel
-            const GLuint                   cs = CompileShader(d,
-                                            GL_COMPUTE_SHADER,
-                                            SpirvToGlsl(d,
-                                                        layout,
-                                                        desc->shader.bytecode,
-                                                        desc->shader.bytecodeSize,
-                                                        desc->shader.entryPointName,
-                                                        spv::ExecutionModelGLCompute,
-                                                        &combined));
-            if (!cs)
+            std::string                    glsl = SpirvToGlsl(d,
+                                           layout,
+                                           desc->shader.bytecode,
+                                           desc->shader.bytecodeSize,
+                                           desc->shader.entryPointName,
+                                           spv::ExecutionModelGLCompute,
+                                           &combined);
+            if (glsl.empty())
                 return VriResult_Failure;
-            GLuint program = glCreateProgram();
-            glAttachShader(program, cs);
-            glLinkProgram(program);
-            glDetachShader(program, cs);
-            glDeleteShader(cs);
-            GLint ok = 0;
-            glGetProgramiv(program, GL_LINK_STATUS, &ok);
-            if (!ok)
-            {
-                char log[2048] = {};
-                glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-                d->ReportError(log);
-                glDeleteProgram(program);
+            std::vector<GlslStage> glslStages {{GL_COMPUTE_SHADER, std::move(glsl)}};
+            uint64_t               key = layout ? layout->hash : 0;
+            key                        = Fnv1a(desc->shader.bytecode, desc->shader.bytecodeSize, key);
+            GLuint program =
+                AcquireProgram(d, desc->pipelineCache ? PipeCacheGL(desc->pipelineCache) : nullptr, key, glslStages);
+            if (!program)
                 return VriResult_Failure;
-            }
             // Uniform blocks (if any) still need binding points; SSBOs use the
             // layout(binding=) emitted by SPIRV-Cross (GLSL 430). Sampled textures need their
             // sampler uniform pointed at its texture unit, same as the graphics path.

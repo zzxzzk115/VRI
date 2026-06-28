@@ -1,5 +1,6 @@
 #include "device_gl.h"
 #include "core_gl.h"
+#include "pipeline_cache_gl.h"
 #include "query_gl.h"
 #include "swapchain_gl.h"
 
@@ -525,6 +526,13 @@ namespace vri::gl
             f.dsa            = atLeast(4, 5);
             f.spirvIngest    = atLeast(4, 6); // ARB_gl_spirv is core in 4.6
             f.textureStorage = atLeast(4, 2); // glTexStorage*; macOS GL 4.1 lacks it -> glTexImage*
+#if !defined(VRI_GL_ES_HEADERS)
+            // Pipeline cache via program binaries (ARB_get_program_binary, core 4.1). Require at
+            // least one supported binary format - some drivers advertise the API but zero formats.
+            GLint binFormats = 0;
+            glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binFormats);
+            f.programBinary = atLeast(4, 1) && binFormats > 0;
+#endif
         }
         m_features = f;
     }
@@ -537,6 +545,11 @@ namespace vri::gl
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceGL(), sizeof(VriSwapChainInterface));
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceGL(), sizeof(VriQueryInterface));
         m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
+        // Pipeline cache emulated via program binaries; desktop GL only (GLES/WebGL2 expose no
+        // program-binary API), so register it only where the cap was detected.
+        if (m_features.programBinary)
+            m_registry.Register(
+                VRI_INTERFACE_PIPELINE_CACHE, GetPipelineCacheInterfaceGL(), sizeof(VriPipelineCacheInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

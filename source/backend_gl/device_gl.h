@@ -71,6 +71,7 @@ namespace vri::gl
         bool     baseInstance   = false; // GL 4.2: *BaseInstance draws
         bool     drawIndirect   = false; // GL 4.3: multi-draw-indirect
         bool     bufferStorage  = false; // GL 4.4: persistent-mapped buffers
+        bool     programBinary  = false; // GL 4.1: glGetProgramBinary (backs the pipeline cache; desktop only)
         // Immutable texture storage (glTexStorage*) is GL 4.2+ AND core in GLES3/WebGL2;
         // the lone gap is desktop GL 4.1 (macOS), which falls back to glTexImage*.
         bool textureStorage = true; // default true: ES/WebGL2 baseline always has it
