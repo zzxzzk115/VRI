@@ -108,6 +108,10 @@ namespace vri::core
         {
             return DV(device)->core.GetFormatSupport(DV(device)->real, f);
         }
+        VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice* device, VriMemoryLocation loc, VriVideoMemoryInfo* out)
+        {
+            return DV(device)->core.GetVideoMemoryInfo(DV(device)->real, loc, out);
+        }
         VriResult VRI_CALL GetQueue(VriDevice* device, VriQueueType type, uint32_t index, VriQueue** outQueue)
         {
             DeviceVal* d    = DV(device);
@@ -842,6 +846,7 @@ namespace vri::core
             // control plane -> validating wrappers
             t.GetDeviceDesc               = GetDeviceDesc;
             t.GetFormatSupport            = GetFormatSupport;
+            t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             t.GetQueue                    = GetQueue;
             t.CreateCommandAllocator      = CreateCommandAllocator;
             t.ResetCommandAllocator       = ResetCommandAllocator;

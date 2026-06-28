@@ -147,6 +147,11 @@ namespace vri::wgpu
             *outQueue = ToHandle(Dev(device)->GetQueue(type));
             return VriResult_Success;
         }
+        // WebGPU exposes no memory-budget query; the implementation manages residency internally.
+        VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice*, VriMemoryLocation, VriVideoMemoryInfo*)
+        {
+            return VriResult_Unsupported;
+        }
 
         // ---- command allocation / lifecycle --------------------------------
         VriResult VRI_CALL CreateCommandAllocator(VriDevice* device, VriQueueType, VriCommandAllocator** out)
@@ -1377,6 +1382,7 @@ namespace vri::wgpu
             t.QueueWaitIdle               = QueueWaitIdle;
             t.DeviceWaitIdle              = DeviceWaitIdle;
             t.SetDebugName                = SetDebugName;
+            t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             return t;
         }
 

@@ -164,6 +164,7 @@ namespace vri::d3d12
         if (VriResult r = NegotiateFeatures(desc); r != VriResult_Success)
             return r;
 
+        chosen.As(&m_adapter3); // IDXGIAdapter3 for QueryVideoMemoryInfo (null if unavailable)
         FillDeviceDesc(chosen.Get());
         FillRegistry();
         return VriResult_Success;

@@ -378,6 +378,11 @@ namespace vri::gl
             *outQueue = ToHandle(Dev(device)->GetQueue(type));
             return VriResult_Success;
         }
+        // OpenGL has no portable VRAM budget query (only vendor extensions like NVX_gpu_memory_info).
+        VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice*, VriMemoryLocation, VriVideoMemoryInfo*)
+        {
+            return VriResult_Unsupported;
+        }
 
         // ---- command allocation / lifecycle --------------------------------
         VriResult VRI_CALL CreateCommandAllocator(VriDevice* device, VriQueueType, VriCommandAllocator** out)
@@ -2376,6 +2381,7 @@ namespace vri::gl
             t.QueueWaitIdle               = QueueWaitIdle;
             t.DeviceWaitIdle              = DeviceWaitIdle;
             t.SetDebugName                = SetDebugName;
+            t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             return t;
         }
 

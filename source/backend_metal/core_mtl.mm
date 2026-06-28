@@ -246,6 +246,18 @@ namespace vri::mtl
             *outQueue = ToHandle(Dev(device)->GetQueue(type));
             return VriResult_Success;
         }
+        // Apple GPUs use unified memory; report the working-set budget + current allocation.
+        VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice* device, VriMemoryLocation location, VriVideoMemoryInfo* out)
+        {
+            if (!out)
+                return VriResult_InvalidArgument;
+            if (location != VriMemoryLocation_Device && location != VriMemoryLocation_DeviceUpload)
+                return VriResult_Unsupported;
+            id<MTLDevice> dev = Dev(device)->Device();
+            out->budget       = static_cast<uint64_t>([dev recommendedMaxWorkingSetSize]);
+            out->usage        = static_cast<uint64_t>([dev currentAllocatedSize]);
+            return VriResult_Success;
+        }
 
         // ---- command allocation / lifecycle --------------------------------
         VriResult VRI_CALL CreateCommandAllocator(VriDevice* device, VriQueueType type, VriCommandAllocator** out)
@@ -1388,7 +1400,8 @@ namespace vri::mtl
             t.QueueSubmit = QueueSubmit;
             t.QueueWaitIdle = QueueWaitIdle;
             t.DeviceWaitIdle = DeviceWaitIdle;
-            t.SetDebugName = SetDebugName;
+            t.SetDebugName       = SetDebugName;
+            t.GetVideoMemoryInfo = GetVideoMemoryInfo;
             return t;
         }
 

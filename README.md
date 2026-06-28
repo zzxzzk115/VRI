@@ -121,6 +121,11 @@ Notes:
   command signature cached by stride), and **desktop OpenGL 4.6** (`glMultiDraw*IndirectCount`).
   (Plain `CmdDrawIndirect` / `CmdDrawIndexedIndirect`, with a CPU-known count, are separate and more
   widely supported.)
+- **Live VRAM budget.** `GetVideoMemoryInfo(device, location, &info)` reports the OS-current memory
+  budget and current usage (bytes) for a memory location, for streaming / eviction decisions. On
+  **Vulkan** (`VK_EXT_memory_budget`), **Direct3D 12** (`IDXGIAdapter3::QueryVideoMemoryInfo`), and
+  **Metal** (working-set size); **OpenGL** and **WebGPU** have no portable query, so they return
+  `Unsupported`.
 
 ## Building
 

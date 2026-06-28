@@ -111,6 +111,39 @@ namespace vri::vk
             return r;
         }
 
+        VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice*    device,
+                                              VriMemoryLocation   location,
+                                              VriVideoMemoryInfo* out)
+        {
+            if (!out)
+                return VriResult_InvalidArgument;
+            const DeviceVK* d = Dev(device);
+            if (!d->HasMemoryBudget())
+                return VriResult_Unsupported;
+            VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = {
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+            VkPhysicalDeviceMemoryProperties2 props = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+            props.pNext                             = &budget;
+            vkGetPhysicalDeviceMemoryProperties2(d->PhysicalDevice(), &props);
+            // Sum the device-local heaps for Device/DeviceUpload, the rest (system) otherwise.
+            const bool wantDeviceLocal =
+                location == VriMemoryLocation_Device || location == VriMemoryLocation_DeviceUpload;
+            uint64_t b = 0, u = 0;
+            for (uint32_t i = 0; i < props.memoryProperties.memoryHeapCount; ++i)
+            {
+                const bool deviceLocal =
+                    (props.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+                if (deviceLocal == wantDeviceLocal)
+                {
+                    b += budget.heapBudget[i];
+                    u += budget.heapUsage[i];
+                }
+            }
+            out->budget = b;
+            out->usage  = u;
+            return VriResult_Success;
+        }
+
         VriResult VRI_CALL GetQueue(VriDevice* device, VriQueueType type, uint32_t /*index*/, VriQueue** outQueue)
         {
             if (type >= VriQueueType_Count)
@@ -1635,6 +1668,7 @@ namespace vri::vk
             QueueWaitIdle,
             DeviceWaitIdle,
             SetDebugName,
+            GetVideoMemoryInfo,
         };
     } // namespace
 

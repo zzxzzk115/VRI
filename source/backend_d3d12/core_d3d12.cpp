@@ -123,6 +123,26 @@ namespace vri::d3d12
             *outQueue = ToHandle(Dev(device)->GetQueue(type));
             return VriResult_Success;
         }
+        VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice*    device,
+                                              VriMemoryLocation   location,
+                                              VriVideoMemoryInfo* out)
+        {
+            if (!out)
+                return VriResult_InvalidArgument;
+            IDXGIAdapter3* a = Dev(device)->Adapter();
+            if (!a)
+                return VriResult_Unsupported;
+            const DXGI_MEMORY_SEGMENT_GROUP seg =
+                (location == VriMemoryLocation_Device || location == VriMemoryLocation_DeviceUpload) ?
+                    DXGI_MEMORY_SEGMENT_GROUP_LOCAL :
+                    DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL;
+            DXGI_QUERY_VIDEO_MEMORY_INFO info = {};
+            if (FAILED(a->QueryVideoMemoryInfo(0, seg, &info)))
+                return VriResult_Failure;
+            out->budget = info.Budget;
+            out->usage  = info.CurrentUsage;
+            return VriResult_Success;
+        }
 
         // ---- resources -------------------------------------------------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
@@ -1810,6 +1830,7 @@ namespace vri::d3d12
             QueueWaitIdle,
             DeviceWaitIdle,
             SetDebugName,
+            GetVideoMemoryInfo,
         };
         return &t;
     }

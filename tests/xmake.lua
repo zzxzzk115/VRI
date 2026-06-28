@@ -48,6 +48,7 @@ target("vri-tests")
     add_files("test_imgui_xbackend.cpp")      -- built-in Dear ImGui renderer (VRI_INTERFACE_IMGUI)
     add_files("test_pipelinecache_xbackend.cpp") -- serializable pipeline cache (VK VkPipelineCache)
     add_files("test_indirectcount_xbackend.cpp") -- draw-indirect-count (GPU draw count from a buffer)
+    add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

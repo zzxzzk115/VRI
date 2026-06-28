@@ -476,6 +476,14 @@ namespace vri::vk
         else if (hasExt("VK_EXT_calibrated_timestamps"))
             extensions.push_back("VK_EXT_calibrated_timestamps");
 
+        // Live VRAM budget/usage: VK_EXT_memory_budget adds VkPhysicalDeviceMemoryBudgetPropertiesEXT
+        // to the memory-properties query. No feature struct, just the extension.
+        if (hasExt(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME))
+        {
+            extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+            m_hasMemoryBudget = true;
+        }
+
         // ---- optional features: query -> enable -> report (bestEffort aware) ----
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asEn = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};

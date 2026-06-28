@@ -14,6 +14,15 @@
 
 VRI_EXTERN_C_BEGIN
 
+/* Live video-memory budget/usage for a memory location (VriCoreInterface::GetVideoMemoryInfo).
+ * `budget` is how much the OS currently lets this process use; `usage` is how much it is using.
+ * Both in bytes; useful for streaming/eviction decisions. */
+typedef struct VriVideoMemoryInfo
+{
+    uint64_t budget;
+    uint64_t usage;
+} VriVideoMemoryInfo;
+
 typedef struct VriAdapterDesc
 {
     char           name[256];

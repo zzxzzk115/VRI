@@ -45,6 +45,8 @@ namespace vri::d3d12
         ID3D12CommandSignature* DispatchMeshSignature();
         // Lazily-created (and cached by stride) DRAW / DRAW_INDEXED signatures for indirect draws.
         ID3D12CommandSignature* DrawSignature(bool indexed, uint32_t stride);
+        // The adapter, for live VRAM budget queries (QueryVideoMemoryInfo); null if unavailable.
+        IDXGIAdapter3* Adapter() const { return m_adapter3.Get(); }
 
     private:
         VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
@@ -53,6 +55,7 @@ namespace vri::d3d12
         VriResult CreateDescriptorHeaps();
 
         ComPtr<IDXGIFactory4>          m_factory;
+        ComPtr<IDXGIAdapter3>          m_adapter3; // chosen adapter, for QueryVideoMemoryInfo
         ComPtr<ID3D12Device>           m_device;
         ComPtr<ID3D12InfoQueue1>       m_infoQueue;       // debug-layer message sink (validation)
         DWORD                          m_msgCookie = 0;   // RegisterMessageCallback token

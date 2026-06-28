@@ -154,6 +154,10 @@ typedef struct VriCoreInterface
     void (VRI_CALL *QueueWaitIdle)(VriQueue* queue);
     void (VRI_CALL *DeviceWaitIdle)(VriDevice* device);
     void (VRI_CALL *SetDebugName)(void* object, const char* name);
+
+    /* Live video-memory budget/usage for a memory location (Device = VRAM, others = system).
+     * Returns VriResult_Unsupported where the backend can't report it (e.g. WebGPU, OpenGL). */
+    VriResult (VRI_CALL *GetVideoMemoryInfo)(const VriDevice* device, VriMemoryLocation location, VriVideoMemoryInfo* out);
 } VriCoreInterface;
 
 VRI_EXTERN_C_END

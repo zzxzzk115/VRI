@@ -23,6 +23,7 @@ namespace vri::vk
         // accessors used by the core interface implementation
         VkInstance           Instance() const { return m_instance; }
         VkPhysicalDevice     PhysicalDevice() const { return m_physicalDevice; }
+        bool                 HasMemoryBudget() const { return m_hasMemoryBudget; }
         VkDevice             Device() const { return m_device; }
         VmaAllocator         Allocator() const { return m_allocator; }
         const VriDeviceDesc& Desc() const { return m_desc; }
@@ -97,6 +98,7 @@ namespace vri::vk
         bool            m_hasPipelineStats        = false;
         bool            m_hasCalibratedTimestamps = false;
         bool            m_hasDrawIndirectCount    = false;
+        bool            m_hasMemoryBudget         = false;
         VkTimeDomainKHR m_hostTimeDomain          = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
         ExtFunctions    m_ext                     = {};
 
