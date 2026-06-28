@@ -116,23 +116,23 @@ through VRI itself). Backend is auto-selected; override on desktop with
 `VRI_API=vulkan|webgpu|opengl|d3d12|metal`, or in the browser with `?backend=webgpu|webgl`.
 
 ```sh
-xmake run example-triangle          # hello triangle
-xmake run example-cube              # textured, depth-tested, animated cube
-xmake run example-instancing        # a field of textured cubes
-xmake run example-pbrbasic          # PBR metallic-roughness sphere grid
-xmake run example-pushconstants     # push constants across backends
-xmake run example-normalmapping     # tangent-space normal mapping
-xmake run example-computeshader     # compute writes a plasma to a storage image
-xmake run example-offscreen         # render-to-texture + multiple render targets
-xmake run example-descriptorindexing# bindless texturing (with fallback)
-xmake run example-shadowmapping     # directional-light PCF shadow mapping
-xmake run example-msaa              # 4x MSAA, toggle to see the edges go jagged
-xmake run example-cubemap           # skybox + reflective chrome sphere
-xmake run example-stenciloutline    # two-pass stencil silhouette outline
-xmake run example-deferred          # deferred shading with a G-buffer + many lights
-xmake run example-rayquery          # ray-traced hard shadows (HW ray query / compute fallback)
-xmake run example-raytracing        # ray-traced glTF model
-xmake run example-pathtracer        # progressive path tracer with global illumination
+xmake run example-triangle            # hello triangle
+xmake run example-cube                # textured, depth-tested, animated cube
+xmake run example-instancing          # a field of textured cubes
+xmake run example-pbrbasic            # PBR metallic-roughness sphere grid
+xmake run example-pushconstants       # push constants across backends
+xmake run example-normalmapping       # tangent-space normal mapping
+xmake run example-computeshader       # compute writes a plasma to a storage image
+xmake run example-offscreen           # render-to-texture + multiple render targets
+xmake run example-descriptorindexing  # bindless texturing (with fallback)
+xmake run example-shadowmapping       # directional-light PCF shadow mapping
+xmake run example-msaa                # 4x MSAA, toggle to see the edges go jagged
+xmake run example-cubemap             # skybox + reflective chrome sphere
+xmake run example-stenciloutline      # two-pass stencil silhouette outline
+xmake run example-deferred            # deferred shading with a G-buffer + many lights
+xmake run example-rayquery            # ray-traced hard shadows (HW ray query / compute fallback)
+xmake run example-raytracing          # ray-traced glTF model
+xmake run example-pathtracer          # progressive path tracer with global illumination
 ```
 
 One example is opt-in because it needs an extra SDK:
