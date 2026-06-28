@@ -504,6 +504,8 @@ namespace vri::gl
         const bool timerOk                = !m_es && (major > 4 || (major == 4 && minor >= 4));
         m_desc.hasTimestampQueries        = timerOk ? VRI_TRUE : VRI_FALSE;
         m_desc.timestampPeriodNanoseconds = timerOk ? 1.0f : 0.0f;
+        // GPU-driven draw count via glMultiDraw*IndirectCount (ARB_indirect_parameters, core 4.6).
+        m_desc.hasDrawIndirectCount = (!m_es && (major > 4 || (major == 4 && minor >= 6))) ? VRI_TRUE : VRI_FALSE;
 #endif
     }
 
@@ -518,14 +520,15 @@ namespace vri::gl
         // context we request; extension scanning can refine this later if needed.
         if (!m_es)
         {
-            f.baseInstance   = atLeast(4, 2);
-            f.separateAttrib = atLeast(4, 3);
-            f.drawIndirect   = atLeast(4, 3);
-            f.bufferStorage  = atLeast(4, 4);
-            f.clipControl    = atLeast(4, 5);
-            f.dsa            = atLeast(4, 5);
-            f.spirvIngest    = atLeast(4, 6); // ARB_gl_spirv is core in 4.6
-            f.textureStorage = atLeast(4, 2); // glTexStorage*; macOS GL 4.1 lacks it -> glTexImage*
+            f.baseInstance      = atLeast(4, 2);
+            f.separateAttrib    = atLeast(4, 3);
+            f.drawIndirect      = atLeast(4, 3);
+            f.bufferStorage     = atLeast(4, 4);
+            f.clipControl       = atLeast(4, 5);
+            f.dsa               = atLeast(4, 5);
+            f.spirvIngest       = atLeast(4, 6); // ARB_gl_spirv is core in 4.6
+            f.drawIndirectCount = atLeast(4, 6); // ARB_indirect_parameters (glMultiDraw*IndirectCount)
+            f.textureStorage    = atLeast(4, 2); // glTexStorage*; macOS GL 4.1 lacks it -> glTexImage*
 #if !defined(VRI_GL_ES_HEADERS)
             // Pipeline cache via program binaries (ARB_get_program_binary, core 4.1). Require at
             // least one supported binary format - some drivers advertise the API but zero formats.

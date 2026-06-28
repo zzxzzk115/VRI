@@ -2,7 +2,7 @@
 // holds one VriDrawDesc {3,1,0,0} (a procedural red triangle) and maxDrawNum is 4; the count buffer
 // holds the real count. With count=1 the triangle is drawn (center red); with count=0 nothing is
 // drawn (center stays the clear color) - proving the count buffer, not maxDrawNum, decides how many
-// draws issue. Gated on VriDeviceDesc::hasDrawIndirectCount (Vulkan now; D3D12 + desktop GL follow).
+// draws issue. Gated on VriDeviceDesc::hasDrawIndirectCount (Vulkan, D3D12, desktop OpenGL 4.6).
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>

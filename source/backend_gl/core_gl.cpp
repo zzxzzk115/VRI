@@ -1956,16 +1956,111 @@ namespace vri::gl
             c->device->ReportError("CmdDrawIndirect: indirect draw is unavailable on WebGL2"); // explicit, never silent
 #endif
         }
-        // Indexed-indirect (glMultiDrawElementsIndirect) + the indirect-count variants
-        // (glMultiDraw*IndirectCount, ARB_indirect_parameters / GL 4.6) land in a follow-up;
-        // hasDrawIndirectCount stays false until then.
-        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
-        void VRI_CALL
-        CmdDrawIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
-        {}
-        void VRI_CALL
-        CmdDrawIndexedIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
-        {}
+        // Indexed-indirect (glMultiDrawElementsIndirect, GL 4.3) + the indirect-count variants
+        // (glMultiDraw*IndirectCount, ARB_indirect_parameters / GL 4.6). The element-array + indirect
+        // buffers are already bound (CmdSetIndexBuffer / below). Desktop GL only.
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer* cmd,
+                                             VriBuffer*        buffer,
+                                             uint64_t          offset,
+                                             uint32_t          drawNum,
+                                             uint32_t          stride)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(VRI_GL_ES_HEADERS)
+            SetupVertexAttribs(c);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
+            if (drawNum > 1 && c->device->Features().drawIndirect)
+                glMultiDrawElementsIndirect(c->topology,
+                                            c->indexType,
+                                            reinterpret_cast<const void*>(static_cast<uintptr_t>(offset)),
+                                            static_cast<GLsizei>(drawNum),
+                                            static_cast<GLsizei>(stride));
+            else
+                for (uint32_t i = 0; i < (drawNum ? drawNum : 1u); ++i)
+                    glDrawElementsIndirect(c->topology,
+                                           c->indexType,
+                                           reinterpret_cast<const void*>(
+                                               static_cast<uintptr_t>(offset + static_cast<uint64_t>(i) * stride)));
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+#else
+            (void)buffer;
+            (void)offset;
+            (void)drawNum;
+            (void)stride;
+            c->device->ReportError("CmdDrawIndexedIndirect: indirect draw is unavailable on WebGL2");
+#endif
+        }
+        void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
+                                           VriBuffer*        buffer,
+                                           uint64_t          offset,
+                                           VriBuffer*        countBuffer,
+                                           uint64_t          countOffset,
+                                           uint32_t          maxDrawNum,
+                                           uint32_t          stride)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(VRI_GL_ES_HEADERS)
+            if (!c->device->Features().drawIndirectCount)
+            {
+                c->device->ReportError("CmdDrawIndirectCount: needs OpenGL 4.6 (ARB_indirect_parameters)");
+                return;
+            }
+            SetupVertexAttribs(c);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
+            glBindBuffer(GL_PARAMETER_BUFFER, Buf(countBuffer)->id); // count source
+            glMultiDrawArraysIndirectCount(c->topology,
+                                           reinterpret_cast<const void*>(static_cast<uintptr_t>(offset)),
+                                           static_cast<GLintptr>(countOffset),
+                                           static_cast<GLsizei>(maxDrawNum),
+                                           static_cast<GLsizei>(stride));
+            glBindBuffer(GL_PARAMETER_BUFFER, 0);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+#else
+            (void)buffer;
+            (void)offset;
+            (void)countBuffer;
+            (void)countOffset;
+            (void)maxDrawNum;
+            (void)stride;
+            c->device->ReportError("CmdDrawIndirectCount: unavailable on WebGL2");
+#endif
+        }
+        void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
+                                                  VriBuffer*        buffer,
+                                                  uint64_t          offset,
+                                                  VriBuffer*        countBuffer,
+                                                  uint64_t          countOffset,
+                                                  uint32_t          maxDrawNum,
+                                                  uint32_t          stride)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(VRI_GL_ES_HEADERS)
+            if (!c->device->Features().drawIndirectCount)
+            {
+                c->device->ReportError("CmdDrawIndexedIndirectCount: needs OpenGL 4.6 (ARB_indirect_parameters)");
+                return;
+            }
+            SetupVertexAttribs(c);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
+            glBindBuffer(GL_PARAMETER_BUFFER, Buf(countBuffer)->id);
+            glMultiDrawElementsIndirectCount(c->topology,
+                                             c->indexType,
+                                             reinterpret_cast<const void*>(static_cast<uintptr_t>(offset)),
+                                             static_cast<GLintptr>(countOffset),
+                                             static_cast<GLsizei>(maxDrawNum),
+                                             static_cast<GLsizei>(stride));
+            glBindBuffer(GL_PARAMETER_BUFFER, 0);
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+#else
+            (void)buffer;
+            (void)offset;
+            (void)countBuffer;
+            (void)countOffset;
+            (void)maxDrawNum;
+            (void)stride;
+            c->device->ReportError("CmdDrawIndexedIndirectCount: unavailable on WebGL2");
+#endif
+        }
         void VRI_CALL CmdDispatch(VriCommandBuffer*, const VriDispatchDesc* d)
         {
 #if defined(VRI_GL_ES_HEADERS)
