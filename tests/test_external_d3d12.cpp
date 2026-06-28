@@ -4,6 +4,12 @@
 // an exportable fence yields a valid HANDLE (D3D12Fence). The real CUDA round-trip is the
 // opt-in example-cuda-interop. Self-skips when D3D12 / external memory is unavailable (e.g. WARP
 // or a runner without a D3D12 device), keeping the suite green there.
+//
+// D3D12 and its shared NT HANDLEs are Windows-only (the backend itself only builds on Windows),
+// so on other platforms -- where CI still configures --vri_backend_d3d12=y as a compile gate --
+// this is an empty translation unit.
+#if defined(_WIN32)
+
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -134,3 +140,5 @@ TEST_CASE("D3D12 external memory: exportable fence yields a valid shared handle"
     CHECK(c.GetFenceValue(fence) == 0);
     c.DestroyFence(fence);
 }
+
+#endif // _WIN32
