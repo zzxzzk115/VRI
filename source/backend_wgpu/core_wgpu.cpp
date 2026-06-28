@@ -1133,9 +1133,18 @@ namespace vri::wgpu
             for (uint32_t i = 0; i < drawNum; ++i)
                 wgpuRenderPassEncoderDrawIndirect(CB(cmd)->pass, Buf(buffer)->buffer, offset);
         }
-        // Indexed-indirect (wgpuRenderPassEncoderDrawIndexedIndirect) lands in a follow-up. WebGPU
-        // core has no indirect-count, so those stay unsupported (hasDrawIndirectCount = false).
-        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        // One indexed-indirect draw per record (WebGPU draws a single record per call). The indirect
+        // *count* variants stay unsupported - WebGPU core has no multi-draw-indirect-count.
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer* cmd,
+                                             VriBuffer*        buffer,
+                                             uint64_t          offset,
+                                             uint32_t          drawNum,
+                                             uint32_t          stride)
+        {
+            for (uint32_t i = 0; i < drawNum; ++i)
+                wgpuRenderPassEncoderDrawIndexedIndirect(
+                    CB(cmd)->pass, Buf(buffer)->buffer, offset + static_cast<uint64_t>(i) * stride);
+        }
         void VRI_CALL
         CmdDrawIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
         {}
