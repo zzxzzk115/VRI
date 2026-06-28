@@ -8,6 +8,8 @@
 #include "swapchain_d3d12.h"
 #include "vrs_d3d12.h"
 
+#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -398,6 +400,7 @@ namespace vri::d3d12
                             GetSwapChainInterfaceD3D12(),
                             sizeof(VriSwapChainInterface)); // DXGI flip-model present
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceD3D12(), sizeof(VriQueryInterface));
+        m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)

@@ -33,5 +33,6 @@
 #include "ext/vri_ext_vrs.h"
 #include "ext/vri_ext_external.h"
 #include "ext/vri_ext_query.h"
+#include "ext/vri_ext_imgui.h"
 
 #endif /* VRI_H */

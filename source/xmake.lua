@@ -10,6 +10,9 @@ target("vri")
     -- internal headers (core, backends)
     add_includedirs(os.scriptdir(), {public = false})
 
+    -- repo root, so the built-in ImGui renderer can embed "shaders/lib/imgui_*.h"
+    add_includedirs("$(projectdir)", {public = false})
+
     -- backend-agnostic core
     add_files("core/*.cpp")
     add_headerfiles("$(projectdir)/include/(vri/**.h)")

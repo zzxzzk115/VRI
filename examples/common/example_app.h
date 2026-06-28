@@ -37,7 +37,6 @@
 #endif
 
 #include "capture.h"
-#include "imgui_vri.h"
 
 namespace vriex
 {
@@ -234,9 +233,16 @@ namespace vriex
         bool                                  running    = true;
         std::chrono::steady_clock::time_point lastFrameTime {};
         bool                                  haveFrameTime = false; // for real dt
-        ImguiVri                              gui;
-        ImDrawData*                           guiDraw  = nullptr;
-        bool                                  guiReady = false; // ImGui renderer + this frame's draw data
+        // VRI's built-in ImGui renderer (VRI_INTERFACE_IMGUI). The app owns the ImGui environment
+        // (context/input/NewFrame/Render) and each frame flattens ImDrawData into guiData.
+        VriImguiInterface                guiApi {};
+        VriImgui*                        gui = nullptr;
+        std::vector<VriImguiVertex>      guiVerts;
+        std::vector<uint16_t>            guiIndices;
+        std::vector<VriImguiDrawCommand> guiCmds;
+        VriImguiDrawData                 guiData {};
+        ImDrawData*                      guiDraw  = nullptr;
+        bool                             guiReady = false; // ImGui renderer + this frame's draw data
 #if !defined(__EMSCRIPTEN__)
         SDL_Window* window = nullptr;
 #endif
@@ -478,7 +484,82 @@ namespace vriex
 #else
             ImGui_ImplSDL3_InitForOther(window);
 #endif
-            gui.Init(c, dev, queue, swapFormat, hasDepth ? depthFormat : VriFormat_Unknown, useWgsl, useDxbc);
+            // VRI's built-in ImGui renderer. VRI doesn't link ImGui, so the app hands it the font
+            // atlas pixels and (each frame) the flattened draw data; one renderer works on every backend.
+            if (vriGetInterface(dev, VRI_INTERFACE_IMGUI, sizeof(guiApi), &guiApi) != VriResult_Success)
+                Fail("VRI_INTERFACE_IMGUI unavailable");
+            unsigned char* fontPixels = nullptr;
+            int            fontW = 0, fontH = 0;
+            ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&fontPixels, &fontW, &fontH);
+            VriImguiDesc gd {};
+            gd.uploadQueue = queue;
+            gd.colorFormat = swapFormat;
+            gd.depthFormat = hasDepth ? depthFormat : VriFormat_Unknown;
+            gd.fontAtlas   = fontPixels;
+            gd.fontWidth   = uint32_t(fontW);
+            gd.fontHeight  = uint32_t(fontH);
+            if (guiApi.CreateImgui(dev, &gd, &gui) != VriResult_Success)
+                Fail("CreateImgui failed");
+            ImGui::GetIO().Fonts->SetTexID(reinterpret_cast<ImTextureID>(guiApi.GetImguiFontView(gui)));
+        }
+
+        // Flatten this frame's ImDrawData (per-list vertex/index buffers + list-relative offsets)
+        // into the neutral VriImguiDrawData the renderer consumes (one buffer each, global offsets).
+        void BuildGuiDrawData(ImDrawData* dd)
+        {
+            guiVerts.clear();
+            guiIndices.clear();
+            guiCmds.clear();
+            guiData = {};
+            if (!dd || dd->TotalVtxCount == 0)
+                return;
+            guiVerts.reserve(size_t(dd->TotalVtxCount));
+            guiIndices.reserve(size_t(dd->TotalIdxCount));
+            uint32_t vtxBase = 0, idxBase = 0;
+            for (int n = 0; n < dd->CmdListsCount; ++n)
+            {
+                const ImDrawList* cl = dd->CmdLists[n];
+                for (int v = 0; v < cl->VtxBuffer.Size; ++v)
+                {
+                    const ImDrawVert& s = cl->VtxBuffer.Data[v];
+                    guiVerts.push_back(VriImguiVertex {{s.pos.x, s.pos.y}, {s.uv.x, s.uv.y}, s.col});
+                }
+                for (int i = 0; i < cl->IdxBuffer.Size; ++i)
+                    guiIndices.push_back(static_cast<uint16_t>(cl->IdxBuffer.Data[i]));
+                for (int i = 0; i < cl->CmdBuffer.Size; ++i)
+                {
+                    const ImDrawCmd& dc = cl->CmdBuffer[i];
+                    if (dc.UserCallback)
+                    {
+                        dc.UserCallback(cl, &dc);
+                        continue;
+                    }
+                    VriImguiDrawCommand o {};
+                    o.clipRect[0]  = dc.ClipRect.x;
+                    o.clipRect[1]  = dc.ClipRect.y;
+                    o.clipRect[2]  = dc.ClipRect.z;
+                    o.clipRect[3]  = dc.ClipRect.w;
+                    o.indexCount   = dc.ElemCount;
+                    o.indexOffset  = idxBase + dc.IdxOffset;          // into the concatenated index buffer
+                    o.vertexOffset = int32_t(vtxBase + dc.VtxOffset); // index values stay list-relative
+                    guiCmds.push_back(o);
+                }
+                vtxBase += uint32_t(cl->VtxBuffer.Size);
+                idxBase += uint32_t(cl->IdxBuffer.Size);
+            }
+            guiData.vertices          = guiVerts.data();
+            guiData.vertexCount       = uint32_t(guiVerts.size());
+            guiData.indices           = guiIndices.data();
+            guiData.indexCount        = uint32_t(guiIndices.size());
+            guiData.indexSize         = sizeof(uint16_t);
+            guiData.commands          = guiCmds.data();
+            guiData.commandCount      = uint32_t(guiCmds.size());
+            guiData.displayPos[0]     = dd->DisplayPos.x;
+            guiData.displayPos[1]     = dd->DisplayPos.y;
+            guiData.displaySize[0]    = dd->DisplaySize.x;
+            guiData.displaySize[1]    = dd->DisplaySize.y;
+            guiData.framebufferWidth  = width;
+            guiData.framebufferHeight = height;
         }
 
         // ---- one-shot upload helper (kills the staging boilerplate examples kept repeating) --
@@ -715,7 +796,8 @@ namespace vriex
             ImGui::End();
             ImGui::Render();
             guiDraw = ImGui::GetDrawData();
-            gui.WriteFrame(guiDraw); // map+memcpy here (before acquire): the map may yield on WebGPU
+            BuildGuiDrawData(guiDraw);
+            guiApi.UploadImguiData(gui, &guiData); // map+memcpy here (before acquire): may yield on WebGPU
         }
 
         void Frame()
@@ -747,7 +829,7 @@ namespace vriex
             c.BeginCommandBuffer(cmd);
             if (onPreRender)
                 onPreRender(cmd);
-            gui.RecordCopy(cmd); // copy ImGui verts/indices (written pre-acquire) before the render pass
+            guiApi.CmdCopyImguiData(cmd, gui); // copy ImGui verts/indices (staged pre-acquire) before the pass
 
             VriTextureBarrierDesc bgr[2] {};
             bgr[0].texture       = backbuffer;
@@ -803,7 +885,7 @@ namespace vriex
             c.CmdSetScissors(cmd, &scis, 1);
             if (onRecord)
                 onRecord(cmd);
-            gui.Render(guiDraw, cmd, width, height); // UI on top of the example
+            guiApi.CmdDrawImgui(cmd, gui, &guiData); // UI on top of the example
             c.CmdEndRendering(cmd);
 
             const bool capturing = captureBuf && maxFrames != 0 && frameValue >= maxFrames;
@@ -959,7 +1041,8 @@ namespace vriex
         // example destroys its own resources before calling this.
         void Shutdown()
         {
-            gui.Shutdown();
+            if (gui)
+                guiApi.DestroyImgui(gui);
 #if !defined(__EMSCRIPTEN__)
             ImGui_ImplSDL3_Shutdown();
 #endif

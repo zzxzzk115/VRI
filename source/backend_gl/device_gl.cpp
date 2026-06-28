@@ -3,6 +3,8 @@
 #include "query_gl.h"
 #include "swapchain_gl.h"
 
+#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
+
 #if defined(VRI_GL_EGL)
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -534,6 +536,7 @@ namespace vri::gl
         // platforms register the interface but report Unsupported at CreateSwapChain.
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceGL(), sizeof(VriSwapChainInterface));
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceGL(), sizeof(VriQueryInterface));
+        m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

@@ -9,6 +9,8 @@
 #include "swapchain_vk.h"
 #include "vrs_vk.h"
 
+#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
+
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -916,6 +918,7 @@ namespace vri::vk
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceVK(), sizeof(VriSwapChainInterface));
         m_registry.Register(VRI_INTERFACE_INTEROP, GetInteropInterfaceVK(), sizeof(VriInteropInterface));
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceVK(), sizeof(VriQueryInterface));
+        m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
         // Optional interfaces: registered only when the backing feature was granted,
         // so vriGetInterface returns Unsupported on adapters/runs that lack it.
         if (m_enabledFeatures & VriFeature_VariableShadingRate)

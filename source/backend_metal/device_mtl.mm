@@ -6,6 +6,8 @@
 #include "rt_mtl.h"
 #include "meshshader_mtl.h"
 
+#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer (returns Unsupported: no MSL shader yet)
+
 #include <cstdio>
 #include <cstring>
 
@@ -115,6 +117,7 @@ namespace vri::mtl
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceMTL(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceMTL(), sizeof(VriSwapChainInterface));
+        m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
         if (m_desc.hasRayQuery)
             m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceMTL(), sizeof(VriRayTracingInterface));
         if (m_desc.hasMeshShader)

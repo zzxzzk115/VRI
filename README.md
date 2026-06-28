@@ -98,6 +98,12 @@ Notes:
   **pipeline-statistics queries** (per-stage invocation counts, a portable `VriPipelineStatistics`
   struct) on Vulkan + D3D12, and **calibrated timestamps** (a correlated GPU+CPU clock pair, for
   aligning GPU spans with a CPU trace) on Vulkan + D3D12.
+- **Built-in Dear ImGui renderer** (`ext/vri_ext_imgui.h`, `VRI_INTERFACE_IMGUI`) draws ImGui
+  through VRI's own core interface, so a single renderer covers every backend with no per-backend
+  `imgui_impl_*` and it flows through the validation layer for free. VRI does **not** depend on or
+  link Dear ImGui: the application owns the ImGui environment (context, input, `NewFrame`) and each
+  frame hands VRI a backend-neutral, flattened `VriImguiDrawData` (so no ImGui types cross into
+  VRI). The examples' control panel is drawn with it.
 
 ## Building
 
@@ -125,7 +131,7 @@ xmake run example-cube   # hosts the page in your browser
 ## Examples
 
 Every example runs across the backends and the web, with a Dear ImGui control panel (rendered
-through VRI itself). Backend is auto-selected; override on desktop with
+through VRI's built-in ImGui renderer, `ext/vri_ext_imgui.h`). Backend is auto-selected; override on desktop with
 `VRI_API=vulkan|webgpu|opengl|d3d12|metal`, or in the browser with `?backend=webgpu|webgl`.
 
 ```sh

@@ -4,6 +4,8 @@
 #include "swapchain_wgpu.h"
 #include "wgpu_native.h" // webgpu.h + native poll helpers (browser yields via ASYNCIFY)
 
+#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
+
 #include <cstdio>
 #include <cstring>
 
@@ -247,6 +249,7 @@ namespace vri::wgpu
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceWGPU(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceWGPU(), sizeof(VriSwapChainInterface));
         m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceWGPU(), sizeof(VriQueryInterface));
+        m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)
