@@ -32,5 +32,6 @@
 #include "ext/vri_ext_meshshader.h"
 #include "ext/vri_ext_vrs.h"
 #include "ext/vri_ext_external.h"
+#include "ext/vri_ext_query.h"
 
 #endif /* VRI_H */

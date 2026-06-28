@@ -181,6 +181,15 @@ namespace vri::vk
         VmaAllocation allocation;
     };
 
+    struct QueryPoolVK
+    {
+        DeviceVK*   device;
+        VkQueryPool pool;
+        VkQueryType type;
+        uint32_t    count;
+    };
+    inline VriQueryPool* ToHandle(QueryPoolVK* q) { return reinterpret_cast<VriQueryPool*>(q); }
+
     // ---- opaque <-> concrete casts -------------------------------------
     template<typename T, typename H>
     inline T* Cast(H* h)

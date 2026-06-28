@@ -54,6 +54,7 @@ VRI_API VriResult VRI_CALL vriGetInterface(const VriDevice* device,
 #define VRI_INTERFACE_VRS        "VriShadingRateInterface"
 #define VRI_INTERFACE_OMM        "VriOpacityMicromapInterface"
 #define VRI_INTERFACE_EXTERNAL   "VriExternalInterface"
+#define VRI_INTERFACE_QUERY      "VriQueryInterface"
 
 /* ---- core interface (function table) ---------------------------------- */
 

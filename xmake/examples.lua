@@ -21,6 +21,8 @@ local _vri_examples = {
     -- and a compute-BVH software fallback on OpenGL and WebGPU (wasm).
     {name = "raytracing"},
     {name = "pathtracer"},
+    -- Headless GPU profiler built on the timestamp query interface (console-only, no UI).
+    {name = "profiler", desktop_only = true},
     -- CUDA <-> VRI external-memory interop. Desktop-only, and opt-in via
     -- --vri_build_cuda_interop=y because it needs the CUDA Toolkit (nvcc + cudart).
     {name = "cuda_interop", desktop_only = true, requires_cuda = true}

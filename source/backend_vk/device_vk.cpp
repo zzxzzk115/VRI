@@ -4,6 +4,7 @@
 #include "interop_vk.h"
 #include "meshshader_vk.h"
 #include "omm_vk.h"
+#include "query_vk.h"
 #include "rt_vk.h"
 #include "swapchain_vk.h"
 #include "vrs_vk.h"
@@ -775,6 +776,18 @@ namespace vri::vk
         m_desc.hasShaderWaveOps =
             (props11.subgroupSupportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) ? VRI_TRUE : VRI_FALSE;
 
+        // Timestamp queries: tick scale + whether the graphics queue family records timestamps.
+        m_desc.timestampPeriodNanoseconds = props.limits.timestampPeriod;
+        uint32_t qfCount                  = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &qfCount, nullptr);
+        std::vector<VkQueueFamilyProperties> qfProps(qfCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &qfCount, qfProps.data());
+        const uint32_t gfxFamily = m_queues[VriQueueType_Graphics].familyIndex;
+        m_desc.hasTimestampQueries =
+            (gfxFamily < qfCount && qfProps[gfxFamily].timestampValidBits > 0 && props.limits.timestampPeriod > 0.0f) ?
+                VRI_TRUE :
+                VRI_FALSE;
+
         if (m_enabledFeatures & VriFeature_RayTracing)
         {
             VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps = {
@@ -851,6 +864,7 @@ namespace vri::vk
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceVK(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceVK(), sizeof(VriSwapChainInterface));
         m_registry.Register(VRI_INTERFACE_INTEROP, GetInteropInterfaceVK(), sizeof(VriInteropInterface));
+        m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceVK(), sizeof(VriQueryInterface));
         // Optional interfaces: registered only when the backing feature was granted,
         // so vriGetInterface returns Unsupported on adapters/runs that lack it.
         if (m_enabledFeatures & VriFeature_VariableShadingRate)

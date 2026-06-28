@@ -3,6 +3,7 @@
 #include "external_d3d12.h"
 #include "meshshader_d3d12.h"
 #include "omm_d3d12.h"
+#include "query_d3d12.h"
 #include "rt_d3d12.h"
 #include "swapchain_d3d12.h"
 #include "vrs_d3d12.h"
@@ -346,6 +347,16 @@ namespace vri::d3d12
             m_desc.subgroupSize     = o1.WaveLaneCountMin; // SM6.0 wave width
         }
 
+        // Timestamp queries are always available on the direct/compute queues; derive the tick
+        // scale from the graphics queue's frequency (ticks/sec -> nanoseconds/tick).
+        m_desc.hasTimestampQueries = VRI_TRUE;
+        UINT64 freq                = 0;
+        if (m_queues[VriQueueType_Graphics].queue &&
+            SUCCEEDED(m_queues[VriQueueType_Graphics].queue->GetTimestampFrequency(&freq)) && freq != 0)
+            m_desc.timestampPeriodNanoseconds = 1.0e9f / static_cast<float>(freq);
+        else
+            m_desc.hasTimestampQueries = VRI_FALSE;
+
         m_desc.enabledFeatures        = m_enabledFeatures;
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasMeshShader          = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
@@ -384,6 +395,7 @@ namespace vri::d3d12
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN,
                             GetSwapChainInterfaceD3D12(),
                             sizeof(VriSwapChainInterface)); // DXGI flip-model present
+        m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceD3D12(), sizeof(VriQueryInterface));
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_registry.Register(VRI_INTERFACE_VRS, GetShadingRateInterfaceD3D12(), sizeof(VriShadingRateInterface));
         if (m_enabledFeatures & VriFeature_MeshShader)

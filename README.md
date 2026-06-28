@@ -67,6 +67,7 @@ How each feature is supported on each backend:
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| GPU timestamp queries | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 Notes:
 
@@ -85,6 +86,11 @@ Notes:
   Implemented on **Vulkan** (`VK_KHR_external_memory/semaphore`) and **Direct3D 12** (shared
   committed resources + shared fences); the opt-in `example-cuda-interop` runs on both
   (`VRI_API=vulkan|d3d12`).
+- **GPU timestamp queries** (`ext/vri_ext_query.h`) record the GPU clock at points in a command
+  buffer and resolve the ticks into a buffer; scale by `VriDeviceDesc::timestampPeriodNanoseconds`
+  for nanoseconds. The basis of a GPU profiler — see `example-profiler`. On **Vulkan** + **Direct3D
+  12** today (occlusion / pipeline-statistics query types are planned; WebGPU is feasible via its
+  optional `timestamp-query` feature).
 
 ## Building
 
@@ -133,6 +139,12 @@ xmake run example-deferred            # deferred shading with a G-buffer + many 
 xmake run example-rayquery            # ray-traced hard shadows (HW ray query / compute fallback)
 xmake run example-raytracing          # ray-traced glTF model
 xmake run example-pathtracer          # progressive path tracer with global illumination
+```
+
+A console-only example (no window/UI) demonstrates GPU timing:
+
+```sh
+xmake run example-profiler            # GPU timestamp profiler (VRI_API=vulkan|d3d12)
 ```
 
 One example is opt-in because it needs an extra SDK:

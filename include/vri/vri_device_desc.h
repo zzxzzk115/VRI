@@ -68,6 +68,8 @@ typedef struct VriDeviceDesc
     VriBool        hasCustomBorderColor;
     VriBool        hasShaderWaveOps; /* subgroup/wave intrinsics (WaveActiveSum, ballots, ...) */
     VriBool        hasExternalMemory; /* external memory/semaphore export (see ext/vri_ext_external.h) */
+    VriBool        hasTimestampQueries;        /* GPU timestamp query pools (see ext/vri_ext_query.h) */
+    float          timestampPeriodNanoseconds; /* nanoseconds per timestamp tick (0 if unsupported) */
     uint32_t       subgroupSize;     /* lanes per subgroup/wave (0 if unknown) */
 
     /* ray-tracing shader-binding-table layout (valid when hasRayTracing) */

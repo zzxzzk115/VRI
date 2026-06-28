@@ -38,6 +38,7 @@ target("vri-tests")
     add_files("test_wave_xbackend.cpp")       -- subgroup/wave ops (VK subgroups + D3D12 SM6.0)
     add_files("test_cube_xbackend.cpp")       -- examples/cube regression: MVP + sampled texture
     add_files("test_instancing_xbackend.cpp") -- per-instance vertex stream (instanced matrices)
+    add_files("test_query_xbackend.cpp")      -- GPU timestamp query pools (VK + D3D12)
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_files("test_triangle_vk.cpp")

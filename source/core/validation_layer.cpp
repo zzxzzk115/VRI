@@ -72,6 +72,7 @@ namespace vri::core
             VriRayTracingInterface      rt;       // the backend's real ray-tracing table (if supported)
             VriOpacityMicromapInterface omm;      // the backend's real OMM table (if supported)
             VriExternalInterface        external; // the backend's real external-memory table (if supported)
+            VriQueryInterface           query;    // the backend's real query-pool table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>  queues;
             std::vector<CmdBufVal*> cmds;
@@ -703,6 +704,38 @@ namespace vri::core
             return DV(device)->external.GetFenceHandle(
                 DV(device)->real, fence ? FV(fence)->real : nullptr, ht, outHandle);
         }
+        // query pool: unwrap the device on create; the command buffer on records. The query
+        // pool itself is a resource handle (not wrapped), so it passes through.
+        VriResult VRI_CALL QueryCreateQueryPool(VriDevice* device, const VriQueryPoolDesc* desc, VriQueryPool** out)
+        {
+            return DV(device)->query.CreateQueryPool(DV(device)->real, desc, out);
+        }
+        void VRI_CALL QueryCmdResetQueries(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdResetQueries"))
+                return;
+            c->dev->query.CmdResetQueries(c->real, pool, offset, num);
+        }
+        void VRI_CALL QueryCmdWriteTimestamp(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdWriteTimestamp"))
+                return;
+            c->dev->query.CmdWriteTimestamp(c->real, pool, index);
+        }
+        void VRI_CALL QueryCmdCopyQueries(VriCommandBuffer* cmd,
+                                          VriQueryPool*     pool,
+                                          uint32_t          offset,
+                                          uint32_t          num,
+                                          VriBuffer*        dstBuffer,
+                                          uint64_t          dstOffset)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdCopyQueries"))
+                return;
+            c->dev->query.CmdCopyQueries(c->real, pool, offset, num, dstBuffer, dstOffset);
+        }
 
         void BuildTable(DeviceVal* d)
         {
@@ -918,6 +951,23 @@ namespace vri::core
                 ExtGetFenceHandle,
             };
             *static_cast<VriExternalInterface*>(out) = wrapped;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_QUERY))
+        {
+            if (size != sizeof(VriQueryInterface))
+                return VriResult_InvalidArgument;
+            const VriResult r =
+                reinterpret_cast<DeviceBase*>(d->real)->GetInterface(VRI_INTERFACE_QUERY, sizeof(d->query), &d->query);
+            if (r != VriResult_Success)
+                return r;
+            // DestroyQueryPool / GetQuerySize take resource handles -> pass through.
+            VriQueryInterface w                   = d->query;
+            w.CreateQueryPool                     = QueryCreateQueryPool;
+            w.CmdResetQueries                     = QueryCmdResetQueries;
+            w.CmdWriteTimestamp                   = QueryCmdWriteTimestamp;
+            w.CmdCopyQueries                      = QueryCmdCopyQueries;
+            *static_cast<VriQueryInterface*>(out) = w;
             return VriResult_Success;
         }
         return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);

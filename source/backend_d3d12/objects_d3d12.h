@@ -167,6 +167,16 @@ namespace vri::d3d12
         void*               event = nullptr; // HANDLE for blocking waits
     };
 
+    struct QueryPoolD3D12
+    {
+        DeviceD3D12*            device = nullptr;
+        ComPtr<ID3D12QueryHeap> heap;
+        D3D12_QUERY_TYPE        queryType = D3D12_QUERY_TYPE_TIMESTAMP;
+        VriQueryType            type      = VriQueryType_Timestamp;
+        uint32_t                count     = 0;
+    };
+    inline VriQueryPool* ToHandle(QueryPoolD3D12* q) { return reinterpret_cast<VriQueryPool*>(q); }
+
     struct PipelineLayoutD3D12
     {
         DeviceD3D12*                    device = nullptr;
