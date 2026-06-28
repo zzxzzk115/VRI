@@ -111,10 +111,28 @@ namespace vri::d3d12
 
         // ---- queries ---------------------------------------------------
         const VriDeviceDesc* VRI_CALL  GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
-        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat)
+        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
-            return VriFormatSupport_Texture | VriFormatSupport_ColorAttachment | VriFormatSupport_Blend |
-                   VriFormatSupport_VertexBuffer;
+            VriFormatSupportFlags             r  = VriFormatSupport_None;
+            D3D12_FEATURE_DATA_FORMAT_SUPPORT fs = {};
+            fs.Format                            = ToDxgiFormat(format).format;
+            if (fs.Format == DXGI_FORMAT_UNKNOWN ||
+                FAILED(Dev(device)->Device()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &fs, sizeof(fs))))
+                return r;
+            const D3D12_FORMAT_SUPPORT1 s = fs.Support1;
+            if (s & (D3D12_FORMAT_SUPPORT1_TEXTURE2D | D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE))
+                r |= VriFormatSupport_Texture;
+            if (s & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW)
+                r |= VriFormatSupport_StorageTexture;
+            if (s & D3D12_FORMAT_SUPPORT1_RENDER_TARGET)
+                r |= VriFormatSupport_ColorAttachment;
+            if (s & D3D12_FORMAT_SUPPORT1_DEPTH_STENCIL)
+                r |= VriFormatSupport_DepthStencil;
+            if (s & D3D12_FORMAT_SUPPORT1_BLENDABLE)
+                r |= VriFormatSupport_Blend;
+            if (s & D3D12_FORMAT_SUPPORT1_IA_VERTEX_BUFFER)
+                r |= VriFormatSupport_VertexBuffer;
+            return r;
         }
         VriResult VRI_CALL GetQueue(VriDevice* device, VriQueueType type, uint32_t, VriQueue** outQueue)
         {
