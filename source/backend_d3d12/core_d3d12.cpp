@@ -432,9 +432,11 @@ namespace vri::d3d12
             CommandBufferD3D12* c = CB(cmd);
             if (FAILED(c->list->Reset(c->allocator->allocator.Get(), nullptr)))
                 return VriResult_Failure;
-            c->rtvCount      = 0;
-            c->boundPipeline = nullptr;
-            c->boundLayout   = nullptr;
+            c->rtvCount         = 0;
+            c->boundPipeline    = nullptr;
+            c->boundLayout      = nullptr;
+            c->boundSrvHeap     = nullptr; // no heap bound until the first CmdSetDescriptorSet
+            c->boundSamplerHeap = nullptr;
             for (auto& vb : c->pendingVBs)
                 vb = {}; // stale bindings/strides must not leak across recordings
             c->vbDirty = false;
@@ -1491,6 +1493,8 @@ namespace vri::d3d12
             {
                 ID3D12DescriptorHeap* heaps[2] = {s->pool->srvHeap.Get(), s->pool->samplerHeap.Get()};
                 c->list->SetDescriptorHeaps(2, heaps);
+                c->boundSrvHeap     = heaps[0];
+                c->boundSamplerHeap = heaps[1];
             }
             // Root CBV / UAV (by GPU address); graphics vs compute root binding point.
             for (const LayoutBindingD3D12& b : s->layout->bindings)
@@ -1663,12 +1667,33 @@ namespace vri::d3d12
             CB(cmd)->list->Dispatch(d->x, d->y, d->z);
         }
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
-        // D3D12 has no direct buffer fill; a value-clear needs ClearUnorderedAccessViewUint (a UAV in
-        // a shader-visible heap) - a follow-up. Diagnose rather than silently no-op.
-        void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer*, uint64_t, uint64_t, uint32_t)
+        // D3D12 has no direct buffer fill: ClearUnorderedAccessViewUint via a transient R32_UINT UAV
+        // staged in both clear heaps (see DeviceD3D12::ClearUavViews). The buffer is bounced into
+        // UNORDERED_ACCESS for the clear and the shader-visible heap is swapped in then restored.
+        void VRI_CALL
+        CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
         {
-            CB(cmd)->device->ReportError(
-                "CmdClearStorageBuffer: not yet implemented on D3D12 (needs ClearUnorderedAccessView)");
+            CommandBufferD3D12*              c   = CB(cmd);
+            BufferD3D12*                     b   = Buf(buffer);
+            const uint64_t                   sz  = size ? size : (b->size - offset);
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+            uav.Format                           = DXGI_FORMAT_R32_UINT;
+            uav.ViewDimension                    = D3D12_UAV_DIMENSION_BUFFER;
+            uav.Buffer.FirstElement              = offset / 4;
+            uav.Buffer.NumElements               = static_cast<UINT>(sz / 4);
+            D3D12_GPU_DESCRIPTOR_HANDLE gpu {};
+            D3D12_CPU_DESCRIPTOR_HANDLE cpuView {};
+            ID3D12DescriptorHeap*       gpuHeap = nullptr;
+            c->device->ClearUavViews(b->resource.Get(), uav, gpu, cpuView, gpuHeap);
+            TransitionBuffer(c, b, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            c->list->SetDescriptorHeaps(1, &gpuHeap);
+            const UINT values[4] = {value, value, value, value};
+            c->list->ClearUnorderedAccessViewUint(gpu, cpuView, b->resource.Get(), values, 0, nullptr);
+            if (c->boundSrvHeap) // restore the app's shader-visible heaps
+            {
+                ID3D12DescriptorHeap* h[2] = {c->boundSrvHeap, c->boundSamplerHeap};
+                c->list->SetDescriptorHeaps(2, h);
+            }
         }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {

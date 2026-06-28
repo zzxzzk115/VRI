@@ -47,6 +47,14 @@ namespace vri::d3d12
         ID3D12CommandSignature* DrawSignature(bool indexed, uint32_t stride);
         // The adapter, for live VRAM budget queries (QueryVideoMemoryInfo); null if unavailable.
         IDXGIAdapter3* Adapter() const { return m_adapter3.Get(); }
+        // Stage a UAV for ClearUnorderedAccessView, which needs the view in BOTH a non-shader-visible
+        // heap (-> outCpu) and the currently-bound shader-visible heap (-> outGpu, in *outGpuHeap).
+        // Ring-allocated across the two dedicated clear heaps (lazily created).
+        void ClearUavViews(ID3D12Resource*                         res,
+                           const D3D12_UNORDERED_ACCESS_VIEW_DESC& desc,
+                           D3D12_GPU_DESCRIPTOR_HANDLE&            outGpu,
+                           D3D12_CPU_DESCRIPTOR_HANDLE&            outCpu,
+                           ID3D12DescriptorHeap*&                  outGpuHeap);
 
     private:
         VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
@@ -64,6 +72,11 @@ namespace vri::d3d12
                                      m_drawSigs;               // indirect draw sigs, keyed by (indexed,stride)
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;                // CPU-only RTV heap
         ComPtr<ID3D12DescriptorHeap> m_dsvHeap;                // CPU-only DSV heap
+        ComPtr<ID3D12DescriptorHeap> m_clearUavCpuHeap;        // non-shader-visible UAVs for ClearUAV (lazy)
+        ComPtr<ID3D12DescriptorHeap> m_clearUavGpuHeap;        // shader-visible UAVs for ClearUAV (lazy)
+        uint32_t                     m_clearUavSize       = 0; // CBV_SRV_UAV descriptor increment
+        uint32_t                     m_clearUavNext       = 0; // ring cursor across the clear heaps
+        static constexpr uint32_t    kClearUavSlots       = 1024;
         uint32_t                     m_rtvSize            = 0; // descriptor increment
         uint32_t                     m_rtvNext            = 0; // bump cursor
         uint32_t                     m_dsvSize            = 0;

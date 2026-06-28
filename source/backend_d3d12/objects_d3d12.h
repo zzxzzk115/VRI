@@ -133,6 +133,10 @@ namespace vri::d3d12
         uint32_t                          rtvCount      = 0;
         const PipelineD3D12*              boundPipeline = nullptr; // for vertex-buffer strides at draw
         const PipelineLayoutD3D12*        boundLayout   = nullptr; // for push constants (root 32-bit constants)
+        // Last shader-visible heaps bound by CmdSetDescriptorSet, so a clear's transient heap swap
+        // (ClearUnorderedAccessView) can be restored without disturbing the app's bindings.
+        ID3D12DescriptorHeap* boundSrvHeap     = nullptr;
+        ID3D12DescriptorHeap* boundSamplerHeap = nullptr;
         // Vertex buffers are recorded here and flushed to IASetVertexBuffers at draw time: a D3D12
         // vertex-buffer view needs the per-stream stride, which lives in the pipeline, so binding must
         // wait until the pipeline is current - regardless of whether the app sets buffers or pipeline

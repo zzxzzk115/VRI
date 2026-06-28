@@ -387,6 +387,7 @@ namespace vri::d3d12
         m_desc.hasPipelineStatistics   = VRI_TRUE; // D3D12 pipeline-statistics query heap is always available
         m_desc.hasCalibratedTimestamps = VRI_TRUE; // ID3D12CommandQueue::GetClockCalibration is always available
         m_desc.hasDrawIndirectCount    = VRI_TRUE; // ExecuteIndirect with a count buffer is always available
+        m_desc.hasClearStorageBuffer   = VRI_TRUE; // ClearUnorderedAccessViewUint via a transient UAV
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).
@@ -432,6 +433,38 @@ namespace vri::d3d12
         m_device->CreateCommandSignature(&sd, nullptr, IID_PPV_ARGS(&sig));
         m_drawSigs[key] = sig;
         return sig.Get();
+    }
+
+    void DeviceD3D12::ClearUavViews(ID3D12Resource*                         res,
+                                    const D3D12_UNORDERED_ACCESS_VIEW_DESC& desc,
+                                    D3D12_GPU_DESCRIPTOR_HANDLE&            outGpu,
+                                    D3D12_CPU_DESCRIPTOR_HANDLE&            outCpu,
+                                    ID3D12DescriptorHeap*&                  outGpuHeap)
+    {
+        if (!m_clearUavGpuHeap)
+        {
+            m_clearUavSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            D3D12_DESCRIPTOR_HEAP_DESC hd = {};
+            hd.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            hd.NumDescriptors             = kClearUavSlots;
+            hd.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // CPU side
+            m_device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&m_clearUavCpuHeap));
+            hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE; // GPU side
+            m_device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&m_clearUavGpuHeap));
+        }
+        const uint32_t              slot = m_clearUavNext++ % kClearUavSlots;
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu  = m_clearUavCpuHeap->GetCPUDescriptorHandleForHeapStart();
+        cpu.ptr += static_cast<SIZE_T>(slot) * m_clearUavSize;
+        D3D12_CPU_DESCRIPTOR_HANDLE gpuCpu = m_clearUavGpuHeap->GetCPUDescriptorHandleForHeapStart();
+        gpuCpu.ptr += static_cast<SIZE_T>(slot) * m_clearUavSize;
+        // The same UAV in both heaps: ClearUAV reads the CPU handle (non-visible) + the GPU handle (visible).
+        m_device->CreateUnorderedAccessView(res, nullptr, &desc, cpu);
+        m_device->CreateUnorderedAccessView(res, nullptr, &desc, gpuCpu);
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_clearUavGpuHeap->GetGPUDescriptorHandleForHeapStart();
+        gpu.ptr += static_cast<UINT64>(slot) * m_clearUavSize;
+        outGpu     = gpu;
+        outCpu     = cpu;
+        outGpuHeap = m_clearUavGpuHeap.Get();
     }
 
     void DeviceD3D12::FillRegistry()

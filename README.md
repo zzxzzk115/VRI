@@ -74,7 +74,7 @@ How each feature is supported on each backend:
 | Pipeline cache | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Indirect draw count (GPU-driven) | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Video memory budget | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Clear storage buffer | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Clear storage buffer | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Built-in Dear ImGui renderer | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 Notes:
@@ -137,8 +137,8 @@ Notes:
 - **Clear storage buffer.** `CmdClearStorageBuffer(cmd, buffer, offset, size, value)` fills a storage
   buffer region with a repeated `uint32` outside a render pass — e.g. resetting an atomic counter or
   accumulation buffer before a compute pass. Gated by `VriDeviceDesc::hasClearStorageBuffer`. On
-  **Vulkan** (`vkCmdFillBuffer`) and **desktop OpenGL 4.3** (`glClearBufferSubData`); Direct3D 12
-  (`ClearUnorderedAccessView`) is a follow-up, and WebGPU/Metal (no arbitrary-value buffer fill)
+  **Vulkan** (`vkCmdFillBuffer`), **Direct3D 12** (`ClearUnorderedAccessView` via a transient UAV),
+  and **desktop OpenGL 4.3** (`glClearBufferSubData`); WebGPU/Metal (no arbitrary-value buffer fill)
   report `Unsupported`. Storage-texture clear is a planned addition.
 
 ## Building
