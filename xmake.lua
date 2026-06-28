@@ -37,6 +37,12 @@ option("vri_build_tools") -- build host tools (vri-shaderc)?
     set_description("Enable VRI host tools (vri-shaderc)")
 option_end()
 
+option("vri_build_cuda_interop") -- build the CUDA interop example? (needs the CUDA Toolkit)
+    set_default(false)
+    set_showmenu(true)
+    set_description("Build example-cuda-interop (requires the CUDA Toolkit; off by default)")
+option_end()
+
 -- backend options (MVP: Vulkan on by default; others enabled as they come online).
 --
 -- Platform-dependent defaults are set in on_check, NOT set_default: an option's set_default is

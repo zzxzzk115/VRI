@@ -67,10 +67,11 @@ namespace vri::core
             VriCoreInterface            table; // the validating table handed to the app
             VriSwapChainInterface       swap;  // the backend's real swapchain table (if supported)
             bool                        hasSwap = false;
-            VriShadingRateInterface     vrs;  // the backend's real VRS table (if supported)
-            VriMeshShaderInterface      mesh; // the backend's real mesh-shader table (if supported)
-            VriRayTracingInterface      rt;   // the backend's real ray-tracing table (if supported)
-            VriOpacityMicromapInterface omm;  // the backend's real OMM table (if supported)
+            VriShadingRateInterface     vrs;      // the backend's real VRS table (if supported)
+            VriMeshShaderInterface      mesh;     // the backend's real mesh-shader table (if supported)
+            VriRayTracingInterface      rt;       // the backend's real ray-tracing table (if supported)
+            VriOpacityMicromapInterface omm;      // the backend's real OMM table (if supported)
+            VriExternalInterface        external; // the backend's real external-memory table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>  queues;
             std::vector<CmdBufVal*> cmds;
@@ -650,6 +651,58 @@ namespace vri::core
                 return;
             c->dev->omm.CmdBuildMicromap(c->real, desc);
         }
+        // external memory/semaphore export: unwrap the device on every call (and the fence on
+        // GetFenceHandle). Returned buffers/textures are not wrapped (resource plane). The
+        // returned fence IS wrapped (the app holds FenceVal-wrapped fences).
+        VriResult VRI_CALL ExtCreateExportableBuffer(VriDevice*            device,
+                                                     const VriBufferDesc*  desc,
+                                                     VriExternalHandleType ht,
+                                                     VriBuffer**           out)
+        {
+            return DV(device)->external.CreateExportableBuffer(DV(device)->real, desc, ht, out);
+        }
+        VriResult VRI_CALL ExtCreateExportableTexture(VriDevice*            device,
+                                                      const VriTextureDesc* desc,
+                                                      VriExternalHandleType ht,
+                                                      VriTexture**          out)
+        {
+            return DV(device)->external.CreateExportableTexture(DV(device)->real, desc, ht, out);
+        }
+        VriResult VRI_CALL ExtGetBufferMemoryHandle(VriDevice*             device,
+                                                    VriBuffer*             buffer,
+                                                    VriExternalHandleType  ht,
+                                                    VriExternalMemoryInfo* out)
+        {
+            return DV(device)->external.GetBufferMemoryHandle(DV(device)->real, buffer, ht, out);
+        }
+        VriResult VRI_CALL ExtGetTextureMemoryHandle(VriDevice*             device,
+                                                     VriTexture*            texture,
+                                                     VriExternalHandleType  ht,
+                                                     VriExternalMemoryInfo* out)
+        {
+            return DV(device)->external.GetTextureMemoryHandle(DV(device)->real, texture, ht, out);
+        }
+        VriResult VRI_CALL ExtCreateExportableFence(VriDevice*            device,
+                                                    uint64_t              initialValue,
+                                                    VriExternalHandleType ht,
+                                                    VriFence**            out)
+        {
+            DeviceVal* d    = DV(device);
+            VriFence*  real = nullptr;
+            VriResult  r    = d->external.CreateExportableFence(d->real, initialValue, ht, &real);
+            if (r != VriResult_Success)
+                return r;
+            *out = reinterpret_cast<VriFence*>(new FenceVal {d, real}); // freed by core DestroyFence wrapper
+            return VriResult_Success;
+        }
+        VriResult VRI_CALL ExtGetFenceHandle(VriDevice*            device,
+                                             VriFence*             fence,
+                                             VriExternalHandleType ht,
+                                             void**                outHandle)
+        {
+            return DV(device)->external.GetFenceHandle(
+                DV(device)->real, fence ? FV(fence)->real : nullptr, ht, outHandle);
+        }
 
         void BuildTable(DeviceVal* d)
         {
@@ -844,6 +897,27 @@ namespace vri::core
             w.CreateMicromap                                = OmmCreateMicromap;
             w.CmdBuildMicromap                              = OmmCmdBuildMicromap;
             *static_cast<VriOpacityMicromapInterface*>(out) = w;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_EXTERNAL))
+        {
+            if (size != sizeof(VriExternalInterface))
+                return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(
+                VRI_INTERFACE_EXTERNAL, sizeof(d->external), &d->external);
+            if (r != VriResult_Success)
+                return r;
+            // Every entry takes a wrapped device (and GetFenceHandle a wrapped fence), so all
+            // are overridden -- nothing passes straight through.
+            static const VriExternalInterface wrapped = {
+                ExtCreateExportableBuffer,
+                ExtCreateExportableTexture,
+                ExtGetBufferMemoryHandle,
+                ExtGetTextureMemoryHandle,
+                ExtCreateExportableFence,
+                ExtGetFenceHandle,
+            };
+            *static_cast<VriExternalInterface*>(out) = wrapped;
             return VriResult_Success;
         }
         return reinterpret_cast<DeviceBase*>(d->real)->GetInterface(name, size, out);

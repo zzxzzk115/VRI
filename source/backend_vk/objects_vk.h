@@ -43,6 +43,10 @@ namespace vri::vk
         VkBuffer      buffer;
         VmaAllocation allocation; // null if not VMA-owned
         uint64_t      size;
+        // Set when the buffer owns a dedicated, non-VMA VkDeviceMemory (the exportable
+        // external-memory path; see external_vk.cpp). allocation is null in that case.
+        VkDeviceMemory dedicatedMemory     = VK_NULL_HANDLE;
+        uint64_t       dedicatedMemorySize = 0; // total allocation size (for export sizing)
     };
 
     struct AccelerationStructureVK
@@ -88,6 +92,9 @@ namespace vri::vk
         uint32_t      layerNum;
         VkImageType   type;
         bool          owned;
+        // Set when the image owns a dedicated, non-VMA VkDeviceMemory (exportable path).
+        VkDeviceMemory dedicatedMemory     = VK_NULL_HANDLE;
+        uint64_t       dedicatedMemorySize = 0;
     };
 
     // A view (texture/buffer) or a sampler.

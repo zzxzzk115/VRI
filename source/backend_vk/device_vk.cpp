@@ -1,5 +1,6 @@
 #include "device_vk.h"
 #include "core_vk.h"
+#include "external_vk.h"
 #include "interop_vk.h"
 #include "meshshader_vk.h"
 #include "omm_vk.h"
@@ -618,6 +619,35 @@ namespace vri::vk
                 return VriResult_Unsupported;
         }
 
+        // External memory/semaphore export (CUDA/OptiX/cross-API/-process interop). No
+        // VkPhysicalDevice feature struct to chain -- just enable the platform extensions.
+        // The win32/fd extensions are never core, so hasExt() is reliable for them; the base
+        // VK_KHR_external_memory/semaphore are core since 1.1, enabled here only if still
+        // advertised (some 1.3 drivers stop listing promoted extensions).
+        if (requested & VriFeature_ExternalMemory)
+        {
+#if defined(_WIN32)
+            const char* memExt = "VK_KHR_external_memory_win32";
+            const char* semExt = "VK_KHR_external_semaphore_win32";
+#else
+            const char* memExt = "VK_KHR_external_memory_fd";
+            const char* semExt = "VK_KHR_external_semaphore_fd";
+#endif
+            const bool ok = hasExt(memExt) && hasExt(semExt);
+            if (ok)
+            {
+                if (hasExt("VK_KHR_external_memory"))
+                    extensions.push_back("VK_KHR_external_memory");
+                if (hasExt("VK_KHR_external_semaphore"))
+                    extensions.push_back("VK_KHR_external_semaphore");
+                extensions.push_back(memExt);
+                extensions.push_back(semExt);
+                granted |= VriFeature_ExternalMemory;
+            }
+            else if (unsupported("external memory/semaphore export not supported"))
+                return VriResult_Unsupported;
+        }
+
         if ((requested & VriFeature_LowLatency) && unsupported("low-latency not implemented"))
             return VriResult_Unsupported;
 
@@ -737,6 +767,7 @@ namespace vri::vk
         m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap     = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery            = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasExternalMemory      = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasConservativeRaster  = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor         = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;
@@ -833,6 +864,8 @@ namespace vri::vk
         if (m_enabledFeatures & VriFeature_OpacityMicromap)
             m_registry.Register(
                 VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceVK(), sizeof(VriOpacityMicromapInterface));
+        if (m_enabledFeatures & VriFeature_ExternalMemory)
+            m_registry.Register(VRI_INTERFACE_EXTERNAL, GetExternalInterfaceVK(), sizeof(VriExternalInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

@@ -226,6 +226,12 @@ namespace vri::vk
             BufferVK* b = Buf(buffer);
             if (b->allocation)
                 vmaDestroyBuffer(b->device->Allocator(), b->buffer, b->allocation);
+            else if (b->dedicatedMemory)
+            {
+                // Exportable external-memory path: dedicated VkDeviceMemory, not VMA-owned.
+                vkDestroyBuffer(b->device->Device(), b->buffer, nullptr);
+                vkFreeMemory(b->device->Device(), b->dedicatedMemory, nullptr);
+            }
             else if (b->buffer)
                 vkDestroyBuffer(b->device->Device(), b->buffer, nullptr);
             delete b;
@@ -308,6 +314,12 @@ namespace vri::vk
             TextureVK* t = Tex(texture);
             if (t->owned && t->allocation)
                 vmaDestroyImage(t->device->Allocator(), t->image, t->allocation);
+            else if (t->owned && t->dedicatedMemory)
+            {
+                // Exportable external-memory path: dedicated VkDeviceMemory, not VMA-owned.
+                vkDestroyImage(t->device->Device(), t->image, nullptr);
+                vkFreeMemory(t->device->Device(), t->dedicatedMemory, nullptr);
+            }
             else if (t->owned && t->image)
                 vkDestroyImage(t->device->Device(), t->image, nullptr); // unbound (explicit memory)
             delete t;

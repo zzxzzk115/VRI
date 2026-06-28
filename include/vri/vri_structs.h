@@ -81,7 +81,8 @@ typedef enum VriFeatureBits
     VriFeature_Bindless     = 1ull << 3,
     VriFeature_VariableShadingRate = 1ull << 4,
     VriFeature_OpacityMicromap     = 1ull << 5,
-    VriFeature_RayQuery            = 1ull << 6  /* inline ray tracing (no RT pipeline/SBT) */
+    VriFeature_RayQuery            = 1ull << 6, /* inline ray tracing (no RT pipeline/SBT) */
+    VriFeature_ExternalMemory      = 1ull << 7  /* external memory/semaphore export (CUDA/OptiX/cross-API/-process interop) */
 } VriFeatureBits;
 
 VRI_EXTERN_C_END

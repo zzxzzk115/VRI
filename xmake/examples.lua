@@ -20,11 +20,20 @@ local _vri_examples = {
     -- raytracing/pathtracer run everywhere: hardware RT pipeline / ray query on Vulkan/D3D12/Metal,
     -- and a compute-BVH software fallback on OpenGL and WebGPU (wasm).
     {name = "raytracing"},
-    {name = "pathtracer"}
+    {name = "pathtracer"},
+    -- CUDA <-> VRI external-memory interop. Desktop-only, and opt-in via
+    -- --vri_build_cuda_interop=y because it needs the CUDA Toolkit (nvcc + cudart).
+    {name = "cuda_interop", desktop_only = true, requires_cuda = true}
 }
 
 local function _vri_example_enabled(example)
-    return not (example.desktop_only and is_plat("wasm"))
+    if example.desktop_only and is_plat("wasm") then
+        return false
+    end
+    if example.requires_cuda and not has_config("vri_build_cuda_interop") then
+        return false
+    end
+    return true
 end
 
 local function _vri_example_target(example)

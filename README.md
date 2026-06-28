@@ -66,6 +66,7 @@ How each feature is supported on each backend:
 | Fragment-shader barycentrics | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| External memory / interop (CUDA) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 Notes:
 
@@ -77,6 +78,11 @@ Notes:
   compute but no ray-tracing hardware — VRI traces rays in a **compute shader** instead (🟡). Where
   there's no compute at all (WebGL 2 / OpenGL ES), ray tracing is unavailable.
 - **Bindless on Metal** is implemented but currently unverified (no Apple hardware in CI).
+- **External memory / interop** exports OS handles (Win32 / fd) for a buffer/texture's backing
+  memory and for timeline fences (`ext/vri_ext_external.h`), so a **CUDA** kernel — or OptiX,
+  NVENC, another process, or another graphics API — can import the same memory and timeline.
+  VRI itself does **not** depend on CUDA; it only produces the handles the consumer imports.
+  Implemented on Vulkan today; Direct3D 12 (shared handles) is planned.
 
 ## Building
 
@@ -125,6 +131,14 @@ xmake run example-deferred          # deferred shading with a G-buffer + many li
 xmake run example-rayquery          # ray-traced hard shadows (HW ray query / compute fallback)
 xmake run example-raytracing        # ray-traced glTF model
 xmake run example-pathtracer        # progressive path tracer with global illumination
+```
+
+One example is opt-in because it needs an extra SDK:
+
+```sh
+# VRI <-> CUDA external-memory interop: VRI and a CUDA kernel share the same GPU buffer and
+# timeline. Needs the CUDA Toolkit (xmake's `cuda` package fetches/installs it if absent).
+xmake f --vri_build_cuda_interop=y && xmake run example-cuda-interop
 ```
 
 ## License
