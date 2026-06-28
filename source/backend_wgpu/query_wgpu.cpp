@@ -34,6 +34,10 @@ namespace vri::wgpu
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
             DeviceWGPU* d = Dev(device);
+            // WebGPU occlusion binds the query set at render-pass-begin, which VRI's
+            // pool-at-query-time API does not express -> only timestamps are supported here.
+            if (desc->type != VriQueryType_Timestamp)
+                return VriResult_Unsupported;
             if (!d->HasTimestamp())
                 return VriResult_Unsupported;
 
@@ -72,6 +76,11 @@ namespace vri::wgpu
         // WebGPU query sets need no reset.
         void VRI_CALL CmdResetQueries(VriCommandBuffer*, VriQueryPool*, uint32_t, uint32_t) {}
 
+        // Occlusion is unsupported on WebGPU (no occlusion pool can be created), so these are
+        // never reached -- present only to fill the interface table.
+        void VRI_CALL CmdBeginQuery(VriCommandBuffer*, VriQueryPool*, uint32_t) {}
+        void VRI_CALL CmdEndQuery(VriCommandBuffer*, VriQueryPool*, uint32_t) {}
+
         void VRI_CALL CmdWriteTimestamp(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
         {
             CommandBufferWGPU* c = Cmd(cmd);
@@ -105,6 +114,8 @@ namespace vri::wgpu
             GetQuerySize,
             CmdResetQueries,
             CmdWriteTimestamp,
+            CmdBeginQuery,
+            CmdEndQuery,
             CmdCopyQueries,
         };
     } // namespace

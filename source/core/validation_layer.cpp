@@ -724,6 +724,20 @@ namespace vri::core
                 return;
             c->dev->query.CmdWriteTimestamp(c->real, pool, index);
         }
+        void VRI_CALL QueryCmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdBeginQuery"))
+                return;
+            c->dev->query.CmdBeginQuery(c->real, pool, index);
+        }
+        void VRI_CALL QueryCmdEndQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdEndQuery"))
+                return;
+            c->dev->query.CmdEndQuery(c->real, pool, index);
+        }
         void VRI_CALL QueryCmdCopyQueries(VriCommandBuffer* cmd,
                                           VriQueryPool*     pool,
                                           uint32_t          offset,
@@ -966,6 +980,8 @@ namespace vri::core
             w.CreateQueryPool                     = QueryCreateQueryPool;
             w.CmdResetQueries                     = QueryCmdResetQueries;
             w.CmdWriteTimestamp                   = QueryCmdWriteTimestamp;
+            w.CmdBeginQuery                       = QueryCmdBeginQuery;
+            w.CmdEndQuery                         = QueryCmdEndQuery;
             w.CmdCopyQueries                      = QueryCmdCopyQueries;
             *static_cast<VriQueryInterface*>(out) = w;
             return VriResult_Success;

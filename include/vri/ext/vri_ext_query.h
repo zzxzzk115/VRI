@@ -10,9 +10,12 @@
  * After the submit's fence signals, map the buffer; a section's GPU time in nanoseconds is
  * (tickEnd - tickStart) * VriDeviceDesc::timestampPeriodNanoseconds.
  *
+ * Occlusion queries bracket draws inside a render pass with CmdBeginQuery/CmdEndQuery; the
+ * result is the number of samples that passed the depth/stencil test (0 = fully occluded).
+ *
  * Results are always 64-bit unsigned and resolved GPU-side into a VriBuffer (no host-side
  * read-out call); this maps cleanly onto vkCmdCopyQueryPoolResults and D3D12 ResolveQueryData.
- * (Occlusion / pipeline-statistics query types are a planned addition.)
+ * (Pipeline-statistics query types are a planned addition.)
  */
 #ifndef VRI_EXT_QUERY_H
 #define VRI_EXT_QUERY_H
@@ -27,6 +30,7 @@ typedef struct VriQueryPool VriQueryPool;
 typedef enum VriQueryType
 {
     VriQueryType_Timestamp = 0, /* GPU clock tick (scale by timestampPeriodNanoseconds) */
+    VriQueryType_Occlusion = 1, /* samples that passed depth/stencil between Begin/End */
     VriQueryType_MaxEnum   = 0x7fffffff
 } VriQueryType;
 
@@ -47,6 +51,11 @@ typedef struct VriQueryInterface
     void (VRI_CALL *CmdResetQueries)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num);
     /* Timestamp query: record the GPU clock once prior work has reached the bottom of the pipe. */
     void (VRI_CALL *CmdWriteTimestamp)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index);
+    /* Occlusion query: bracket draws inside a render pass. Not supported on WebGPU (its
+     * occlusion model binds the query set at pass-begin, which this pool-at-query-time API
+     * does not express); CreateQueryPool returns Unsupported there. */
+    void (VRI_CALL *CmdBeginQuery)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index);
+    void (VRI_CALL *CmdEndQuery)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index);
     /* Resolve num results (uint64 each) into dstBuffer; read it back after the submit's fence.
      * dstBuffer needs num*GetQuerySize bytes and TransferDst usage (a HostReadback buffer works). */
     void (VRI_CALL *CmdCopyQueries)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num,

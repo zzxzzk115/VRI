@@ -20,7 +20,7 @@ namespace vri::vk
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
             DeviceVK*   d  = Dev(device);
-            VkQueryType vt = VK_QUERY_TYPE_TIMESTAMP;
+            VkQueryType vt = desc->type == VriQueryType_Occlusion ? VK_QUERY_TYPE_OCCLUSION : VK_QUERY_TYPE_TIMESTAMP;
 
             VkQueryPoolCreateInfo ci = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
             ci.queryType             = vt;
@@ -55,6 +55,16 @@ namespace vri::vk
             vkCmdWriteTimestamp(Cmd(cmd)->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QP(pool)->pool, index);
         }
 
+        void VRI_CALL CmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            vkCmdBeginQuery(Cmd(cmd)->cmd, QP(pool)->pool, index, 0); // non-precise: >0 if any sample passed
+        }
+
+        void VRI_CALL CmdEndQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            vkCmdEndQuery(Cmd(cmd)->cmd, QP(pool)->pool, index);
+        }
+
         void VRI_CALL CmdCopyQueries(VriCommandBuffer* cmd,
                                      VriQueryPool*     pool,
                                      uint32_t          offset,
@@ -79,6 +89,8 @@ namespace vri::vk
             GetQuerySize,
             CmdResetQueries,
             CmdWriteTimestamp,
+            CmdBeginQuery,
+            CmdEndQuery,
             CmdCopyQueries,
         };
     } // namespace

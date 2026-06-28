@@ -19,10 +19,11 @@ namespace vri::d3d12
         {
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
-            DeviceD3D12*          d  = Dev(device);
-            D3D12_QUERY_HEAP_DESC hd = {};
-            hd.Type                  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-            hd.Count                 = desc->queryCount;
+            DeviceD3D12*          d         = Dev(device);
+            const bool            occlusion = desc->type == VriQueryType_Occlusion;
+            D3D12_QUERY_HEAP_DESC hd        = {};
+            hd.Type  = occlusion ? D3D12_QUERY_HEAP_TYPE_OCCLUSION : D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+            hd.Count = desc->queryCount;
 
             QueryPoolD3D12* q = new QueryPoolD3D12 {};
             if (FAILED(d->Device()->CreateQueryHeap(&hd, IID_PPV_ARGS(&q->heap))))
@@ -32,7 +33,7 @@ namespace vri::d3d12
                 return VriResult_Failure;
             }
             q->device    = d;
-            q->queryType = D3D12_QUERY_TYPE_TIMESTAMP;
+            q->queryType = occlusion ? D3D12_QUERY_TYPE_OCCLUSION : D3D12_QUERY_TYPE_TIMESTAMP;
             q->type      = desc->type;
             q->count     = desc->queryCount;
             *out         = ToHandle(q);
@@ -55,6 +56,18 @@ namespace vri::d3d12
             Cmd(cmd)->list->EndQuery(QP(pool)->heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, index);
         }
 
+        void VRI_CALL CmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            QueryPoolD3D12* q = QP(pool);
+            Cmd(cmd)->list->BeginQuery(q->heap.Get(), q->queryType, index);
+        }
+
+        void VRI_CALL CmdEndQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
+        {
+            QueryPoolD3D12* q = QP(pool);
+            Cmd(cmd)->list->EndQuery(q->heap.Get(), q->queryType, index);
+        }
+
         void VRI_CALL CmdCopyQueries(VriCommandBuffer* cmd,
                                      VriQueryPool*     pool,
                                      uint32_t          offset,
@@ -75,6 +88,8 @@ namespace vri::d3d12
             GetQuerySize,
             CmdResetQueries,
             CmdWriteTimestamp,
+            CmdBeginQuery,
+            CmdEndQuery,
             CmdCopyQueries,
         };
     } // namespace

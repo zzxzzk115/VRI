@@ -91,8 +91,10 @@ Notes:
   for nanoseconds. The basis of a GPU profiler — see `example-profiler`. On **Vulkan**, **Direct3D
   12**, **WebGPU** (desktop wgpu-native, via the `timestamp-query` + `TimestampQueryInsideEncoders`
   features; browser WebGPU timestamps are pass-scoped and not yet wired), and **desktop OpenGL 4.4+**
-  (`glQueryCounter` + a query buffer object; GLES/WebGL have no core timer query). Occlusion /
-  pipeline-statistics query types are a planned addition.
+  (`glQueryCounter` + a query buffer object; GLES/WebGL have no core timer query). **Occlusion
+  queries** (samples-passed) are also supported on Vulkan + D3D12 + desktop OpenGL (WebGPU's
+  occlusion binds the query set at pass-begin, which this API doesn't express). Pipeline-statistics
+  query types are a planned addition.
 
 ## Building
 

@@ -55,6 +55,13 @@ namespace vri::gl
             glQueryCounter(QP(pool)->ids[index], GL_TIMESTAMP);
         }
 
+        void VRI_CALL CmdBeginQuery(VriCommandBuffer*, VriQueryPool* pool, uint32_t index)
+        {
+            glBeginQuery(GL_SAMPLES_PASSED, QP(pool)->ids[index]); // occlusion: exact sample count
+        }
+
+        void VRI_CALL CmdEndQuery(VriCommandBuffer*, VriQueryPool*, uint32_t) { glEndQuery(GL_SAMPLES_PASSED); }
+
         void VRI_CALL CmdCopyQueries(VriCommandBuffer*,
                                      VriQueryPool* pool,
                                      uint32_t      offset,
@@ -83,6 +90,8 @@ namespace vri::gl
         uint32_t VRI_CALL GetQuerySize(const VriQueryPool*) { return sizeof(uint64_t); }
         void VRI_CALL     CmdResetQueries(VriCommandBuffer*, VriQueryPool*, uint32_t, uint32_t) {}
         void VRI_CALL     CmdWriteTimestamp(VriCommandBuffer*, VriQueryPool*, uint32_t) {}
+        void VRI_CALL     CmdBeginQuery(VriCommandBuffer*, VriQueryPool*, uint32_t) {}
+        void VRI_CALL     CmdEndQuery(VriCommandBuffer*, VriQueryPool*, uint32_t) {}
         void VRI_CALL     CmdCopyQueries(VriCommandBuffer*, VriQueryPool*, uint32_t, uint32_t, VriBuffer*, uint64_t) {}
 #endif
 
@@ -92,6 +101,8 @@ namespace vri::gl
             GetQuerySize,
             CmdResetQueries,
             CmdWriteTimestamp,
+            CmdBeginQuery,
+            CmdEndQuery,
             CmdCopyQueries,
         };
     } // namespace
