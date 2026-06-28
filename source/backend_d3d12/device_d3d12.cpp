@@ -385,6 +385,7 @@ namespace vri::d3d12
         m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasPipelineStatistics   = VRI_TRUE; // D3D12 pipeline-statistics query heap is always available
         m_desc.hasCalibratedTimestamps = VRI_TRUE; // ID3D12CommandQueue::GetClockCalibration is always available
+        m_desc.hasDrawIndirectCount    = VRI_TRUE; // ExecuteIndirect with a count buffer is always available
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).
@@ -407,6 +408,29 @@ namespace vri::d3d12
             m_device->CreateCommandSignature(&sd, nullptr, IID_PPV_ARGS(&m_dispatchMeshSig));
         }
         return m_dispatchMeshSig.Get();
+    }
+
+    ID3D12CommandSignature* DeviceD3D12::DrawSignature(bool indexed, uint32_t stride)
+    {
+        // ExecuteIndirect steps through the arg buffer by the signature's ByteStride, so it must
+        // equal the app's stride; stride 0 means tightly packed records. Cache one per (indexed, stride).
+        if (stride == 0)
+            stride = indexed ? static_cast<uint32_t>(sizeof(D3D12_DRAW_INDEXED_ARGUMENTS)) :
+                               static_cast<uint32_t>(sizeof(D3D12_DRAW_ARGUMENTS));
+        const uint64_t key = (static_cast<uint64_t>(indexed) << 32) | stride;
+        auto           it  = m_drawSigs.find(key);
+        if (it != m_drawSigs.end())
+            return it->second.Get();
+        D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+        arg.Type = indexed ? D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED : D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+        D3D12_COMMAND_SIGNATURE_DESC sd = {};
+        sd.ByteStride                   = stride;
+        sd.NumArgumentDescs             = 1;
+        sd.pArgumentDescs               = &arg;
+        ComPtr<ID3D12CommandSignature> sig;
+        m_device->CreateCommandSignature(&sd, nullptr, IID_PPV_ARGS(&sig));
+        m_drawSigs[key] = sig;
+        return sig.Get();
     }
 
     void DeviceD3D12::FillRegistry()

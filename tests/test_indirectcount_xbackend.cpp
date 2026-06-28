@@ -11,9 +11,20 @@
 #include <cstring>
 
 #include "shaders/common/triangle_spv.h" // g_triangleSpv (solid red, procedural)
+#if defined(_WIN32)
+#include "shaders/common/triangle_dxbc.h" // g_triangleDxbcVS / g_triangleDxbcPS (D3D12)
+#endif
 
 namespace
 {
+    struct Shaders
+    {
+        const void* vs;
+        size_t      vsSize;
+        const void* ps;
+        size_t      psSize;
+    };
+
     constexpr uint32_t kW       = 64;
     constexpr uint32_t kH       = 64;
     constexpr uint32_t kMaxDraw = 4;
@@ -61,7 +72,11 @@ namespace
     }
 
     // Render the indirect-count triangle with the given GPU draw count; return the center pixel's red.
-    uint8_t RenderWithCount(const VriCoreInterface& c, VriDevice* dev, VriQueue* queue, uint32_t drawCount)
+    uint8_t RenderWithCount(const VriCoreInterface& c,
+                            VriDevice*              dev,
+                            VriQueue*               queue,
+                            uint32_t                drawCount,
+                            const Shaders&          shaders)
     {
         VriTextureDesc td {};
         td.type                    = VriTextureType_2D;
@@ -97,12 +112,12 @@ namespace
         REQUIRE(c.CreatePipelineLayout(dev, &ld, &layout) == VriResult_Success);
         VriShaderDesc sh[2] {};
         sh[0].stage          = VriShaderStage_Vertex;
-        sh[0].bytecode       = g_triangleSpv;
-        sh[0].bytecodeSize   = sizeof(g_triangleSpv);
+        sh[0].bytecode       = shaders.vs;
+        sh[0].bytecodeSize   = shaders.vsSize;
         sh[0].entryPointName = "vertexMain";
         sh[1].stage          = VriShaderStage_Fragment;
-        sh[1].bytecode       = g_triangleSpv;
-        sh[1].bytecodeSize   = sizeof(g_triangleSpv);
+        sh[1].bytecode       = shaders.ps;
+        sh[1].bytecodeSize   = shaders.psSize;
         sh[1].entryPointName = "fragmentMain";
         VriColorAttachmentDesc ca {};
         ca.format         = VriFormat_RGBA8_UNORM;
@@ -218,7 +233,7 @@ namespace
         return red;
     }
 
-    void Check(VriGraphicsAPI api, const char* name)
+    void Check(VriGraphicsAPI api, const char* name, const Shaders& shaders)
     {
         VriDeviceCreationDesc dc {};
         dc.graphicsAPI      = api;
@@ -241,8 +256,8 @@ namespace
         VriQueue* queue = nullptr;
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
-        const uint8_t red1 = RenderWithCount(c, dev, queue, 1); // GPU count 1 -> triangle drawn
-        const uint8_t red0 = RenderWithCount(c, dev, queue, 0); // GPU count 0 -> nothing drawn
+        const uint8_t red1 = RenderWithCount(c, dev, queue, 1, shaders); // GPU count 1 -> triangle drawn
+        const uint8_t red0 = RenderWithCount(c, dev, queue, 0, shaders); // GPU count 0 -> nothing drawn
         CHECK(red1 > 200);
         CHECK(red0 < 60);
         vriDestroyDevice(dev);
@@ -251,7 +266,11 @@ namespace
 
 TEST_CASE("Draw indirect count: the GPU count buffer drives the draw count")
 {
-    Check(VriGraphicsAPI_Vulkan, "Vulkan");
-    Check(VriGraphicsAPI_D3D12, "D3D12");
-    Check(VriGraphicsAPI_OpenGL, "OpenGL");
+    const Shaders spv {g_triangleSpv, sizeof(g_triangleSpv), g_triangleSpv, sizeof(g_triangleSpv)};
+    Check(VriGraphicsAPI_Vulkan, "Vulkan", spv);
+    Check(VriGraphicsAPI_OpenGL, "OpenGL", spv);
+#if defined(_WIN32)
+    const Shaders dxbc {g_triangleDxbcVS, sizeof(g_triangleDxbcVS), g_triangleDxbcPS, sizeof(g_triangleDxbcPS)};
+    Check(VriGraphicsAPI_D3D12, "D3D12", dxbc);
+#endif
 }

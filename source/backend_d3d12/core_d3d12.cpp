@@ -104,6 +104,8 @@ namespace vri::d3d12
                 return D3D12_RESOURCE_STATE_INDEX_BUFFER;
             if (a & (VriAccess_VertexBufferRead | VriAccess_ConstantBufferRead))
                 return D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+            if (a & VriAccess_IndirectBufferRead)
+                return D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT; // ExecuteIndirect arg + count buffers
             return D3D12_RESOURCE_STATE_COMMON;
         }
 
@@ -1585,16 +1587,57 @@ namespace vri::d3d12
             CB(cmd)->list->DrawIndexedInstanced(
                 d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
         }
-        void VRI_CALL CmdDrawIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
-        // Indexed-indirect + the indirect-count variants land in a follow-up (ID3D12CommandSignature +
-        // ExecuteIndirect with a count buffer); hasDrawIndirectCount stays false until then.
-        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer*, VriBuffer*, uint64_t, uint32_t, uint32_t) {}
+        // Indirect draws via ExecuteIndirect + a DRAW/DRAW_INDEXED command signature (cached by stride).
+        // The *Count variants pass the count buffer; the others pass null and a fixed drawNum.
         void VRI_CALL
-        CmdDrawIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
-        {}
-        void VRI_CALL
-        CmdDrawIndexedIndirectCount(VriCommandBuffer*, VriBuffer*, uint64_t, VriBuffer*, uint64_t, uint32_t, uint32_t)
-        {}
+        CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            c->list->ExecuteIndirect(
+                c->device->DrawSignature(false, stride), drawNum, Buf(buffer)->resource.Get(), offset, nullptr, 0);
+        }
+        void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer* cmd,
+                                             VriBuffer*        buffer,
+                                             uint64_t          offset,
+                                             uint32_t          drawNum,
+                                             uint32_t          stride)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            c->list->ExecuteIndirect(
+                c->device->DrawSignature(true, stride), drawNum, Buf(buffer)->resource.Get(), offset, nullptr, 0);
+        }
+        void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
+                                           VriBuffer*        buffer,
+                                           uint64_t          offset,
+                                           VriBuffer*        countBuffer,
+                                           uint64_t          countOffset,
+                                           uint32_t          maxDrawNum,
+                                           uint32_t          stride)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            c->list->ExecuteIndirect(c->device->DrawSignature(false, stride),
+                                     maxDrawNum,
+                                     Buf(buffer)->resource.Get(),
+                                     offset,
+                                     Buf(countBuffer)->resource.Get(),
+                                     countOffset);
+        }
+        void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
+                                                  VriBuffer*        buffer,
+                                                  uint64_t          offset,
+                                                  VriBuffer*        countBuffer,
+                                                  uint64_t          countOffset,
+                                                  uint32_t          maxDrawNum,
+                                                  uint32_t          stride)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            c->list->ExecuteIndirect(c->device->DrawSignature(true, stride),
+                                     maxDrawNum,
+                                     Buf(buffer)->resource.Get(),
+                                     offset,
+                                     Buf(countBuffer)->resource.Get(),
+                                     countOffset);
+        }
         void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
         {
             CB(cmd)->list->Dispatch(d->x, d->y, d->z);

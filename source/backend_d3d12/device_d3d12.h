@@ -43,6 +43,8 @@ namespace vri::d3d12
         // Lazily-created command signature for ExecuteIndirect(DispatchMesh) - must
         // outlive GPU execution, so it lives on the device (12-byte: 3x uint32 x,y,z).
         ID3D12CommandSignature* DispatchMeshSignature();
+        // Lazily-created (and cached by stride) DRAW / DRAW_INDEXED signatures for indirect draws.
+        ID3D12CommandSignature* DrawSignature(bool indexed, uint32_t stride);
 
     private:
         VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
@@ -52,17 +54,19 @@ namespace vri::d3d12
 
         ComPtr<IDXGIFactory4>          m_factory;
         ComPtr<ID3D12Device>           m_device;
-        ComPtr<ID3D12InfoQueue1>       m_infoQueue;            // debug-layer message sink (validation)
-        DWORD                          m_msgCookie = 0;        // RegisterMessageCallback token
-        ComPtr<ID3D12CommandSignature> m_dispatchMeshSig;      // lazy, for indirect DispatchMesh
-        ComPtr<ID3D12DescriptorHeap>   m_rtvHeap;              // CPU-only RTV heap
-        ComPtr<ID3D12DescriptorHeap>   m_dsvHeap;              // CPU-only DSV heap
-        uint32_t                       m_rtvSize          = 0; // descriptor increment
-        uint32_t                       m_rtvNext          = 0; // bump cursor
-        uint32_t                       m_dsvSize          = 0;
-        uint32_t                       m_dsvNext          = 0;
-        static constexpr uint32_t      kRtvHeapSize       = 256;
-        static constexpr uint32_t      kDsvHeapSize       = 64;
+        ComPtr<ID3D12InfoQueue1>       m_infoQueue;       // debug-layer message sink (validation)
+        DWORD                          m_msgCookie = 0;   // RegisterMessageCallback token
+        ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
+        std::unordered_map<uint64_t, ComPtr<ID3D12CommandSignature>>
+                                     m_drawSigs;               // indirect draw sigs, keyed by (indexed,stride)
+        ComPtr<ID3D12DescriptorHeap> m_rtvHeap;                // CPU-only RTV heap
+        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;                // CPU-only DSV heap
+        uint32_t                     m_rtvSize            = 0; // descriptor increment
+        uint32_t                     m_rtvNext            = 0; // bump cursor
+        uint32_t                     m_dsvSize            = 0;
+        uint32_t                     m_dsvNext            = 0;
+        static constexpr uint32_t    kRtvHeapSize         = 256;
+        static constexpr uint32_t    kDsvHeapSize         = 64;
         QueueD3D12           m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
         uint64_t             m_enabledFeatures            = 0;  // granted VriFeatureBits
         VriDeviceDesc        m_desc                       = {};
