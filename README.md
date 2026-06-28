@@ -75,7 +75,8 @@ Notes:
   VRI provides a transparent fallback (an emulated uniform path, or a texture-array path) that
   produces the same result.
 - **Ray tracing** is hardware-accelerated on Vulkan & Direct3D 12 (ray query *and* a full
-  raygen/miss/hit pipeline) and on Metal (inline ray query). On **WebGPU and OpenGL** — which have
+  raygen/miss/hit pipeline, plus **acceleration-structure compaction** to shrink a built BLAS/TLAS
+  to its exact size) and on Metal (inline ray query). On **WebGPU and OpenGL** — which have
   compute but no ray-tracing hardware — VRI traces rays in a **compute shader** instead (🟡). Where
   there's no compute at all (WebGL 2 / OpenGL ES), ray tracing is unavailable.
 - **Bindless on Metal** is implemented but currently unverified (no Apple hardware in CI).

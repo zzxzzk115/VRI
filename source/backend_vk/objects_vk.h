@@ -60,6 +60,8 @@ namespace vri::vk
         VkDeviceAddress                deviceAddress;
         VkDeviceAddress                scratchAddress;
         VkAccelerationStructureTypeKHR type;
+        // Transient query pool for the compacted-size query (lazily created; freed with the AS).
+        VkQueryPool compactedSizePool = VK_NULL_HANDLE;
     };
     inline VriAccelerationStructure* ToHandle(AccelerationStructureVK* a)
     {

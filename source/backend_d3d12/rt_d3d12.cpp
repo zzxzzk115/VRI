@@ -455,6 +455,61 @@ namespace vri::d3d12
             list4->DispatchRays(&dr);
         }
 
+        void VRI_CALL CmdWriteAccelerationStructureCompactedSize(VriCommandBuffer*         cmd,
+                                                                 VriAccelerationStructure* as,
+                                                                 VriBuffer*                dstBuffer,
+                                                                 uint64_t                  dstOffset)
+        {
+            CommandBufferD3D12*                c = CB(cmd);
+            ComPtr<ID3D12GraphicsCommandList4> list4;
+            if (FAILED(c->list.As(&list4)))
+                return;
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC pd = {};
+            pd.DestBuffer                       = BUF(dstBuffer)->resource->GetGPUVirtualAddress() + dstOffset;
+            pd.InfoType                         = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
+            const D3D12_GPU_VIRTUAL_ADDRESS src = AS(as)->address;
+            list4->EmitRaytracingAccelerationStructurePostbuildInfo(&pd, 1, &src);
+        }
+
+        VriResult VRI_CALL CreateAccelerationStructureCompacted(VriDevice*                   device,
+                                                                VriAccelerationStructureType type,
+                                                                uint64_t                     size,
+                                                                VriAccelerationStructure**   out)
+        {
+            DeviceD3D12*                d = Dev(device);
+            AccelerationStructureD3D12* a = new AccelerationStructureD3D12 {};
+            a->device                     = d;
+            a->type                       = type == VriAccelerationStructureType_TopLevel ?
+                                                D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL :
+                                                D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+            a->result = MakeUavBuffer(d, size, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+            if (!a->result)
+            {
+                delete a;
+                d->ReportError("compacted AS buffer alloc failed");
+                return VriResult_OutOfMemory;
+            }
+            a->address = a->result->GetGPUVirtualAddress();
+            *out       = ToHandle(a);
+            return VriResult_Success;
+        }
+
+        void VRI_CALL CmdCopyAccelerationStructure(VriCommandBuffer*         cmd,
+                                                   VriAccelerationStructure* dst,
+                                                   VriAccelerationStructure* src,
+                                                   VriBool                   compact)
+        {
+            CommandBufferD3D12*                c = CB(cmd);
+            ComPtr<ID3D12GraphicsCommandList4> list4;
+            if (FAILED(c->list.As(&list4)))
+                return;
+            list4->CopyRaytracingAccelerationStructure(AS(dst)->address,
+                                                       AS(src)->address,
+                                                       compact != VRI_FALSE ?
+                                                           D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_COMPACT :
+                                                           D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_CLONE);
+        }
+
         const VriRayTracingInterface g_rtD3D12 = {
             CreateAccelerationStructure,
             DestroyAccelerationStructure,
@@ -464,6 +519,9 @@ namespace vri::d3d12
             GetShaderGroupHandles,
             CmdBuildAccelerationStructure,
             CmdTraceRays,
+            CmdWriteAccelerationStructureCompactedSize,
+            CreateAccelerationStructureCompacted,
+            CmdCopyAccelerationStructure,
         };
     } // namespace
 

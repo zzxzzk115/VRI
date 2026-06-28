@@ -640,6 +640,33 @@ namespace vri::core
                 return;
             c->dev->rt.CmdTraceRays(c->real, desc);
         }
+        void VRI_CALL RtCmdWriteAccelerationStructureCompactedSize(VriCommandBuffer*         cmd,
+                                                                   VriAccelerationStructure* as,
+                                                                   VriBuffer*                dstBuffer,
+                                                                   uint64_t                  dstOffset)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdWriteAccelerationStructureCompactedSize"))
+                return;
+            c->dev->rt.CmdWriteAccelerationStructureCompactedSize(c->real, as, dstBuffer, dstOffset);
+        }
+        VriResult VRI_CALL RtCreateAccelerationStructureCompacted(VriDevice*                   device,
+                                                                  VriAccelerationStructureType type,
+                                                                  uint64_t                     size,
+                                                                  VriAccelerationStructure**   out)
+        {
+            return DV(device)->rt.CreateAccelerationStructureCompacted(DV(device)->real, type, size, out);
+        }
+        void VRI_CALL RtCmdCopyAccelerationStructure(VriCommandBuffer*         cmd,
+                                                     VriAccelerationStructure* dst,
+                                                     VriAccelerationStructure* src,
+                                                     VriBool                   compact)
+        {
+            CmdBufVal* c = CV(cmd);
+            if (!RecordingOk(c, "CmdCopyAccelerationStructure"))
+                return;
+            c->dev->rt.CmdCopyAccelerationStructure(c->real, dst, src, compact);
+        }
         // opacity micromap: unwrap device on create, command buffer on build.
         VriResult VRI_CALL OmmCreateMicromap(VriDevice* device, const VriMicromapDesc* desc, VriMicromap** out)
         {
@@ -923,13 +950,16 @@ namespace vri::core
             // Start from the real table (handle-only entry points pass through; the
             // backend table is process-constant), then override the ones taking a
             // wrapped device or command buffer.
-            VriRayTracingInterface w                   = d->rt;
-            w.CreateAccelerationStructure              = RtCreateAccelerationStructure;
-            w.CreateAccelerationStructureDescriptor    = RtCreateAccelerationStructureDescriptor;
-            w.CreateRayTracingPipeline                 = RtCreateRayTracingPipeline;
-            w.CmdBuildAccelerationStructure            = RtCmdBuildAccelerationStructure;
-            w.CmdTraceRays                             = RtCmdTraceRays;
-            *static_cast<VriRayTracingInterface*>(out) = w;
+            VriRayTracingInterface w                     = d->rt;
+            w.CreateAccelerationStructure                = RtCreateAccelerationStructure;
+            w.CreateAccelerationStructureDescriptor      = RtCreateAccelerationStructureDescriptor;
+            w.CreateRayTracingPipeline                   = RtCreateRayTracingPipeline;
+            w.CmdBuildAccelerationStructure              = RtCmdBuildAccelerationStructure;
+            w.CmdTraceRays                               = RtCmdTraceRays;
+            w.CmdWriteAccelerationStructureCompactedSize = RtCmdWriteAccelerationStructureCompactedSize;
+            w.CreateAccelerationStructureCompacted       = RtCreateAccelerationStructureCompacted;
+            w.CmdCopyAccelerationStructure               = RtCmdCopyAccelerationStructure;
+            *static_cast<VriRayTracingInterface*>(out)   = w;
             return VriResult_Success;
         }
         if (nameIs(VRI_INTERFACE_OMM))

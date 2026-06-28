@@ -850,6 +850,11 @@ namespace vri::vk
             m_ext.GetRayTracingShaderGroupHandles =
                 reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(L("vkGetRayTracingShaderGroupHandlesKHR"));
             m_ext.CmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(L("vkCmdTraceRaysKHR"));
+            m_ext.CmdWriteAccelerationStructuresProperties =
+                reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
+                    L("vkCmdWriteAccelerationStructuresPropertiesKHR"));
+            m_ext.CmdCopyAccelerationStructure =
+                reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(L("vkCmdCopyAccelerationStructureKHR"));
         }
         if (m_enabledFeatures & VriFeature_OpacityMicromap)
         {

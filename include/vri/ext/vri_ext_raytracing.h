@@ -183,6 +183,28 @@ typedef struct VriRayTracingInterface
 
     void (VRI_CALL *CmdBuildAccelerationStructure)(VriCommandBuffer* cmd, const VriBuildAccelerationStructureDesc* desc);
     void (VRI_CALL *CmdTraceRays)(VriCommandBuffer* cmd, const VriDispatchRaysDesc* desc);
+
+    /* ---- compaction (shrink a built AS to its exact size) ---------------------
+       Build the source AS with VriAccelerationStructureBuild_AllowCompaction, then:
+         1. CmdWriteAccelerationStructureCompactedSize -> a uint64 size in a buffer
+            (read it back after the submit's fence),
+         2. CreateAccelerationStructureCompacted(size) for the destination,
+         3. CmdCopyAccelerationStructure(dst, src, compact=VRI_TRUE),
+         4. use dst (smaller) and DestroyAccelerationStructure(src). */
+
+    /* Write src's compacted size (uint64) into dstBuffer at dstOffset. dstBuffer must be a
+       device buffer usable as the size sink (StorageBuffer + TransferSrc); copy it to a
+       HostReadback buffer to read the value. */
+    void (VRI_CALL *CmdWriteAccelerationStructureCompactedSize)(VriCommandBuffer* cmd, VriAccelerationStructure* as,
+                                                                VriBuffer* dstBuffer, uint64_t dstOffset);
+    /* Create an AS with an explicit backing size and no geometry/scratch -- the destination of a
+       compacting copy. */
+    VriResult (VRI_CALL *CreateAccelerationStructureCompacted)(VriDevice* device, VriAccelerationStructureType type,
+                                                               uint64_t size, VriAccelerationStructure** outAS);
+    /* Copy src into dst; compact == VRI_TRUE shrinks (dst sized from the compacted-size query,
+       src built with AllowCompaction). */
+    void (VRI_CALL *CmdCopyAccelerationStructure)(VriCommandBuffer* cmd, VriAccelerationStructure* dst,
+                                                  VriAccelerationStructure* src, VriBool compact);
 } VriRayTracingInterface;
 
 VRI_EXTERN_C_END

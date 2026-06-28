@@ -225,6 +225,8 @@ namespace vri::vk
             if (!as)
                 return;
             AccelerationStructureVK* a = AS(as);
+            if (a->compactedSizePool)
+                vkDestroyQueryPool(a->device->Device(), a->compactedSizePool, nullptr);
             a->device->Ext().DestroyAccelerationStructure(a->device->Device(), a->as, nullptr);
             vmaDestroyBuffer(a->device->Allocator(), a->buffer, a->bufferAlloc);
             vmaDestroyBuffer(a->device->Allocator(), a->scratch, a->scratchAlloc);
@@ -397,6 +399,85 @@ namespace vri::vk
             d->Ext().CmdTraceRays(c->cmd, &rg, &ms, &ht, &cl, desc->width, desc->height, desc->depth ? desc->depth : 1);
         }
 
+        void VRI_CALL CmdWriteAccelerationStructureCompactedSize(VriCommandBuffer*         cmd,
+                                                                 VriAccelerationStructure* as,
+                                                                 VriBuffer*                dstBuffer,
+                                                                 uint64_t                  dstOffset)
+        {
+            AccelerationStructureVK* a  = AS(as);
+            DeviceVK*                d  = a->device;
+            VkCommandBuffer          cb = CB(cmd)->cmd;
+            if (a->compactedSizePool == VK_NULL_HANDLE)
+            {
+                VkQueryPoolCreateInfo qci = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+                qci.queryType             = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+                qci.queryCount            = 1;
+                vkCreateQueryPool(d->Device(), &qci, nullptr, &a->compactedSizePool);
+            }
+            vkCmdResetQueryPool(cb, a->compactedSizePool, 0, 1);
+            d->Ext().CmdWriteAccelerationStructuresProperties(
+                cb, 1, &a->as, VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, a->compactedSizePool, 0);
+            vkCmdCopyQueryPoolResults(cb,
+                                      a->compactedSizePool,
+                                      0,
+                                      1,
+                                      BUF(dstBuffer)->buffer,
+                                      dstOffset,
+                                      sizeof(uint64_t),
+                                      VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        }
+
+        VriResult VRI_CALL CreateAccelerationStructureCompacted(VriDevice*                   device,
+                                                                VriAccelerationStructureType type,
+                                                                uint64_t                     size,
+                                                                VriAccelerationStructure**   out)
+        {
+            DeviceVK*                d = Dev(device);
+            AccelerationStructureVK* a = new AccelerationStructureVK {};
+            a->device                  = d;
+            a->type                    = ToAsType(type);
+            if (!MakeBuffer(d,
+                            size,
+                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                            a->buffer,
+                            a->bufferAlloc))
+            {
+                delete a;
+                return VriResult_OutOfMemory;
+            }
+            VkAccelerationStructureCreateInfoKHR ci = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+            ci.buffer                               = a->buffer;
+            ci.size                                 = size;
+            ci.type                                 = a->type;
+            if (d->Ext().CreateAccelerationStructure(d->Device(), &ci, nullptr, &a->as) != VK_SUCCESS)
+            {
+                vmaDestroyBuffer(d->Allocator(), a->buffer, a->bufferAlloc);
+                delete a;
+                return VriResult_Failure;
+            }
+            VkAccelerationStructureDeviceAddressInfoKHR ai = {
+                VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+            ai.accelerationStructure = a->as;
+            a->deviceAddress         = d->Ext().GetAccelerationStructureDeviceAddress(d->Device(), &ai);
+            *out                     = ToHandle(a);
+            return VriResult_Success;
+        }
+
+        void VRI_CALL CmdCopyAccelerationStructure(VriCommandBuffer*         cmd,
+                                                   VriAccelerationStructure* dst,
+                                                   VriAccelerationStructure* src,
+                                                   VriBool                   compact)
+        {
+            AccelerationStructureVK*           s    = AS(src);
+            VkCopyAccelerationStructureInfoKHR info = {VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR};
+            info.src                                = s->as;
+            info.dst                                = AS(dst)->as;
+            info.mode = compact != VRI_FALSE ? VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR :
+                                               VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR;
+            s->device->Ext().CmdCopyAccelerationStructure(CB(cmd)->cmd, &info);
+        }
+
         const VriRayTracingInterface g_rtVK = {
             CreateAccelerationStructure,
             DestroyAccelerationStructure,
@@ -406,6 +487,9 @@ namespace vri::vk
             GetShaderGroupHandles,
             CmdBuildAccelerationStructure,
             CmdTraceRays,
+            CmdWriteAccelerationStructureCompactedSize,
+            CreateAccelerationStructureCompacted,
+            CmdCopyAccelerationStructure,
         };
     } // namespace
 

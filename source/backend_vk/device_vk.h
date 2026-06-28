@@ -46,14 +46,16 @@ namespace vri::vk
             PFN_vkCmdDrawMeshTasksEXT          CmdDrawMeshTasks          = nullptr;
             PFN_vkCmdDrawMeshTasksIndirectEXT  CmdDrawMeshTasksIndirect  = nullptr;
             // ray tracing (KHR acceleration structure + ray tracing pipeline)
-            PFN_vkCreateAccelerationStructureKHR           CreateAccelerationStructure           = nullptr;
-            PFN_vkDestroyAccelerationStructureKHR          DestroyAccelerationStructure          = nullptr;
-            PFN_vkGetAccelerationStructureBuildSizesKHR    GetAccelerationStructureBuildSizes    = nullptr;
-            PFN_vkCmdBuildAccelerationStructuresKHR        CmdBuildAccelerationStructures        = nullptr;
-            PFN_vkGetAccelerationStructureDeviceAddressKHR GetAccelerationStructureDeviceAddress = nullptr;
-            PFN_vkCreateRayTracingPipelinesKHR             CreateRayTracingPipelines             = nullptr;
-            PFN_vkGetRayTracingShaderGroupHandlesKHR       GetRayTracingShaderGroupHandles       = nullptr;
-            PFN_vkCmdTraceRaysKHR                          CmdTraceRays                          = nullptr;
+            PFN_vkCreateAccelerationStructureKHR              CreateAccelerationStructure              = nullptr;
+            PFN_vkDestroyAccelerationStructureKHR             DestroyAccelerationStructure             = nullptr;
+            PFN_vkGetAccelerationStructureBuildSizesKHR       GetAccelerationStructureBuildSizes       = nullptr;
+            PFN_vkCmdBuildAccelerationStructuresKHR           CmdBuildAccelerationStructures           = nullptr;
+            PFN_vkGetAccelerationStructureDeviceAddressKHR    GetAccelerationStructureDeviceAddress    = nullptr;
+            PFN_vkCreateRayTracingPipelinesKHR                CreateRayTracingPipelines                = nullptr;
+            PFN_vkGetRayTracingShaderGroupHandlesKHR          GetRayTracingShaderGroupHandles          = nullptr;
+            PFN_vkCmdTraceRaysKHR                             CmdTraceRays                             = nullptr;
+            PFN_vkCmdWriteAccelerationStructuresPropertiesKHR CmdWriteAccelerationStructuresProperties = nullptr;
+            PFN_vkCmdCopyAccelerationStructureKHR             CmdCopyAccelerationStructure             = nullptr;
             // opacity micromap (VK_EXT_opacity_micromap)
             PFN_vkCreateMicromapEXT        CreateMicromap        = nullptr;
             PFN_vkDestroyMicromapEXT       DestroyMicromap       = nullptr;
