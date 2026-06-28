@@ -141,3 +141,5 @@ namespace
 TEST_CASE("Query pool: Vulkan timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_Vulkan, "Vulkan"); }
 
 TEST_CASE("Query pool: D3D12 timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_D3D12, "D3D12"); }
+
+TEST_CASE("Query pool: WebGPU timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_WebGPU, "WebGPU"); }

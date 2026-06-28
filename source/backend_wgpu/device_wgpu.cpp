@@ -1,5 +1,6 @@
 #include "device_wgpu.h"
 #include "core_wgpu.h"
+#include "query_wgpu.h"
 #include "swapchain_wgpu.h"
 #include "wgpu_native.h" // webgpu.h + native poll helpers (browser yields via ASYNCIFY)
 
@@ -135,15 +136,41 @@ namespace vri::wgpu
         }
         m_adapter = areq.adapter;
 
+        // Opt into timestamp queries when the adapter supports them (for the query interface).
+        // VRI's CmdWriteTimestamp records at arbitrary encoder points, which wgpu-native gates
+        // behind the native TimestampQueryInsideEncoders feature; the browser (emdawnwebgpu) has
+        // no such feature (timestamps are pass-scoped there), so timestamps are native-only.
+        const bool hasTsQuery = wgpuAdapterHasFeature(m_adapter, WGPUFeatureName_TimestampQuery) != 0;
+#if !defined(__EMSCRIPTEN__)
+        const bool hasTsInside =
+            wgpuAdapterHasFeature(m_adapter,
+                                  static_cast<WGPUFeatureName>(WGPUNativeFeature_TimestampQueryInsideEncoders)) != 0;
+#else
+        const bool hasTsInside = false;
+#endif
+        m_hasTimestamp = hasTsQuery && hasTsInside;
+
         // request device
         DeviceRequest        dreq;
         WGPUDeviceDescriptor deviceDesc                  = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
-        WGPURequestDeviceCallbackInfo dcb                = {};
-        dcb.mode                                         = kCallbackMode;
-        dcb.callback                                     = OnDevice;
-        dcb.userdata1                                    = &dreq;
+        WGPUFeatureName requiredFeatures[2]              = {};
+        uint32_t        featureCount                     = 0;
+        if (m_hasTimestamp)
+        {
+            requiredFeatures[featureCount++] = WGPUFeatureName_TimestampQuery;
+#if !defined(__EMSCRIPTEN__)
+            requiredFeatures[featureCount++] =
+                static_cast<WGPUFeatureName>(WGPUNativeFeature_TimestampQueryInsideEncoders);
+#endif
+            deviceDesc.requiredFeatures     = requiredFeatures;
+            deviceDesc.requiredFeatureCount = featureCount;
+        }
+        WGPURequestDeviceCallbackInfo dcb = {};
+        dcb.mode                          = kCallbackMode;
+        dcb.callback                      = OnDevice;
+        dcb.userdata1                     = &dreq;
         wgpuAdapterRequestDevice(m_adapter, &deviceDesc, dcb);
         for (int i = 0; i < 100000 && !dreq.done; ++i)
             PumpInstance(m_instance);
@@ -210,12 +237,16 @@ namespace vri::wgpu
         // WebGPU has no geometry or tessellation stages.
         m_desc.hasGeometryShader = VRI_FALSE;
         m_desc.hasTessellation   = VRI_FALSE;
+        // Timestamp query values are already in nanoseconds (period = 1).
+        m_desc.hasTimestampQueries        = m_hasTimestamp ? VRI_TRUE : VRI_FALSE;
+        m_desc.timestampPeriodNanoseconds = m_hasTimestamp ? 1.0f : 0.0f;
     }
 
     void DeviceWGPU::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceWGPU(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceWGPU(), sizeof(VriSwapChainInterface));
+        m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceWGPU(), sizeof(VriQueryInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

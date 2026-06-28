@@ -67,7 +67,7 @@ How each feature is supported on each backend:
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| GPU timestamp queries | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| GPU timestamp queries | ✅ | ✅ | ❌ | 🟡 | ❌ | ❌ | ❌ |
 
 Notes:
 
@@ -88,9 +88,10 @@ Notes:
   (`VRI_API=vulkan|d3d12`).
 - **GPU timestamp queries** (`ext/vri_ext_query.h`) record the GPU clock at points in a command
   buffer and resolve the ticks into a buffer; scale by `VriDeviceDesc::timestampPeriodNanoseconds`
-  for nanoseconds. The basis of a GPU profiler — see `example-profiler`. On **Vulkan** + **Direct3D
-  12** today (occlusion / pipeline-statistics query types are planned; WebGPU is feasible via its
-  optional `timestamp-query` feature).
+  for nanoseconds. The basis of a GPU profiler — see `example-profiler`. On **Vulkan**, **Direct3D
+  12**, and **WebGPU** (desktop wgpu-native, via the `timestamp-query` + `TimestampQueryInsideEncoders`
+  features; browser WebGPU timestamps are pass-scoped and not yet wired). Occlusion /
+  pipeline-statistics query types are a planned addition.
 
 ## Building
 

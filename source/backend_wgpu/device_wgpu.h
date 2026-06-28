@@ -23,6 +23,7 @@ namespace vri::wgpu
         WGPUQueue            Queue() const { return m_queue; }
         QueueWGPU*           GetQueue(VriQueueType /*type*/) { return &m_queueObj; }
         const VriDeviceDesc& Desc() const { return m_desc; }
+        bool                 HasTimestamp() const { return m_hasTimestamp; }
 
         void ReportError(const char* message) const;
         void ReportWarning(const char* message) const;
@@ -33,13 +34,14 @@ namespace vri::wgpu
         void FillDeviceDesc();
         void FillRegistry();
 
-        WGPUInstance         m_instance = nullptr;
-        WGPUAdapter          m_adapter  = nullptr;
-        WGPUDevice           m_device   = nullptr;
-        WGPUQueue            m_queue    = nullptr;
-        QueueWGPU            m_queueObj = {};
-        VriDeviceDesc        m_desc     = {};
-        VriCallbackInterface m_callback = {};
+        WGPUInstance         m_instance     = nullptr;
+        WGPUAdapter          m_adapter      = nullptr;
+        WGPUDevice           m_device       = nullptr;
+        WGPUQueue            m_queue        = nullptr;
+        QueueWGPU            m_queueObj     = {};
+        VriDeviceDesc        m_desc         = {};
+        VriCallbackInterface m_callback     = {};
+        bool                 m_hasTimestamp = false; // WGPUFeatureName_TimestampQuery granted at creation
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

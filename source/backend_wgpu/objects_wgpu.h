@@ -139,6 +139,15 @@ namespace vri::wgpu
         uint64_t    value; // emulated timeline
     };
 
+    struct QueryPoolWGPU
+    {
+        DeviceWGPU*  device;
+        WGPUQuerySet querySet;
+        WGPUBuffer   resolveBuffer; // QUERY_RESOLVE|COPY_SRC scratch; results land here then copy to the app buffer
+        uint32_t     count;
+    };
+    inline VriQueryPool* ToHandle(QueryPoolWGPU* q) { return reinterpret_cast<VriQueryPool*>(q); }
+
     inline VriQueue*            ToHandle(QueueWGPU* q) { return reinterpret_cast<VriQueue*>(q); }
     inline VriCommandAllocator* ToHandle(CommandAllocatorWGPU* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
     inline VriCommandBuffer*    ToHandle(CommandBufferWGPU* c) { return reinterpret_cast<VriCommandBuffer*>(c); }
