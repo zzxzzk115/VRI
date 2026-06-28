@@ -69,7 +69,7 @@ How each feature is supported on each backend:
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GPU timestamp queries | ✅ | ✅ | ❌ | 🟡 | 🟡 | ❌ | ❌ |
 | Occlusion queries | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Pipeline-statistics queries | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Pipeline-statistics queries | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Calibrated GPU+CPU timestamps | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Pipeline cache | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Indirect draw count (GPU-driven) | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
@@ -104,8 +104,9 @@ Notes:
   queries** (samples-passed) are also supported on Vulkan + D3D12 + desktop OpenGL (WebGPU's
   occlusion binds the query set at pass-begin, which this API doesn't express),
   **pipeline-statistics queries** (per-stage invocation counts, a portable `VriPipelineStatistics`
-  struct) on Vulkan + D3D12, and **calibrated timestamps** (a correlated GPU+CPU clock pair, for
-  aligning GPU spans with a CPU trace) on Vulkan + D3D12.
+  struct) on Vulkan + D3D12 + desktop OpenGL 4.6 (via `ARB_pipeline_statistics_query`, one GL query
+  object per stat), and **calibrated timestamps** (a correlated GPU+CPU clock pair, for aligning GPU
+  spans with a CPU trace) on Vulkan + D3D12.
 - **Built-in Dear ImGui renderer** (`ext/vri_ext_imgui.h`, `VRI_INTERFACE_IMGUI`) draws ImGui
   through VRI's own core interface, so a single renderer covers every backend with no per-backend
   `imgui_impl_*` and it flows through the validation layer for free. VRI does **not** depend on or

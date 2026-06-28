@@ -285,7 +285,8 @@ namespace vri::gl
     struct QueryPoolGL
     {
         DeviceGL*           device;
-        std::vector<GLuint> ids; // one GL query object per timestamp slot
+        VriQueryType        type = VriQueryType_Timestamp;
+        std::vector<GLuint> ids; // one GL query object per slot; pipeline-stats uses 11 per slot
     };
     inline VriQueryPool* ToHandle(QueryPoolGL* q) { return reinterpret_cast<VriQueryPool*>(q); }
 

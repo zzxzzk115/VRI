@@ -211,3 +211,4 @@ namespace
 
 TEST_CASE("Pipeline statistics: Vulkan counts a triangle draw") { RunPipelineStats(VriGraphicsAPI_Vulkan, "Vulkan"); }
 TEST_CASE("Pipeline statistics: D3D12 counts a triangle draw") { RunPipelineStats(VriGraphicsAPI_D3D12, "D3D12"); }
+TEST_CASE("Pipeline statistics: OpenGL counts a triangle draw") { RunPipelineStats(VriGraphicsAPI_OpenGL, "OpenGL"); }
