@@ -357,15 +357,16 @@ namespace vri::d3d12
         else
             m_desc.hasTimestampQueries = VRI_FALSE;
 
-        m_desc.enabledFeatures        = m_enabledFeatures;
-        m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasMeshShader          = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasRayTracing          = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasOpacityMicromap     = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasRayQuery            = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasBindless            = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasExternalMemory      = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasPipelineStatistics  = VRI_TRUE; // D3D12 pipeline-statistics query heap is always available
+        m_desc.enabledFeatures         = m_enabledFeatures;
+        m_desc.hasVariableShadingRate  = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasMeshShader           = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasRayTracing           = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasOpacityMicromap      = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasRayQuery             = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasBindless             = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasPipelineStatistics   = VRI_TRUE; // D3D12 pipeline-statistics query heap is always available
+        m_desc.hasCalibratedTimestamps = VRI_TRUE; // ID3D12CommandQueue::GetClockCalibration is always available
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).

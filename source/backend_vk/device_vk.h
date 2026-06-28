@@ -56,6 +56,8 @@ namespace vri::vk
             PFN_vkCmdTraceRaysKHR                             CmdTraceRays                             = nullptr;
             PFN_vkCmdWriteAccelerationStructuresPropertiesKHR CmdWriteAccelerationStructuresProperties = nullptr;
             PFN_vkCmdCopyAccelerationStructureKHR             CmdCopyAccelerationStructure             = nullptr;
+            // calibrated timestamps (VK_KHR/EXT_calibrated_timestamps)
+            PFN_vkGetCalibratedTimestampsKHR GetCalibratedTimestamps = nullptr;
             // opacity micromap (VK_EXT_opacity_micromap)
             PFN_vkCreateMicromapEXT        CreateMicromap        = nullptr;
             PFN_vkDestroyMicromapEXT       DestroyMicromap       = nullptr;
@@ -64,6 +66,7 @@ namespace vri::vk
         };
         const ExtFunctions& Ext() const { return m_ext; }
         uint64_t            EnabledFeatures() const { return m_enabledFeatures; }
+        VkTimeDomainKHR     HostTimeDomain() const { return m_hostTimeDomain; }
 
         void ReportError(const char* message) const;
         void ReportWarning(const char* message) const;
@@ -88,11 +91,13 @@ namespace vri::vk
         bool     m_validation                        = false;
         uint64_t m_enabledFeatures                   = 0; // granted VriFeatureBits
         // Always-on-if-available pipeline-state extensions (capabilities, not opt-in features).
-        bool         m_hasConservativeRaster = false;
-        bool         m_hasBarycentric        = false;
-        bool         m_hasCustomBorderColor  = false;
-        bool         m_hasPipelineStats      = false;
-        ExtFunctions m_ext                   = {};
+        bool            m_hasConservativeRaster   = false;
+        bool            m_hasBarycentric          = false;
+        bool            m_hasCustomBorderColor    = false;
+        bool            m_hasPipelineStats        = false;
+        bool            m_hasCalibratedTimestamps = false;
+        VkTimeDomainKHR m_hostTimeDomain          = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
+        ExtFunctions    m_ext                     = {};
 
         VriDeviceDesc        m_desc     = {};
         VriCallbackInterface m_callback = {};

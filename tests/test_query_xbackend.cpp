@@ -140,6 +140,38 @@ namespace
     }
 } // namespace
 
+// Two correlated GPU+CPU timestamp captures; both clocks must be non-zero and non-decreasing.
+void RunCalibrated(VriGraphicsAPI api, const char* name)
+{
+    Dev d;
+    if (!Init(d, api))
+    {
+        MESSAGE("[" << name << "] unavailable - skipping calibrated-timestamp test");
+        return;
+    }
+    const VriCoreInterface& c   = d.core;
+    VriDevice*              dev = d.device;
+    if (c.GetDeviceDesc(dev)->hasCalibratedTimestamps == VRI_FALSE)
+    {
+        MESSAGE("[" << name << "] no calibrated timestamps - skipping");
+        return;
+    }
+    VriQueryInterface q {};
+    REQUIRE(vriGetInterface(dev, VRI_INTERFACE_QUERY, sizeof(q), &q) == VriResult_Success);
+
+    VriCalibratedTimestamps t0 {}, t1 {};
+    REQUIRE(q.GetCalibratedTimestamps(dev, &t0) == VriResult_Success);
+    CHECK(t0.gpuTimestamp > 0);
+    CHECK(t0.cpuTimestamp > 0);
+    volatile uint64_t spin = 0; // burn a little CPU time so the host clock advances
+    for (int i = 0; i < 1000000; ++i)
+        spin += static_cast<uint64_t>(i);
+    REQUIRE(q.GetCalibratedTimestamps(dev, &t1) == VriResult_Success);
+    CHECK(t1.cpuTimestamp >= t0.cpuTimestamp); // host clock is monotonic
+    CHECK(t1.gpuTimestamp >= t0.gpuTimestamp);
+    MESSAGE("[" << name << "] CPU ticks advanced by " << (t1.cpuTimestamp - t0.cpuTimestamp));
+}
+
 TEST_CASE("Query pool: Vulkan timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_Vulkan, "Vulkan"); }
 
 TEST_CASE("Query pool: D3D12 timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_D3D12, "D3D12"); }
@@ -152,3 +184,6 @@ TEST_CASE("Query pool: OpenGL timestamps advance across GPU work")
 {
     RunTimestamp(VriGraphicsAPI_OpenGL, "OpenGL", /*strictNonzero*/ false);
 }
+
+TEST_CASE("Calibrated timestamps: Vulkan pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_Vulkan, "Vulkan"); }
+TEST_CASE("Calibrated timestamps: D3D12 pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_D3D12, "D3D12"); }

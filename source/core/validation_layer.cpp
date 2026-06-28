@@ -777,6 +777,10 @@ namespace vri::core
                 return;
             c->dev->query.CmdCopyQueries(c->real, pool, offset, num, dstBuffer, dstOffset);
         }
+        VriResult VRI_CALL QueryGetCalibratedTimestamps(VriDevice* device, VriCalibratedTimestamps* out)
+        {
+            return DV(device)->query.GetCalibratedTimestamps(DV(device)->real, out);
+        }
 
         void BuildTable(DeviceVal* d)
         {
@@ -1013,6 +1017,7 @@ namespace vri::core
             w.CmdBeginQuery                       = QueryCmdBeginQuery;
             w.CmdEndQuery                         = QueryCmdEndQuery;
             w.CmdCopyQueries                      = QueryCmdCopyQueries;
+            w.GetCalibratedTimestamps             = QueryGetCalibratedTimestamps;
             *static_cast<VriQueryInterface*>(out) = w;
             return VriResult_Success;
         }

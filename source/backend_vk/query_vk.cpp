@@ -109,6 +109,27 @@ namespace vri::vk
                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
         }
 
+        VriResult VRI_CALL GetCalibratedTimestamps(VriDevice* device, VriCalibratedTimestamps* out)
+        {
+            if (!out)
+                return VriResult_InvalidArgument;
+            DeviceVK* d = Dev(device);
+            if (!d->Ext().GetCalibratedTimestamps || d->Desc().hasCalibratedTimestamps == VRI_FALSE)
+                return VriResult_Unsupported;
+            VkCalibratedTimestampInfoKHR infos[2] = {};
+            infos[0].sType                        = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_KHR;
+            infos[0].timeDomain                   = VK_TIME_DOMAIN_DEVICE_KHR;
+            infos[1].sType                        = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_KHR;
+            infos[1].timeDomain                   = d->HostTimeDomain();
+            uint64_t ts[2]                        = {0, 0};
+            uint64_t maxDeviation                 = 0;
+            if (d->Ext().GetCalibratedTimestamps(d->Device(), 2, infos, ts, &maxDeviation) != VK_SUCCESS)
+                return VriResult_Failure;
+            out->gpuTimestamp = ts[0];
+            out->cpuTimestamp = ts[1];
+            return VriResult_Success;
+        }
+
         const VriQueryInterface g_queryVK = {
             CreateQueryPool,
             DestroyQueryPool,
@@ -118,6 +139,7 @@ namespace vri::vk
             CmdBeginQuery,
             CmdEndQuery,
             CmdCopyQueries,
+            GetCalibratedTimestamps,
         };
     } // namespace
 

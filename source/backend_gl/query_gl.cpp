@@ -99,6 +99,12 @@ namespace vri::gl
         void VRI_CALL     CmdCopyQueries(VriCommandBuffer*, VriQueryPool*, uint32_t, uint32_t, VriBuffer*, uint64_t) {}
 #endif
 
+        // OpenGL has no calibrated GPU+CPU timestamp pairing.
+        VriResult VRI_CALL GetCalibratedTimestamps(VriDevice*, VriCalibratedTimestamps*)
+        {
+            return VriResult_Unsupported;
+        }
+
         const VriQueryInterface g_queryGL = {
             CreateQueryPool,
             DestroyQueryPool,
@@ -108,6 +114,7 @@ namespace vri::gl
             CmdBeginQuery,
             CmdEndQuery,
             CmdCopyQueries,
+            GetCalibratedTimestamps,
         };
     } // namespace
 

@@ -60,6 +60,16 @@ typedef struct VriQueryPoolDesc
     uint32_t     queryCount;
 } VriQueryPoolDesc;
 
+/* A GPU + CPU timestamp captured at (nearly) the same instant, for aligning GPU spans with a
+ * CPU timeline. gpuTimestamp is in GPU ticks (scale by VriDeviceDesc::timestampPeriodNanoseconds);
+ * cpuTimestamp is the host performance counter (QueryPerformanceCounter ticks on Windows,
+ * CLOCK_MONOTONIC nanoseconds on Linux). Available when VriDeviceDesc::hasCalibratedTimestamps. */
+typedef struct VriCalibratedTimestamps
+{
+    uint64_t gpuTimestamp;
+    uint64_t cpuTimestamp;
+} VriCalibratedTimestamps;
+
 typedef struct VriQueryInterface
 {
     VriResult (VRI_CALL *CreateQueryPool)(VriDevice* device, const VriQueryPoolDesc* desc, VriQueryPool** outPool);
@@ -81,6 +91,10 @@ typedef struct VriQueryInterface
      * dstBuffer needs num*GetQuerySize bytes and TransferDst usage (a HostReadback buffer works). */
     void (VRI_CALL *CmdCopyQueries)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num,
                                     VriBuffer* dstBuffer, uint64_t dstOffset);
+
+    /* Capture a correlated GPU+CPU timestamp pair (no command buffer; immediate device call).
+     * Returns Unsupported where VriDeviceDesc::hasCalibratedTimestamps is false. */
+    VriResult (VRI_CALL *GetCalibratedTimestamps)(VriDevice* device, VriCalibratedTimestamps* out);
 } VriQueryInterface;
 
 VRI_EXTERN_C_END

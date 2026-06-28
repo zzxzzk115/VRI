@@ -100,6 +100,19 @@ namespace vri::d3d12
                 q->heap.Get(), q->queryType, offset, num, Buf(dstBuffer)->resource.Get(), dstOffset);
         }
 
+        VriResult VRI_CALL GetCalibratedTimestamps(VriDevice* device, VriCalibratedTimestamps* out)
+        {
+            if (!out)
+                return VriResult_InvalidArgument;
+            ID3D12CommandQueue* q   = Dev(device)->GetQueue(VriQueueType_Graphics)->queue.Get();
+            UINT64              gpu = 0, cpu = 0;
+            if (!q || FAILED(q->GetClockCalibration(&gpu, &cpu))) // cpu = QueryPerformanceCounter ticks
+                return VriResult_Failure;
+            out->gpuTimestamp = gpu;
+            out->cpuTimestamp = cpu;
+            return VriResult_Success;
+        }
+
         const VriQueryInterface g_queryD3D12 = {
             CreateQueryPool,
             DestroyQueryPool,
@@ -109,6 +122,7 @@ namespace vri::d3d12
             CmdBeginQuery,
             CmdEndQuery,
             CmdCopyQueries,
+            GetCalibratedTimestamps,
         };
     } // namespace
 

@@ -70,6 +70,7 @@ typedef struct VriDeviceDesc
     VriBool        hasExternalMemory; /* external memory/semaphore export (see ext/vri_ext_external.h) */
     VriBool        hasTimestampQueries;        /* GPU timestamp query pools (see ext/vri_ext_query.h) */
     VriBool        hasPipelineStatistics;      /* pipeline-statistics query pools (see ext/vri_ext_query.h) */
+    VriBool        hasCalibratedTimestamps;    /* correlated GPU+CPU timestamps (see ext/vri_ext_query.h) */
     float          timestampPeriodNanoseconds; /* nanoseconds per timestamp tick (0 if unsupported) */
     uint32_t       subgroupSize;     /* lanes per subgroup/wave (0 if unknown) */
 

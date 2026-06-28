@@ -108,6 +108,12 @@ namespace vri::wgpu
                                                  static_cast<uint64_t>(num) * sizeof(uint64_t));
         }
 
+        // WebGPU exposes no calibrated GPU+CPU timestamp pairing.
+        VriResult VRI_CALL GetCalibratedTimestamps(VriDevice*, VriCalibratedTimestamps*)
+        {
+            return VriResult_Unsupported;
+        }
+
         const VriQueryInterface g_queryWGPU = {
             CreateQueryPool,
             DestroyQueryPool,
@@ -117,6 +123,7 @@ namespace vri::wgpu
             CmdBeginQuery,
             CmdEndQuery,
             CmdCopyQueries,
+            GetCalibratedTimestamps,
         };
     } // namespace
 

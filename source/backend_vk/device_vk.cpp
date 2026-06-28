@@ -463,6 +463,12 @@ namespace vri::vk
             features2.pNext                      = &cbcEn;
             m_hasCustomBorderColor               = true;
         }
+        // Calibrated timestamps (correlated GPU+CPU clocks). No feature struct; just the
+        // extension. Confirmed in LoadExtensionFunctions, which also picks the host time domain.
+        if (hasExt("VK_KHR_calibrated_timestamps"))
+            extensions.push_back("VK_KHR_calibrated_timestamps");
+        else if (hasExt("VK_EXT_calibrated_timestamps"))
+            extensions.push_back("VK_EXT_calibrated_timestamps");
 
         // ---- optional features: query -> enable -> report (bestEffort aware) ----
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asEn = {
@@ -763,16 +769,17 @@ namespace vri::vk
         m_desc.hasGeometryShader = baseFeatures.geometryShader ? VRI_TRUE : VRI_FALSE;
         m_desc.hasTessellation   = baseFeatures.tessellationShader ? VRI_TRUE : VRI_FALSE;
 
-        m_desc.enabledFeatures        = m_enabledFeatures;
-        m_desc.hasRayTracing          = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasMeshShader          = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasBindless            = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasVariableShadingRate = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasOpacityMicromap     = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasRayQuery            = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasExternalMemory      = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasPipelineStatistics  = m_hasPipelineStats ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasConservativeRaster  = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
+        m_desc.enabledFeatures         = m_enabledFeatures;
+        m_desc.hasRayTracing           = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasMeshShader           = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasBindless             = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasVariableShadingRate  = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasOpacityMicromap      = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasRayQuery             = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasPipelineStatistics   = m_hasPipelineStats ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasCalibratedTimestamps = m_hasCalibratedTimestamps ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasConservativeRaster   = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor         = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;
         m_desc.subgroupSize                 = props11.subgroupSize;
@@ -864,6 +871,42 @@ namespace vri::vk
             m_ext.GetMicromapBuildSizes =
                 reinterpret_cast<PFN_vkGetMicromapBuildSizesEXT>(L("vkGetMicromapBuildSizesEXT"));
             m_ext.CmdBuildMicromaps = reinterpret_cast<PFN_vkCmdBuildMicromapsEXT>(L("vkCmdBuildMicromapsEXT"));
+        }
+
+        // Calibrated timestamps: load the entry point + confirm the GPU clock can be paired with
+        // the platform host clock (QPC on Windows, CLOCK_MONOTONIC on Linux).
+        m_ext.GetCalibratedTimestamps = reinterpret_cast<PFN_vkGetCalibratedTimestampsKHR>(
+            LoadCoreOrKhr("vkGetCalibratedTimestampsKHR", "vkGetCalibratedTimestampsEXT"));
+        if (m_ext.GetCalibratedTimestamps)
+        {
+            auto getDomains = reinterpret_cast<PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR>(
+                vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR"));
+            if (!getDomains)
+                getDomains = reinterpret_cast<PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR>(
+                    vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT"));
+            if (getDomains)
+            {
+                uint32_t n = 0;
+                getDomains(m_physicalDevice, &n, nullptr);
+                std::vector<VkTimeDomainKHR> domains(n);
+                getDomains(m_physicalDevice, &n, domains.data());
+#if defined(_WIN32)
+                const VkTimeDomainKHR host = VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_KHR;
+#else
+                const VkTimeDomainKHR host = VK_TIME_DOMAIN_CLOCK_MONOTONIC_KHR;
+#endif
+                bool hasDevice = false, hasHost = false;
+                for (VkTimeDomainKHR dmn : domains)
+                {
+                    hasDevice = hasDevice || dmn == VK_TIME_DOMAIN_DEVICE_KHR;
+                    hasHost   = hasHost || dmn == host;
+                }
+                if (hasDevice && hasHost)
+                {
+                    m_hostTimeDomain          = host;
+                    m_hasCalibratedTimestamps = true;
+                }
+            }
         }
     }
 
