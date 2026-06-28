@@ -1480,6 +1480,16 @@ namespace vri::vk
         {
             vkCmdFillBuffer(CB(cmd)->cmd, Buf(buffer)->buffer, offset, size ? size : VK_WHOLE_SIZE, value);
         }
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
+        {
+            VkClearColorValue cv;
+            std::memcpy(&cv, value, sizeof(cv)); // VriClearColor + VkClearColorValue are both a 16-byte union
+            VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS};
+            // vkCmdClearColorImage is a transfer-domain op, so the caller barriers the texture to the
+            // CopyDestination state/layout (matching the storage-buffer clear's transfer contract).
+            vkCmdClearColorImage(
+                CB(cmd)->cmd, Tex(texture)->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &range);
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*        cmd,
                                     VriBuffer*               dst,
                                     VriBuffer*               src,
@@ -1675,6 +1685,7 @@ namespace vri::vk
             SetDebugName,
             GetVideoMemoryInfo,
             CmdClearStorageBuffer,
+            CmdClearStorageTexture,
         };
     } // namespace
 

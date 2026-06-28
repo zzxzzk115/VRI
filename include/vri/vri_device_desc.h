@@ -82,6 +82,7 @@ typedef struct VriDeviceDesc
     VriBool        hasCalibratedTimestamps;    /* correlated GPU+CPU timestamps (see ext/vri_ext_query.h) */
     VriBool        hasDrawIndirectCount;       /* CmdDraw[Indexed]IndirectCount (GPU-driven draw count) */
     VriBool        hasClearStorageBuffer;      /* CmdClearStorageBuffer (fill a storage buffer with a uint32) */
+    VriBool        hasClearStorageTexture;     /* CmdClearStorageTexture (clear a storage texture to a color) */
     float          timestampPeriodNanoseconds; /* nanoseconds per timestamp tick (0 if unsupported) */
     uint32_t       subgroupSize;     /* lanes per subgroup/wave (0 if unknown) */
 

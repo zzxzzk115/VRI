@@ -2122,6 +2122,23 @@ namespace vri::gl
             c->device->ReportError("CmdClearStorageBuffer: glClearBufferSubData is unavailable on WebGL2/GLES");
 #endif
         }
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
+        {
+            CommandBufferGL* c = CB(cmd);
+#if !defined(VRI_GL_ES_HEADERS)
+            TextureGL* t = Tex(texture);
+            // glClearTexImage (GL 4.4) clears the whole level (all layers). Use the texture's component
+            // format but read the value as FLOAT (GL converts to the internal format) or, for integer
+            // textures, as UINT - matching the portable "f32 for float/unorm, u32 for integer" contract.
+            const bool isInt = t->glFormat == GL_RED_INTEGER || t->glFormat == GL_RG_INTEGER ||
+                               t->glFormat == GL_RGB_INTEGER || t->glFormat == GL_RGBA_INTEGER;
+            glClearTexImage(t->id, 0, t->glFormat, isInt ? GL_UNSIGNED_INT : GL_FLOAT, value);
+#else
+            (void)texture;
+            (void)value;
+            c->device->ReportError("CmdClearStorageTexture: glClearTexImage is unavailable on WebGL2/GLES");
+#endif
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             // Keep an element-class buffer on GL_ELEMENT_ARRAY_BUFFER so WebGL never
@@ -2408,6 +2425,7 @@ namespace vri::gl
             t.SetDebugName                = SetDebugName;
             t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
+            t.CmdClearStorageTexture      = CmdClearStorageTexture;
             return t;
         }
 

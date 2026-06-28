@@ -1171,6 +1171,11 @@ namespace vri::wgpu
         {
             CB(cmd)->device->ReportError("CmdClearStorageBuffer: unsupported on WebGPU");
         }
+        // WebGPU can only clear a texture via a render pass loadOp, not an out-of-pass command.
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture*, const VriClearColor*)
+        {
+            CB(cmd)->device->ReportError("CmdClearStorageTexture: unsupported on WebGPU");
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             CommandBufferWGPU* c = CB(cmd);
@@ -1398,6 +1403,7 @@ namespace vri::wgpu
             t.SetDebugName                = SetDebugName;
             t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
+            t.CmdClearStorageTexture      = CmdClearStorageTexture;
             return t;
         }
 

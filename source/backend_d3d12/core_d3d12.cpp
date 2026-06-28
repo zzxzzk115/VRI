@@ -64,6 +64,38 @@ namespace vri::d3d12
             }
         }
 
+        // Integer (UINT/SINT) color formats need ClearUnorderedAccessViewUint; everything else uses
+        // the Float clear (which converts to the format). Storage textures are always typed/color.
+        bool IsIntegerDxgi(DXGI_FORMAT f)
+        {
+            switch (f)
+            {
+                case DXGI_FORMAT_R8_UINT:
+                case DXGI_FORMAT_R8_SINT:
+                case DXGI_FORMAT_R8G8_UINT:
+                case DXGI_FORMAT_R8G8_SINT:
+                case DXGI_FORMAT_R8G8B8A8_UINT:
+                case DXGI_FORMAT_R8G8B8A8_SINT:
+                case DXGI_FORMAT_R16_UINT:
+                case DXGI_FORMAT_R16_SINT:
+                case DXGI_FORMAT_R16G16_UINT:
+                case DXGI_FORMAT_R16G16_SINT:
+                case DXGI_FORMAT_R16G16B16A16_UINT:
+                case DXGI_FORMAT_R16G16B16A16_SINT:
+                case DXGI_FORMAT_R32_UINT:
+                case DXGI_FORMAT_R32_SINT:
+                case DXGI_FORMAT_R32G32_UINT:
+                case DXGI_FORMAT_R32G32_SINT:
+                case DXGI_FORMAT_R32G32B32_UINT:
+                case DXGI_FORMAT_R32G32B32_SINT:
+                case DXGI_FORMAT_R32G32B32A32_UINT:
+                case DXGI_FORMAT_R32G32B32A32_SINT:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after)
         {
             if (t->state == after)
@@ -1713,6 +1745,35 @@ namespace vri::d3d12
                 c->list->SetDescriptorHeaps(2, h);
             }
         }
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
+        {
+            CommandBufferD3D12*              c   = CB(cmd);
+            TextureD3D12*                    t   = Tex(texture);
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+            uav.Format                           = t->format;
+            if (t->layerNum > 1)
+            {
+                uav.ViewDimension            = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                uav.Texture2DArray.ArraySize = t->layerNum;
+            }
+            else
+                uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+            D3D12_GPU_DESCRIPTOR_HANDLE gpu {};
+            D3D12_CPU_DESCRIPTOR_HANDLE cpuView {};
+            ID3D12DescriptorHeap*       gpuHeap = nullptr;
+            c->device->ClearUavViews(t->resource.Get(), uav, gpu, cpuView, gpuHeap);
+            Transition(c, t, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            c->list->SetDescriptorHeaps(1, &gpuHeap);
+            if (IsIntegerDxgi(t->format))
+                c->list->ClearUnorderedAccessViewUint(gpu, cpuView, t->resource.Get(), value->u32, 0, nullptr);
+            else
+                c->list->ClearUnorderedAccessViewFloat(gpu, cpuView, t->resource.Get(), value->f32, 0, nullptr);
+            if (c->boundSrvHeap)
+            {
+                ID3D12DescriptorHeap* h[2] = {c->boundSrvHeap, c->boundSamplerHeap};
+                c->list->SetDescriptorHeaps(2, h);
+            }
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             // Buffers implicitly promote from COMMON to COPY_DEST on a direct queue. Record that
@@ -1882,6 +1943,7 @@ namespace vri::d3d12
             SetDebugName,
             GetVideoMemoryInfo,
             CmdClearStorageBuffer,
+            CmdClearStorageTexture,
         };
         return &t;
     }

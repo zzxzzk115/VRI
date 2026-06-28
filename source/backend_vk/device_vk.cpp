@@ -795,6 +795,7 @@ namespace vri::vk
         m_desc.hasCalibratedTimestamps = m_hasCalibratedTimestamps ? VRI_TRUE : VRI_FALSE;
         m_desc.hasDrawIndirectCount    = m_hasDrawIndirectCount ? VRI_TRUE : VRI_FALSE;
         m_desc.hasClearStorageBuffer   = VRI_TRUE; // vkCmdFillBuffer is core Vulkan
+        m_desc.hasClearStorageTexture  = VRI_TRUE; // vkCmdClearColorImage is core Vulkan
         m_desc.hasConservativeRaster   = m_hasConservativeRaster ? VRI_TRUE : VRI_FALSE;
         m_desc.hasFragmentShaderBarycentric = m_hasBarycentric ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCustomBorderColor         = m_hasCustomBorderColor ? VRI_TRUE : VRI_FALSE;

@@ -388,6 +388,7 @@ namespace vri::d3d12
         m_desc.hasCalibratedTimestamps = VRI_TRUE; // ID3D12CommandQueue::GetClockCalibration is always available
         m_desc.hasDrawIndirectCount    = VRI_TRUE; // ExecuteIndirect with a count buffer is always available
         m_desc.hasClearStorageBuffer   = VRI_TRUE; // ClearUnorderedAccessViewUint via a transient UAV
+        m_desc.hasClearStorageTexture  = VRI_TRUE; // ClearUnorderedAccessView{Float,Uint} via a transient UAV
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             // DXR shader-table layout constants (mirror the Vulkan RT props fields).

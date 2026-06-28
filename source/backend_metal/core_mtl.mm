@@ -1208,6 +1208,11 @@ namespace vri::mtl
         {
             CB(cmd)->device->ReportError("CmdClearStorageBuffer: unsupported on Metal");
         }
+        // Metal clears textures via a render pass loadAction, not an out-of-pass command.
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture*, const VriClearColor*)
+        {
+            CB(cmd)->device->ReportError("CmdClearStorageTexture: unsupported on Metal");
+        }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
             CommandBufferMTL* c = CB(cmd);
@@ -1420,7 +1425,8 @@ namespace vri::mtl
             t.DeviceWaitIdle = DeviceWaitIdle;
             t.SetDebugName          = SetDebugName;
             t.GetVideoMemoryInfo    = GetVideoMemoryInfo;
-            t.CmdClearStorageBuffer = CmdClearStorageBuffer;
+            t.CmdClearStorageBuffer  = CmdClearStorageBuffer;
+            t.CmdClearStorageTexture = CmdClearStorageTexture;
             return t;
         }
 

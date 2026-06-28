@@ -74,7 +74,7 @@ How each feature is supported on each backend:
 | Pipeline cache | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Indirect draw count (GPU-driven) | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Video memory budget | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Clear storage buffer | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Clear storage buffer / texture | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Built-in Dear ImGui renderer | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 Notes:
@@ -139,7 +139,9 @@ Notes:
   accumulation buffer before a compute pass. Gated by `VriDeviceDesc::hasClearStorageBuffer`. On
   **Vulkan** (`vkCmdFillBuffer`), **Direct3D 12** (`ClearUnorderedAccessView` via a transient UAV),
   and **desktop OpenGL 4.3** (`glClearBufferSubData`); WebGPU/Metal (no arbitrary-value buffer fill)
-  report `Unsupported`. Storage-texture clear is a planned addition.
+  report `Unsupported`. **`CmdClearStorageTexture`** clears a storage texture to a color the same way
+  (`vkCmdClearColorImage` / `ClearUnorderedAccessView{Float,Uint}` / `glClearTexImage`, GL 4.4),
+  gated by `hasClearStorageTexture`.
 
 ## Building
 

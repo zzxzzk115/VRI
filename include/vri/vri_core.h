@@ -164,6 +164,13 @@ typedef struct VriCoreInterface
      * The caller barriers the buffer (CopyDestinationWrite-style) around the clear. Backends without a
      * direct buffer fill (Direct3D 12, WebGPU, Metal) diagnose rather than silently no-op. */
     void (VRI_CALL *CmdClearStorageBuffer)(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value);
+
+    /* Clear a storage (UAV/image) texture's mip 0 (all layers) to a color value, outside a render
+     * pass. `value` is interpreted per the texture's format - fill the f32 (float/normalized) or
+     * u32 / i32 (integer) union member that matches it. Gated by VriDeviceDesc::hasClearStorageTexture
+     * (WebGPU/Metal can't clear a texture outside a pass). Like CmdClearStorageBuffer this is a
+     * transfer-domain op: barrier the texture to CopyDestination before, and to its next use after. */
+    void (VRI_CALL *CmdClearStorageTexture)(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value);
 } VriCoreInterface;
 
 VRI_EXTERN_C_END
