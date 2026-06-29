@@ -74,6 +74,7 @@ namespace vri::core
             VriExternalInterface        external;      // the backend's real external-memory table (if supported)
             VriQueryInterface           query;         // the backend's real query-pool table (if supported)
             VriPipelineCacheInterface   pipelineCache; // the backend's real pipeline-cache table (if supported)
+            VriInteropInterface         interop;       // the backend's real native-handle interop table (if supported)
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>  queues;
             std::vector<CmdBufVal*> cmds;
@@ -804,6 +805,21 @@ namespace vri::core
             return DV(device)->external.GetFenceHandle(
                 DV(device)->real, fence ? FV(fence)->real : nullptr, ht, outHandle);
         }
+        // native-handle interop (OpenXR seam): unwrap the wrapped device / queue before forwarding.
+        // Texture/buffer handles are not wrapped by the validation layer, so they pass through.
+        VriResult VRI_CALL InteropGetDeviceNativeHandles(const VriDevice* device, VriDeviceNativeHandles* out)
+        {
+            return DV(device)->interop.GetDeviceNativeHandles(DV(device)->real, out);
+        }
+        void* VRI_CALL InteropGetQueueNativeHandle(const VriQueue* queue)
+        {
+            const QueueVal* q = reinterpret_cast<const QueueVal*>(queue);
+            return q->dev->interop.GetQueueNativeHandle(q->real);
+        }
+        VriResult VRI_CALL InteropWrapTexture(VriDevice* device, const VriWrapTextureDesc* desc, VriTexture** out)
+        {
+            return DV(device)->interop.WrapTexture(DV(device)->real, desc, out);
+        }
         // query pool: unwrap the device on create; the command buffer on records. The query
         // pool itself is a resource handle (not wrapped), so it passes through.
         VriResult VRI_CALL QueryCreateQueryPool(VriDevice* device, const VriQueryPoolDesc* desc, VriQueryPool** out)
@@ -1067,6 +1083,23 @@ namespace vri::core
             w.CreateMicromap                                = OmmCreateMicromap;
             w.CmdBuildMicromap                              = OmmCmdBuildMicromap;
             *static_cast<VriOpacityMicromapInterface*>(out) = w;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_INTEROP))
+        {
+            if (size != sizeof(VriInteropInterface))
+                return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(
+                VRI_INTERFACE_INTEROP, sizeof(d->interop), &d->interop);
+            if (r != VriResult_Success)
+                return r;
+            // GetDeviceNativeHandles / WrapTexture take a wrapped device, GetQueueNativeHandle a
+            // wrapped queue -> override those; texture/buffer handles pass through (not wrapped).
+            VriInteropInterface w                   = d->interop;
+            w.GetDeviceNativeHandles                = InteropGetDeviceNativeHandles;
+            w.GetQueueNativeHandle                  = InteropGetQueueNativeHandle;
+            w.WrapTexture                           = InteropWrapTexture;
+            *static_cast<VriInteropInterface*>(out) = w;
             return VriResult_Success;
         }
         if (nameIs(VRI_INTERFACE_EXTERNAL))

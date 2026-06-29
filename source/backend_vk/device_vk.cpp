@@ -100,6 +100,11 @@ namespace vri::vk
             m_callback = *desc.callbackInterface;
         m_validation = desc.enableValidation != VRI_FALSE;
 
+        // OpenXR XR_KHR_vulkan_enable2: adopt the instance/device creation hooks (Vulkan only).
+        const auto* hooks = static_cast<const VriVulkanCreateHooks*>(desc.nativeCreateInfo);
+        if (hooks && hooks->api == VriGraphicsAPI_Vulkan)
+            m_vkHooks = hooks;
+
         VriResult r = CreateInstance(desc);
         if (r != VriResult_Success)
             return r;
@@ -179,7 +184,12 @@ namespace vri::vk
         ci.pNext                      = &mvkLayerSettings;
 #endif
 
-        if (vkCreateInstance(&ci, nullptr, &m_instance) != VK_SUCCESS)
+        // With OpenXR enable2 hooks, route creation through xrCreateVulkanInstanceKHR; else create
+        // directly. VRI owns the resulting instance either way (destroyed with vkDestroyInstance).
+        const VkResult instRes =
+            m_vkHooks ? static_cast<VkResult>(m_vkHooks->createInstance(m_vkHooks->userData, &ci, &m_instance)) :
+                        vkCreateInstance(&ci, nullptr, &m_instance);
+        if (instRes != VK_SUCCESS || m_instance == VK_NULL_HANDLE)
         {
             ReportError("vkCreateInstance failed");
             return VriResult_Failure;
@@ -208,6 +218,14 @@ namespace vri::vk
 
     VriResult DeviceVK::PickPhysicalDevice(uint32_t adapterIndex)
     {
+        // OpenXR (enable2) dictates the physical device via xrGetVulkanGraphicsDevice2KHR; the hook
+        // fills it during instance creation. Honor it instead of picking by adapter index.
+        if (m_vkHooks && m_vkHooks->physicalDevice)
+        {
+            m_physicalDevice = static_cast<VkPhysicalDevice>(m_vkHooks->physicalDevice);
+            return VriResult_Success;
+        }
+
         uint32_t count = 0;
         vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
         if (count == 0)
@@ -701,7 +719,12 @@ namespace vri::vk
         ci.enabledExtensionCount   = static_cast<uint32_t>(extensions.size());
         ci.ppEnabledExtensionNames = extensions.data();
 
-        if (vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device) != VK_SUCCESS)
+        // Route device creation through xrCreateVulkanDeviceKHR when OpenXR enable2 hooks are set.
+        const VkResult devRes =
+            m_vkHooks ?
+                static_cast<VkResult>(m_vkHooks->createDevice(m_vkHooks->userData, m_physicalDevice, &ci, &m_device)) :
+                vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device);
+        if (devRes != VK_SUCCESS || m_device == VK_NULL_HANDLE)
         {
             ReportError("vkCreateDevice failed");
             return VriResult_Failure;

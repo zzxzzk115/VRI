@@ -91,6 +91,9 @@ namespace vri::vk
         uint32_t m_queueFamilies[VriQueueType_Count] = {};
         bool     m_validation                        = false;
         uint64_t m_enabledFeatures                   = 0; // granted VriFeatureBits
+        // OpenXR XR_KHR_vulkan_enable2: when set, instance/device creation is routed through these
+        // hooks (which forward to xrCreateVulkan*KHR). Borrowed from the caller's nativeCreateInfo.
+        const VriVulkanCreateHooks* m_vkHooks = nullptr;
         // Always-on-if-available pipeline-state extensions (capabilities, not opt-in features).
         bool            m_hasConservativeRaster   = false;
         bool            m_hasBarycentric          = false;

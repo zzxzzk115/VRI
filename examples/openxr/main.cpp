@@ -3,9 +3,11 @@
 // VRI does NOT depend on OpenXR. This example links the OpenXR loader and bridges the two through
 // VRI_INTERFACE_INTEROP:
 //
-//   1. Create an XrInstance (XR_KHR_vulkan_enable) and pick the HMD system.
-//   2. Ask OpenXR which Vulkan instance/device extensions it requires and pass them straight to
-//      vriCreateDevice -- so VRI builds a Vulkan device OpenXR is happy to render with.
+//   1. Create an XrInstance (XR_KHR_vulkan_enable2) and pick the HMD system.
+//   2. Let VRI build the Vulkan device, but route the actual vkCreate{Instance,Device} calls
+//      through OpenXR (VriDeviceCreationDesc::nativeCreateInfo -> VriVulkanCreateHooks ->
+//      xrCreateVulkan{Instance,Device}KHR), so the runtime adds its required extensions and
+//      interposes creation. enable2 is what runtimes like the Meta XR Simulator require.
 //   3. Read VRI's native Vulkan handles back (GetDeviceNativeHandles) to fill the
 //      XrGraphicsBindingVulkanKHR and create the session.
 //   4. Create ONE stereo swapchain (a 2-layer array), wrap each swapchain VkImage as a VriTexture,
@@ -14,13 +16,6 @@
 //
 // Build: xmake f --vri_build_examples=y --vri_build_openxr=y -y && xmake build example-openxr
 // Run:   needs an OpenXR runtime (a headset, or a runtime simulator). Not run in CI.
-//
-// This uses XR_KHR_vulkan_enable (v1): VRI creates the Vulkan instance/device itself from the
-// extension set OpenXR asks for. That works with runtimes that accept v1 (SteamVR, Monado, ...).
-// The newer XR_KHR_vulkan_enable2 instead has OpenXR create the VkInstance/VkDevice for you, which
-// some runtimes (e.g. the Meta XR Simulator) require; supporting it means VRI adopting an
-// externally-created instance/device through VriDeviceCreationDesc::nativeCreateInfo (declared but
-// not yet implemented in the Vulkan backend) -- a documented follow-up.
 
 #define XR_USE_GRAPHICS_API_VULKAN
 // clang-format off
@@ -38,8 +33,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <string>
 #include <vector>
+
+// vkGetInstanceProcAddr (handed to OpenXR's enable2 create calls) comes from the Vulkan loader.
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace
 {
@@ -58,24 +61,68 @@ namespace
         return false;
     }
 
-    // OpenXR returns required extensions as one space-separated string; split into NUL-terminated names.
-    std::vector<std::string> splitExtensions(const std::string& s)
+    PFN_vkGetInstanceProcAddr loadVulkanGIPA()
     {
-        std::vector<std::string> out;
-        std::string              cur;
-        for (char ch : s)
-        {
-            if (ch == ' ')
-            {
-                if (!cur.empty())
-                    out.push_back(cur), cur.clear();
-            }
-            else
-                cur.push_back(ch);
-        }
-        if (!cur.empty())
-            out.push_back(cur);
-        return out;
+#if defined(_WIN32)
+        HMODULE m = LoadLibraryA("vulkan-1.dll");
+        return m ? reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(m, "vkGetInstanceProcAddr")) : nullptr;
+#else
+        void* m = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+        return m ? reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(m, "vkGetInstanceProcAddr")) : nullptr;
+#endif
+    }
+
+    // Everything the enable2 creation hooks need, passed as the hooks' userData.
+    struct XrVkCtx
+    {
+        XrInstance                        instance;
+        XrSystemId                        systemId;
+        PFN_xrCreateVulkanInstanceKHR     createInstance;
+        PFN_xrGetVulkanGraphicsDevice2KHR getDevice;
+        PFN_xrCreateVulkanDeviceKHR       createDevice;
+        PFN_vkGetInstanceProcAddr         gipa;
+        VriVulkanCreateHooks              hooks; // .physicalDevice is filled by the createInstance hook
+    };
+
+    // VRI builds the VkInstanceCreateInfo and calls this; we forward it to xrCreateVulkanInstanceKHR
+    // (so the runtime adds its required extensions and interposes creation), then resolve the
+    // physical device OpenXR mandates and stash it for VRI's PickPhysicalDevice.
+    int32_t VRI_CALL hookCreateInstance(void* ud, const void* vkCI, void* outInstance)
+    {
+        auto*                         ctx = static_cast<XrVkCtx*>(ud);
+        XrVulkanInstanceCreateInfoKHR ci {XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR};
+        ci.systemId               = ctx->systemId;
+        ci.pfnGetInstanceProcAddr = ctx->gipa;
+        ci.vulkanCreateInfo       = static_cast<const VkInstanceCreateInfo*>(vkCI);
+        VkResult   vkr            = VK_ERROR_INITIALIZATION_FAILED;
+        VkInstance inst           = VK_NULL_HANDLE;
+        if (XR_FAILED(ctx->createInstance(ctx->instance, &ci, &inst, &vkr)) || vkr != VK_SUCCESS)
+            return vkr != VK_SUCCESS ? vkr : VK_ERROR_INITIALIZATION_FAILED;
+        *static_cast<VkInstance*>(outInstance) = inst;
+
+        VkPhysicalDevice                 phys = VK_NULL_HANDLE;
+        XrVulkanGraphicsDeviceGetInfoKHR gi {XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR};
+        gi.systemId       = ctx->systemId;
+        gi.vulkanInstance = inst;
+        ctx->getDevice(ctx->instance, &gi, &phys);
+        ctx->hooks.physicalDevice = phys;
+        return VK_SUCCESS;
+    }
+
+    int32_t VRI_CALL hookCreateDevice(void* ud, void* physicalDevice, const void* vkCI, void* outDevice)
+    {
+        auto*                       ctx = static_cast<XrVkCtx*>(ud);
+        XrVulkanDeviceCreateInfoKHR ci {XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
+        ci.systemId               = ctx->systemId;
+        ci.pfnGetInstanceProcAddr = ctx->gipa;
+        ci.vulkanPhysicalDevice   = static_cast<VkPhysicalDevice>(physicalDevice);
+        ci.vulkanCreateInfo       = static_cast<const VkDeviceCreateInfo*>(vkCI);
+        VkResult vkr              = VK_ERROR_INITIALIZATION_FAILED;
+        VkDevice dev              = VK_NULL_HANDLE;
+        if (XR_FAILED(ctx->createDevice(ctx->instance, &ci, &dev, &vkr)) || vkr != VK_SUCCESS)
+            return vkr != VK_SUCCESS ? vkr : VK_ERROR_INITIALIZATION_FAILED;
+        *static_cast<VkDevice*>(outDevice) = dev;
+        return VK_SUCCESS;
     }
 
     VriFormat toVriFormat(int64_t vk)
@@ -98,10 +145,12 @@ namespace
 
 int main()
 {
-    // ---- 1. OpenXR instance + system ------------------------------------------------------------
+    std::setvbuf(stdout, nullptr, _IONBF, 0); // unbuffered: progress prints survive even if killed
+
+    // ---- 1. OpenXR instance + system (XR_KHR_vulkan_enable2) ------------------------------------
     XrInstance xrInstance = XR_NULL_HANDLE;
     {
-        const char*          exts[] = {XR_KHR_VULKAN_ENABLE_EXTENSION_NAME};
+        const char*          exts[] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME};
         XrInstanceCreateInfo ci {XR_TYPE_INSTANCE_CREATE_INFO};
         std::strcpy(ci.applicationInfo.applicationName, "vri-openxr");
         ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
@@ -122,56 +171,57 @@ int main()
             return 1;
     }
 
-    // KHR Vulkan-enable entry points are extension functions -> resolve them dynamically.
+    // enable2 entry points are extension functions -> resolve them dynamically.
     auto load = [&](const char* name, auto& fp) {
         xrGetInstanceProcAddr(xrInstance, name, reinterpret_cast<PFN_xrVoidFunction*>(&fp));
     };
-    PFN_xrGetVulkanGraphicsRequirementsKHR xrGetVulkanGraphicsRequirementsKHR = nullptr;
-    PFN_xrGetVulkanInstanceExtensionsKHR   xrGetVulkanInstanceExtensionsKHR   = nullptr;
-    PFN_xrGetVulkanDeviceExtensionsKHR     xrGetVulkanDeviceExtensionsKHR     = nullptr;
-    PFN_xrGetVulkanGraphicsDeviceKHR       xrGetVulkanGraphicsDeviceKHR       = nullptr;
-    load("xrGetVulkanGraphicsRequirementsKHR", xrGetVulkanGraphicsRequirementsKHR);
-    load("xrGetVulkanInstanceExtensionsKHR", xrGetVulkanInstanceExtensionsKHR);
-    load("xrGetVulkanDeviceExtensionsKHR", xrGetVulkanDeviceExtensionsKHR);
-    load("xrGetVulkanGraphicsDeviceKHR", xrGetVulkanGraphicsDeviceKHR);
-    if (!xrGetVulkanGraphicsRequirementsKHR || !xrGetVulkanInstanceExtensionsKHR || !xrGetVulkanDeviceExtensionsKHR ||
-        !xrGetVulkanGraphicsDeviceKHR)
+    PFN_xrGetVulkanGraphicsRequirements2KHR xrGetVulkanGraphicsRequirements2KHR = nullptr;
+    PFN_xrCreateVulkanInstanceKHR           xrCreateVulkanInstanceKHR           = nullptr;
+    PFN_xrGetVulkanGraphicsDevice2KHR       xrGetVulkanGraphicsDevice2KHR       = nullptr;
+    PFN_xrCreateVulkanDeviceKHR             xrCreateVulkanDeviceKHR             = nullptr;
+    load("xrGetVulkanGraphicsRequirements2KHR", xrGetVulkanGraphicsRequirements2KHR);
+    load("xrCreateVulkanInstanceKHR", xrCreateVulkanInstanceKHR);
+    load("xrGetVulkanGraphicsDevice2KHR", xrGetVulkanGraphicsDevice2KHR);
+    load("xrCreateVulkanDeviceKHR", xrCreateVulkanDeviceKHR);
+    if (!xrGetVulkanGraphicsRequirements2KHR || !xrCreateVulkanInstanceKHR || !xrGetVulkanGraphicsDevice2KHR ||
+        !xrCreateVulkanDeviceKHR)
     {
-        std::fprintf(stderr, "[openxr] runtime is missing XR_KHR_vulkan_enable entry points\n");
+        std::fprintf(stderr, "[openxr] runtime is missing XR_KHR_vulkan_enable2 entry points\n");
         return 1;
     }
 
-    // Must be called before creating the Vulkan device (spec requirement), even if we only log it.
+    // Required before creating the Vulkan device (spec).
     XrGraphicsRequirementsVulkanKHR vkReq {XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR};
-    xrGetVulkanGraphicsRequirementsKHR(xrInstance, systemId, &vkReq);
+    xrGetVulkanGraphicsRequirements2KHR(xrInstance, systemId, &vkReq);
 
-    // ---- 2. ask OpenXR which Vulkan extensions it needs, hand them to VRI -----------------------
-    auto queryExts = [&](auto fn) {
-        uint32_t n = 0;
-        fn(xrInstance, systemId, 0, &n, nullptr);
-        std::string s(n, '\0');
-        fn(xrInstance, systemId, n, &n, s.data());
-        if (!s.empty() && s.back() == '\0')
-            s.pop_back();
-        return splitExtensions(s);
-    };
-    const std::vector<std::string> instExtStr = queryExts(xrGetVulkanInstanceExtensionsKHR);
-    const std::vector<std::string> devExtStr  = queryExts(xrGetVulkanDeviceExtensionsKHR);
-    std::vector<const char*>       instExts, devExts;
-    for (const std::string& e : instExtStr)
-        instExts.push_back(e.c_str());
-    for (const std::string& e : devExtStr)
-        devExts.push_back(e.c_str());
+    // ---- 2. let VRI build the device, but route vkCreate{Instance,Device} through OpenXR --------
+    // enable2: VRI builds the Vk*CreateInfos (so it knows the extensions/features it enabled) and
+    // calls our hooks, which forward to xrCreateVulkan{Instance,Device}KHR; OpenXR adds the
+    // extensions it requires and interposes creation (the Meta XR Simulator needs this).
+    PFN_vkGetInstanceProcAddr gipa = loadVulkanGIPA();
+    if (!gipa)
+    {
+        std::fprintf(stderr, "[openxr] could not load the Vulkan loader (vulkan-1.dll / libvulkan.so.1)\n");
+        return 1;
+    }
+    XrVkCtx ctx {};
+    ctx.instance             = xrInstance;
+    ctx.systemId             = systemId;
+    ctx.createInstance       = xrCreateVulkanInstanceKHR;
+    ctx.getDevice            = xrGetVulkanGraphicsDevice2KHR;
+    ctx.createDevice         = xrCreateVulkanDeviceKHR;
+    ctx.gipa                 = gipa;
+    ctx.hooks.api            = VriGraphicsAPI_Vulkan;
+    ctx.hooks.createInstance = hookCreateInstance;
+    ctx.hooks.createDevice   = hookCreateDevice;
+    ctx.hooks.userData       = &ctx;
 
     VriDeviceCreationDesc dc {};
-    dc.graphicsAPI                  = VriGraphicsAPI_Vulkan;
-    dc.enableValidation             = VRI_TRUE;
-    dc.bestEffort                   = VRI_TRUE;
-    dc.requiredInstanceExtensions   = instExts.data();
-    dc.requiredInstanceExtensionNum = static_cast<uint32_t>(instExts.size());
-    dc.requiredDeviceExtensions     = devExts.data();
-    dc.requiredDeviceExtensionNum   = static_cast<uint32_t>(devExts.size());
-    VriDevice* dev                  = nullptr;
+    dc.graphicsAPI      = VriGraphicsAPI_Vulkan;
+    dc.enableValidation = VRI_TRUE;
+    dc.bestEffort       = VRI_TRUE;
+    dc.nativeCreateInfo = &ctx.hooks;
+    VriDevice* dev      = nullptr;
     if (!vriOk(vriCreateDevice(&dc, &dev), "vriCreateDevice"))
         return 1;
 
@@ -190,13 +240,6 @@ int main()
     VriDeviceNativeHandles nh {};
     if (!vriOk(interop.GetDeviceNativeHandles(dev, &nh), "GetDeviceNativeHandles"))
         return 1;
-
-    VkPhysicalDevice xrPhysical = VK_NULL_HANDLE;
-    xrGetVulkanGraphicsDeviceKHR(xrInstance, systemId, static_cast<VkInstance>(nh.u.vulkan.instance), &xrPhysical);
-    if (xrPhysical != static_cast<VkPhysicalDevice>(nh.u.vulkan.physicalDevice))
-        std::fprintf(stderr,
-                     "[openxr] warning: VRI picked a different physical device than OpenXR wants; "
-                     "pass a matching adapterIndex on a multi-GPU machine\n");
 
     XrGraphicsBindingVulkanKHR binding {XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR};
     binding.instance         = static_cast<VkInstance>(nh.u.vulkan.instance);
@@ -365,6 +408,7 @@ int main()
             if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED)
             {
                 const auto* ss = reinterpret_cast<const XrEventDataSessionStateChanged*>(&ev);
+                std::printf("[vri-openxr] session state -> %d\n", int(ss->state));
                 if (ss->state == XR_SESSION_STATE_READY)
                 {
                     XrSessionBeginInfo bi {XR_TYPE_SESSION_BEGIN_INFO};
