@@ -23,9 +23,13 @@
 // not yet implemented in the Vulkan backend) -- a documented follow-up.
 
 #define XR_USE_GRAPHICS_API_VULKAN
+// clang-format off
+// Order matters: vulkan.h must precede openxr_platform.h, which uses VkInstance/VkImage/... in the
+// OpenXR<->Vulkan structs. (We need the Vulkan types only for those structs; no Vulkan calls.)
+#include <vulkan/vulkan.h>
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-#include <vulkan/vulkan.h> // only for the Vulkan types in the OpenXR<->Vulkan structs; no vk calls
+// clang-format on
 
 #include <vri/vri.h>
 
