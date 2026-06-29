@@ -185,5 +185,10 @@ TEST_CASE("Query pool: OpenGL timestamps advance across GPU work")
     RunTimestamp(VriGraphicsAPI_OpenGL, "OpenGL", /*strictNonzero*/ false);
 }
 
+// Metal samples the GPU clock at encoder stage boundaries (CmdWriteTimestamp opens an empty blit
+// encoder) and resolves the counter sample buffer CPU-side in the submit completion handler.
+TEST_CASE("Query pool: Metal timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_Metal, "Metal"); }
+
 TEST_CASE("Calibrated timestamps: Vulkan pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_Vulkan, "Vulkan"); }
 TEST_CASE("Calibrated timestamps: D3D12 pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_D3D12, "D3D12"); }
+TEST_CASE("Calibrated timestamps: Metal pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_Metal, "Metal"); }

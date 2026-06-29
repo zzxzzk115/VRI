@@ -206,3 +206,5 @@ namespace
 TEST_CASE("Occlusion query: Vulkan counts samples passed") { RunOcclusion(VriGraphicsAPI_Vulkan, "Vulkan"); }
 TEST_CASE("Occlusion query: D3D12 counts samples passed") { RunOcclusion(VriGraphicsAPI_D3D12, "D3D12"); }
 TEST_CASE("Occlusion query: OpenGL counts samples passed") { RunOcclusion(VriGraphicsAPI_OpenGL, "OpenGL"); }
+// Metal: native visibility-result buffer + MTLVisibilityResultModeCounting (SPIR-V via SPIRV-Cross).
+TEST_CASE("Occlusion query: Metal counts samples passed") { RunOcclusion(VriGraphicsAPI_Metal, "Metal"); }

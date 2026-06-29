@@ -139,6 +139,7 @@ TEST_CASE("Pipeline cache: serialize + reseed round-trip")
     const Shaders spv {g_triangleSpv, sizeof(g_triangleSpv), g_triangleSpv, sizeof(g_triangleSpv)};
     Check(VriGraphicsAPI_Vulkan, "Vulkan", spv);
     Check(VriGraphicsAPI_OpenGL, "OpenGL", spv);
+    Check(VriGraphicsAPI_Metal, "Metal", spv); // MTLBinaryArchive (blob bridged through a temp file)
 #if defined(_WIN32)
     const Shaders dxbc {g_triangleDxbcVS, sizeof(g_triangleDxbcVS), g_triangleDxbcPS, sizeof(g_triangleDxbcPS)};
     Check(VriGraphicsAPI_D3D12, "D3D12", dxbc);

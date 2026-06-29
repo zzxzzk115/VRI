@@ -20,7 +20,9 @@
 
 #include <spirv_cross/spirv_msl.hpp>
 
+#include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace vri::mtl
@@ -43,6 +45,7 @@ namespace vri::mtl
         inline DescriptorPoolMTL*   DPool(VriDescriptorPool* h)  { return reinterpret_cast<DescriptorPoolMTL*>(h); }
         inline DescriptorSetMTL*    DSet(VriDescriptorSet* h)    { return reinterpret_cast<DescriptorSetMTL*>(h); }
         inline MemoryMTL*           Mem(VriMemory* h)            { return reinterpret_cast<MemoryMTL*>(h); }
+        inline PipelineCacheMTL*    PCache(VriPipelineCache* h)  { return reinterpret_cast<PipelineCacheMTL*>(h); }
 
         inline bool IsBufferType(VriDescriptorType t)
         {
@@ -92,8 +95,12 @@ namespace vri::mtl
             bool        ok = false;
         };
 
+        // view_mask_buffer_index for SPIRV-Cross multiview: a buffer at this slot carries the view
+        // mask so the shader derives gl_ViewIndex from [[amplification_id]] (see CmdSetPipeline).
+        static constexpr uint32_t kMtlViewMaskBufferIndex = 24;
+
         MslResult SpirvToMsl(const DeviceMTL* d, const PipelineLayoutMTL* layout, const VriShaderDesc& sh,
-                             spv::ExecutionModel model)
+                             spv::ExecutionModel model, uint32_t viewMask = 0)
         {
             MslResult r;
             const uint32_t* words = static_cast<const uint32_t*>(sh.bytecode);
@@ -108,6 +115,12 @@ namespace vri::mtl
                 // backward-compatible for the plain graphics/compute shaders.
                 o.set_msl_version(3, 0);
                 o.argument_buffers = false; // MVP binds resources directly to the argument tables
+                if (viewMask) // multiview (single-pass stereo): gl_ViewIndex via vertex amplification
+                {
+                    o.multiview                  = true;
+                    o.multiview_layered_rendering = true; // write [[render_target_array_index]] per view
+                    o.view_mask_buffer_index      = kMtlViewMaskBufferIndex;
+                }
                 comp.set_msl_options(o);
                 comp.set_entry_point(entry, model);
 
@@ -287,6 +300,10 @@ namespace vri::mtl
             c->renderEnc = nil; c->computeEnc = nil; c->blitEnc = nil;
             c->boundLayout = nullptr; c->boundPipeline = nullptr;
             c->indexBuffer = nil; c->indexOffset = 0; c->indexType = MTLIndexTypeUInt16;
+            // Query state resets each begin; the visibility buffer (occlusion) is reused across resets.
+            c->visNextSlot = 0;
+            c->occMarks.clear();
+            c->tsResolves.clear();
             return c->cmd ? VriResult_Success : VriResult_Failure;
         }
 
@@ -626,6 +643,10 @@ namespace vri::mtl
             DeviceMTL* d = Dev(device);
             const PipelineLayoutMTL* pl = desc->pipelineLayout ? PLc(desc->pipelineLayout) : nullptr;
 
+            // Multiview (single-pass stereo): viewMask drives vertex amplification + layered output.
+            const uint32_t viewMask  = desc->outputMerger.viewMask;
+            const uint32_t viewCount = viewMask ? static_cast<uint32_t>(__builtin_popcount(viewMask)) : 0;
+
             id<MTLFunction> vsFn = nil, fsFn = nil, objFn = nil, meshFn = nil;
             MTLSize objTG = MTLSizeMake(1, 1, 1), meshTG = MTLSizeMake(1, 1, 1);
             bool hasMesh = false;
@@ -633,9 +654,9 @@ namespace vri::mtl
             {
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Vertex)
-                    vsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelVertex));
+                    vsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelVertex, viewMask));
                 else if (s.stage == VriShaderStage_Fragment)
-                    fsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelFragment));
+                    fsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelFragment, viewMask));
                 else if (s.stage == VriShaderStage_Mesh)
                     { MslResult m = SpirvToMsl(d, pl, s, spv::ExecutionModelMeshEXT); meshFn = MakeFunction(d, m); meshTG = m.localSize; hasMesh = true; }
                 else if (s.stage == VriShaderStage_Task)
@@ -724,6 +745,17 @@ namespace vri::mtl
                 setupColor(pd.colorAttachments);
                 if (hasD) pd.depthAttachmentPixelFormat = depthFmt;
                 if (hasS) pd.stencilAttachmentPixelFormat = depthFmt;
+                // Pipeline cache (ext/vri_ext_pipeline_cache.h): add this pipeline's functions to the
+                // MTLBinaryArchive (populate, best-effort) and bind the archive so creation reuses any
+                // cached binary - the basis of fast warm startup across runs.
+                if (desc->pipelineCache)
+                {
+                    PipelineCacheMTL* cache = PCache(desc->pipelineCache);
+                    NSError* ae = nil;
+                    [cache->archive addRenderPipelineFunctionsWithDescriptor:pd error:&ae];
+                    cache->dirty      = true;
+                    pd.binaryArchives = @[ cache->archive ];
+                }
                 rps = [d->Device() newRenderPipelineStateWithDescriptor:pd error:&err];
                 [pd release];
             }
@@ -788,6 +820,8 @@ namespace vri::mtl
             p->isMesh = hasMesh;
             p->objectTG = objTG;
             p->meshTG = meshTG;
+            p->viewCount = viewCount;
+            p->viewBase = viewMask ? static_cast<uint32_t>(__builtin_ctz(viewMask)) : 0;
             *out = ToHandle(p);
             return VriResult_Success;
         }
@@ -801,7 +835,25 @@ namespace vri::mtl
             if (!fn) return VriResult_Failure;
 
             NSError* err = nil;
-            id<MTLComputePipelineState> cps = [d->Device() newComputePipelineStateWithFunction:fn error:&err];
+            id<MTLComputePipelineState> cps = nil;
+            if (desc->pipelineCache)
+            {
+                // Populate + reuse the MTLBinaryArchive (see CreateGraphicsPipeline).
+                MTLComputePipelineDescriptor* cd = [[MTLComputePipelineDescriptor alloc] init];
+                cd.computeFunction      = fn;
+                PipelineCacheMTL* cache = PCache(desc->pipelineCache);
+                NSError* ae = nil;
+                [cache->archive addComputePipelineFunctionsWithDescriptor:cd error:&ae];
+                cache->dirty      = true;
+                cd.binaryArchives = @[ cache->archive ];
+                cps = [d->Device() newComputePipelineStateWithDescriptor:cd
+                                                                 options:MTLPipelineOptionNone
+                                                              reflection:nil
+                                                                   error:&err];
+                [cd release];
+            }
+            else
+                cps = [d->Device() newComputePipelineStateWithFunction:fn error:&err];
             [fn release];
             if (!cps)
             {
@@ -973,6 +1025,19 @@ namespace vri::mtl
                 }
             }
 
+            // Multiview (single-pass stereo): a non-zero viewMask renders to that many array slices
+            // in one pass; the shader writes [[render_target_array_index]] per view (see CmdDraw).
+            if (a->viewMask)
+                rp.renderTargetArrayLength = static_cast<NSUInteger>(__builtin_popcount(a->viewMask));
+
+            // Bind the per-command-buffer visibility-result buffer so occlusion queries
+            // (CmdBeginQuery/CmdEndQuery) can write sample counts into a fresh slot. Lazily created,
+            // reused across BeginCommandBuffer resets; capacity caps occlusion queries per buffer.
+            if (!c->visBuffer)
+                c->visBuffer = [c->device->Device() newBufferWithLength:kMtlMaxOcclusionSlots * sizeof(uint64_t)
+                                                               options:MTLResourceStorageModeShared];
+            rp.visibilityResultBuffer = c->visBuffer;
+
             c->renderEnc = [[c->cmd renderCommandEncoderWithDescriptor:rp] retain];
         }
 
@@ -1023,6 +1088,14 @@ namespace vri::mtl
             [c->renderEnc setDepthClipMode:p->depthClampEnable ? MTLDepthClipModeClamp : MTLDepthClipModeClip];
             if (p->depthStencil) [c->renderEnc setDepthStencilState:p->depthStencil];
             if (p->stencilTest)  [c->renderEnc setStencilReferenceValue:p->stencilReference];
+            // Multiview: SPIRV-Cross reads spvViewMask[{base,count}] at a fixed buffer slot to derive
+            // gl_ViewIndex from the (amplified-by-instancing) instance id; bind it to both stages.
+            if (p->viewCount)
+            {
+                const uint32_t vm[2] = {p->viewBase, p->viewCount};
+                [c->renderEnc setVertexBytes:vm length:sizeof(vm) atIndex:kMtlViewMaskBufferIndex];
+                [c->renderEnc setFragmentBytes:vm length:sizeof(vm) atIndex:kMtlViewMaskBufferIndex];
+            }
         }
 
         void BindOne(CommandBufferMTL* c, const DescriptorSetMTL::Bound& b)
@@ -1121,6 +1194,15 @@ namespace vri::mtl
             c->indexType = type == VriIndexType_UInt16 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32;
         }
 
+        // Multiview renders N views by amplifying the instance count by N (SPIRV-Cross splits the
+        // instance id back into real-instance + view, see CmdSetPipeline); 1x for non-multiview.
+        uint32_t MultiviewInstances(const CommandBufferMTL* c, uint32_t instanceNum)
+        {
+            const uint32_t n = instanceNum ? instanceNum : 1;
+            const uint32_t views = c->boundPipeline ? c->boundPipeline->viewCount : 0;
+            return views ? n * views : n;
+        }
+
         void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
         {
             CommandBufferMTL* c = CB(cmd);
@@ -1128,7 +1210,7 @@ namespace vri::mtl
             [c->renderEnc drawPrimitives:c->boundPipeline->primType
                              vertexStart:d->baseVertex
                              vertexCount:d->vertexNum
-                           instanceCount:d->instanceNum ? d->instanceNum : 1
+                           instanceCount:MultiviewInstances(c, d->instanceNum)
                             baseInstance:d->baseInstance];
         }
 
@@ -1142,7 +1224,7 @@ namespace vri::mtl
                                       indexType:c->indexType
                                     indexBuffer:c->indexBuffer
                               indexBufferOffset:c->indexOffset + (uint64_t)d->baseIndex * idxSize
-                                  instanceCount:d->instanceNum ? d->instanceNum : 1
+                                  instanceCount:MultiviewInstances(c, d->instanceNum)
                                      baseVertex:d->vertexOffset
                                    baseInstance:d->baseInstance];
         }
@@ -1316,14 +1398,55 @@ namespace vri::mtl
                     [wb encodeWaitForEvent:Fen(submit->waitFences[i].fence)->event value:submit->waitFences[i].value];
                 [wb commit];
             }
+            // Gather CPU-side timestamp resolves from every submitted command buffer (Apple Silicon
+            // resolves counter sample buffers only on the host). When present, the last buffer's
+            // completion handler runs them and then CPU-signals the fences, so a host Wait can't
+            // observe the signal before the resolved timestamps land in the destination buffer.
+            std::vector<CommandBufferMTL::TimestampResolve> resolves;
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+            {
+                CommandBufferMTL* c = CB(submit->commandBuffers[i]);
+                for (CommandBufferMTL::TimestampResolve& r : c->tsResolves) { [r.sb retain]; resolves.push_back(r); }
+                c->tsResolves.clear();
+            }
+            std::vector<std::pair<id<MTLSharedEvent>, uint64_t>> deferredSignals;
+            if (!resolves.empty())
+                for (uint32_t f = 0; f < submit->signalFenceNum; ++f)
+                {
+                    id<MTLSharedEvent> ev = Fen(submit->signalFences[f].fence)->event;
+                    [ev retain];
+                    deferredSignals.push_back({ev, submit->signalFences[f].value});
+                }
+
             for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
             {
                 CommandBufferMTL* c = CB(submit->commandBuffers[i]);
                 if (!c->cmd) continue;
-                // Signal all fences on the last command buffer (after its GPU work completes).
-                if (i + 1 == submit->commandBufferNum)
+                const bool last = (i + 1 == submit->commandBufferNum);
+                if (last && !resolves.empty())
+                {
+                    // Resolve timestamps, then CPU-signal the fences (GPU waiters release too).
+                    [c->cmd addCompletedHandler:^(id<MTLCommandBuffer>) {
+                        for (const CommandBufferMTL::TimestampResolve& r : resolves)
+                        {
+                            NSData* data = [r.sb resolveCounterRange:NSMakeRange(r.srcIndex, r.num)];
+                            if (data && [data length] >= r.num * sizeof(uint64_t))
+                                std::memcpy(r.dst, [data bytes], r.num * sizeof(uint64_t));
+                            [r.sb release];
+                        }
+                        for (const std::pair<id<MTLSharedEvent>, uint64_t>& s : deferredSignals)
+                        {
+                            s.first.signaledValue = s.second;
+                            [s.first release];
+                        }
+                    }];
+                }
+                else if (last)
+                {
+                    // Signal all fences on the last command buffer (after its GPU work completes).
                     for (uint32_t f = 0; f < submit->signalFenceNum; ++f)
                         [c->cmd encodeSignalEvent:Fen(submit->signalFences[f].fence)->event value:submit->signalFences[f].value];
+                }
                 [c->cmd commit];
                 [c->cmd release];
                 c->cmd = nil;

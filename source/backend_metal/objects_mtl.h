@@ -15,6 +15,7 @@
 namespace vri::mtl
 {
     class DeviceMTL;
+    struct QueryPoolMTL;
 
     // Metal exposes 31 buffer argument slots per stage. Descriptor buffers + push
     // constants grow up from 0; vertex stream buffers grow down from 30 so the two
@@ -22,6 +23,10 @@ namespace vri::mtl
     // CreateGraphicsPipeline / CmdSetVertexBuffers).
     static constexpr uint32_t kMaxMtlBuffers = 31;
     inline uint32_t VertexBufferIndex(uint32_t streamSlot) { return kMaxMtlBuffers - 1 - streamSlot; }
+
+    // Max occlusion queries per command buffer (one visibility-result slot each). The buffer is
+    // bound at every render pass, so this caps total occlusion Begin/End pairs between submits.
+    static constexpr uint32_t kMtlMaxOcclusionSlots = 4096;
 
     struct QueueMTL
     {
@@ -49,6 +54,20 @@ namespace vri::mtl
         id<MTLBuffer>               indexBuffer;
         uint64_t                    indexOffset;
         MTLIndexType                indexType;
+
+        // ---- query state (ext/vri_ext_query.h) ----
+        // Occlusion: a single per-command-buffer visibility-result buffer is bound on every render
+        // pass; each CmdBeginQuery grabs a fresh uint64 slot (visNextSlot) and CmdCopyQueries blits
+        // the recorded slots into the destination (all GPU-side).
+        id<MTLBuffer>               visBuffer;   // lazily created; reused across Begin..Submit resets
+        uint32_t                    visNextSlot; // next free slot index, reset each BeginCommandBuffer
+        id<MTLBuffer>               tsScratch;   // tiny buffer a timestamp blit encoder fills (must be non-empty)
+        struct OcclusionMark { QueryPoolMTL* pool; uint32_t index; uint32_t visSlot; };
+        std::vector<OcclusionMark>  occMarks;
+        // Timestamp: Apple Silicon only resolves counter sample buffers CPU-side, so CmdCopyQueries
+        // records the resolve and QueueSubmit executes it in the command buffer's completion handler.
+        struct TimestampResolve { id<MTLCounterSampleBuffer> sb; uint32_t srcIndex; uint32_t num; void* dst; };
+        std::vector<TimestampResolve> tsResolves;
     };
 
     struct BufferMTL
@@ -162,6 +181,10 @@ namespace vri::mtl
         bool                        isMesh;
         MTLSize                     objectTG;  // task/object stage local size (1,1,1 if mesh-only)
         MTLSize                     meshTG;    // mesh stage local size
+        // Multiview (single-pass stereo): 0 = off. viewCount = #views, viewBase = first view index;
+        // bound as the spvViewMask buffer (see CmdSetPipeline) and used to scale the instance count.
+        uint32_t                    viewCount;
+        uint32_t                    viewBase;
     };
 
     struct FenceMTL
@@ -178,6 +201,25 @@ namespace vri::mtl
         VriMemoryLocation location;
     };
 
+    struct QueryPoolMTL
+    {
+        DeviceMTL*                 device;
+        VriQueryType               type;
+        uint32_t                   count;
+        id<MTLCounterSampleBuffer> sampleBuf; // Timestamp: GPU clock samples (nil otherwise)
+        id<MTLBuffer>              results;    // Occlusion: count * uint64 visibility results (nil otherwise)
+    };
+
+    struct PipelineCacheMTL
+    {
+        DeviceMTL*            device;
+        id<MTLBinaryArchive>  archive; // pipeline binaries; populated at pipeline creation, serialized to a blob
+        // serializeToURL: is reliable only on the first call per archive object (a Metal quirk), so the
+        // serialized bytes are cached and only refreshed when a new pipeline marks the archive dirty.
+        std::vector<uint8_t>  blob;
+        bool                  dirty;
+    };
+
     inline VriQueue*            ToHandle(QueueMTL* q)            { return reinterpret_cast<VriQueue*>(q); }
     inline VriCommandAllocator* ToHandle(CommandAllocatorMTL* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
     inline VriCommandBuffer*    ToHandle(CommandBufferMTL* c)    { return reinterpret_cast<VriCommandBuffer*>(c); }
@@ -190,4 +232,6 @@ namespace vri::mtl
     inline VriDescriptorPool*   ToHandle(DescriptorPoolMTL* p)   { return reinterpret_cast<VriDescriptorPool*>(p); }
     inline VriDescriptorSet*    ToHandle(DescriptorSetMTL* s)    { return reinterpret_cast<VriDescriptorSet*>(s); }
     inline VriMemory*           ToHandle(MemoryMTL* m)           { return reinterpret_cast<VriMemory*>(m); }
+    inline VriQueryPool*        ToHandle(QueryPoolMTL* q)        { return reinterpret_cast<VriQueryPool*>(q); }
+    inline VriPipelineCache*    ToHandle(PipelineCacheMTL* p)    { return reinterpret_cast<VriPipelineCache*>(p); }
 } // namespace vri::mtl

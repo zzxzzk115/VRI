@@ -1,8 +1,8 @@
 // Multiview (single-pass layered rendering): render one fullscreen triangle to a 2-layer array
 // target in a single pass with viewMask = 0b11. The shader colors each view by SV_ViewID, so
 // layer 0 comes out red and layer 1 green -- proving the viewMask drove per-layer rendering (the
-// basis of single-pass VR stereo). Gated on VriDeviceDesc::hasMultiview: Vulkan + desktop-GL/GLES
-// (GL_OVR_multiview2); D3D12 ViewInstancing is a follow-up, so D3D12 self-skips.
+// basis of single-pass VR stereo). Gated on VriDeviceDesc::hasMultiview: Vulkan + Metal (instanced
+// amplification) + desktop-GL/GLES (GL_OVR_multiview2); D3D12 ViewInstancing is a follow-up, so it self-skips.
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -224,4 +224,5 @@ TEST_CASE("Multiview: single-pass stereo colors each view by SV_ViewID")
     RunMultiview(VriGraphicsAPI_Vulkan, "Vulkan");
     RunMultiview(VriGraphicsAPI_D3D12, "D3D12");
     RunMultiview(VriGraphicsAPI_OpenGL, "OpenGL");
+    RunMultiview(VriGraphicsAPI_Metal, "Metal"); // vertex amplification
 }

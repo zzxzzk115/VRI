@@ -28,6 +28,7 @@ namespace vri::mtl
     private:
         void FillDeviceDesc();
         void FillRegistry();
+        bool HasTimestampCounterSet() const;
 
         id<MTLDevice>        m_device = nil;
         id<MTLCommandQueue>  m_queue = nil;

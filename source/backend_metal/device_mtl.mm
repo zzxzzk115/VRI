@@ -5,8 +5,10 @@
 #include "swapchain_mtl.h"
 #include "rt_mtl.h"
 #include "meshshader_mtl.h"
+#include "query_mtl.h"
+#include "pipeline_cache_mtl.h"
 
-#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer (returns Unsupported: no MSL shader yet)
+#include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer (SPIR-V transpiled to MSL)
 
 #include <cstdio>
 #include <cstring>
@@ -111,12 +113,38 @@ namespace vri::mtl
         m_desc.hasRayQuery = [m_device supportsRaytracing] ? VRI_TRUE : VRI_FALSE;
         // Mesh/object shaders require the Metal 3 family.
         m_desc.hasMeshShader = [m_device supportsFamily:MTLGPUFamilyMetal3] ? VRI_TRUE : VRI_FALSE;
+
+        // GPU queries: timestamps need the standard counter set + stage-boundary sampling; occlusion
+        // (visibility result buffers) is always available. Apple GPUs expose no statistic counter set.
+        m_desc.hasTimestampQueries = ([m_device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary] &&
+                                      HasTimestampCounterSet()) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasPipelineStatistics      = VRI_FALSE;
+        m_desc.hasCalibratedTimestamps    = VRI_TRUE; // [MTLDevice sampleTimestamps:gpuTimestamp:]
+
+        // Multiview (single-pass stereo): SPIRV-Cross emits the instanced form (instances *= viewCount,
+        // each view writes its array slice via [[render_target_array_index]]), which every Apple GPU
+        // supports. maxViewCount is the viewMask bit width (the array-layer count is the real ceiling).
+        m_desc.hasMultiview = [m_device supportsFamily:MTLGPUFamilyApple1] ? VRI_TRUE : VRI_FALSE;
+        m_desc.maxViewCount = m_desc.hasMultiview ? 32 : 0;
+        // Apple Silicon GPU timestamps are already in nanoseconds (same domain as sampleTimestamps).
+        m_desc.timestampPeriodNanoseconds = m_desc.hasTimestampQueries ? 1.0f : 0.0f;
+    }
+
+    bool DeviceMTL::HasTimestampCounterSet() const
+    {
+        for (id<MTLCounterSet> cs in [m_device counterSets])
+            if ([[cs name] isEqualToString:MTLCommonCounterSetTimestamp])
+                return true;
+        return false;
     }
 
     void DeviceMTL::FillRegistry()
     {
         m_registry.Register(VRI_INTERFACE_CORE, GetCoreInterfaceMTL(), sizeof(VriCoreInterface));
         m_registry.Register(VRI_INTERFACE_SWAPCHAIN, GetSwapChainInterfaceMTL(), sizeof(VriSwapChainInterface));
+        m_registry.Register(VRI_INTERFACE_QUERY, GetQueryInterfaceMTL(), sizeof(VriQueryInterface));
+        m_registry.Register(
+            VRI_INTERFACE_PIPELINE_CACHE, GetPipelineCacheInterfaceMTL(), sizeof(VriPipelineCacheInterface));
         m_registry.Register(VRI_INTERFACE_IMGUI, core::GetImguiInterface(), sizeof(VriImguiInterface));
         if (m_desc.hasRayQuery)
             m_registry.Register(VRI_INTERFACE_RAYTRACING, GetRayTracingInterfaceMTL(), sizeof(VriRayTracingInterface));
