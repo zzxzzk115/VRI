@@ -25,7 +25,10 @@ local _vri_examples = {
     {name = "profiler", desktop_only = true},
     -- CUDA <-> VRI external-memory interop. Desktop-only, and opt-in via
     -- --vri_build_cuda_interop=y because it needs the CUDA Toolkit (nvcc + cudart).
-    {name = "cuda_interop", desktop_only = true, requires_cuda = true}
+    {name = "cuda_interop", desktop_only = true, requires_cuda = true},
+    -- OpenXR single-pass-stereo demo. Desktop-only, opt-in via --vri_build_openxr=y: it links
+    -- the OpenXR loader and needs an OpenXR runtime (HMD / simulator) to actually run.
+    {name = "openxr", desktop_only = true, requires_openxr = true}
 }
 
 local function _vri_example_enabled(example)
@@ -33,6 +36,9 @@ local function _vri_example_enabled(example)
         return false
     end
     if example.requires_cuda and not has_config("vri_build_cuda_interop") then
+        return false
+    end
+    if example.requires_openxr and not has_config("vri_build_openxr") then
         return false
     end
     return true

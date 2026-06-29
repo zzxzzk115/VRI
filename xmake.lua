@@ -43,6 +43,12 @@ option("vri_build_cuda_interop") -- build the CUDA interop example? (needs the C
     set_description("Build example-cuda-interop (requires the CUDA Toolkit; off by default)")
 option_end()
 
+option("vri_build_openxr") -- build the OpenXR stereo example? (needs the OpenXR loader + an XR runtime to run)
+    set_default(false)
+    set_showmenu(true)
+    set_description("Build example-openxr (links openxr-loader; needs an OpenXR runtime to run; off by default)")
+option_end()
+
 -- backend options (MVP: Vulkan on by default; others enabled as they come online).
 --
 -- Platform-dependent defaults are set in on_check, NOT set_default: an option's set_default is

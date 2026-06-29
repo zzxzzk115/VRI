@@ -96,6 +96,14 @@ Notes:
   Implemented on **Vulkan** (`VK_KHR_external_memory/semaphore`) and **Direct3D 12** (shared
   committed resources + shared fences); the opt-in `example-cuda-interop` runs on both
   (`VRI_API=vulkan|d3d12`).
+- **Native-handle interop** (`ext/vri_ext_interop.h`, `VRI_INTERFACE_INTEROP`) is the **OpenXR**
+  seam: it hands out VRI's native objects (`GetDeviceNativeHandles` → `VkInstance`/`VkPhysicalDevice`/
+  `VkDevice`/queue) to build an `XrGraphicsBindingVulkanKHR`, and wraps externally-created textures
+  (`WrapTexture`, e.g. OpenXR swapchain `VkImage`s) back into `VriTexture`. VRI does **not** depend on
+  OpenXR — the opt-in `example-openxr` (`--vri_build_openxr=y`) links the loader, takes the Vulkan
+  extensions OpenXR requires straight into `vriCreateDevice`, and renders both eyes in one multiview
+  pass. It uses `XR_KHR_vulkan_enable` (v1); `vulkan_enable2` (instance/device adopted from OpenXR via
+  `nativeCreateInfo`) is a follow-up.
 - **GPU timestamp queries** (`ext/vri_ext_query.h`) record the GPU clock at points in a command
   buffer and resolve the ticks into a buffer; scale by `VriDeviceDesc::timestampPeriodNanoseconds`
   for nanoseconds. The basis of a GPU profiler — see `example-profiler`. On **Vulkan**, **Direct3D
