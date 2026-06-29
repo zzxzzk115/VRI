@@ -243,6 +243,7 @@ namespace vriex
         VriImguiDrawData                 guiData {};
         ImDrawData*                      guiDraw  = nullptr;
         bool                             guiReady = false; // ImGui renderer + this frame's draw data
+        bool                             wantViewports = false; // multi-viewport (detached OS windows)
 #if !defined(__EMSCRIPTEN__)
         SDL_Window* window = nullptr;
 #endif
@@ -479,6 +480,19 @@ namespace vriex
             ImGui::CreateContext();
             ImGui::StyleColorsDark();
             ImGui::GetIO().IniFilename = nullptr; // don't write imgui.ini next to the examples
+            ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // dockable panels
+            // Multi-viewport (detached OS windows) is opt-in (VRI_IMGUI_VIEWPORTS=1): it needs the
+            // per-viewport swapchain + platform-callback wiring below and a real display to verify.
+#if !defined(__EMSCRIPTEN__)
+            // Multi-viewport (detached OS windows) is on by default on desktop; opt out with
+            // VRI_IMGUI_VIEWPORTS=0. Never in headless capture (VRI_MAX_FRAMES / VRI_CAPTURE renders
+            // one offscreen target + a pixel self-check, so detached windows would break it).
+            const char* vpEnv   = std::getenv("VRI_IMGUI_VIEWPORTS");
+            const bool  headless = std::getenv("VRI_MAX_FRAMES") || std::getenv("VRI_CAPTURE");
+            wantViewports        = !headless && !(vpEnv && vpEnv[0] == '0');
+            if (wantViewports)
+                ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+#endif
 #if defined(__EMSCRIPTEN__)
             InstallWebInput();
 #else
@@ -501,20 +515,31 @@ namespace vriex
             if (guiApi.CreateImgui(dev, &gd, &gui) != VriResult_Success)
                 Fail("CreateImgui failed");
             ImGui::GetIO().Fonts->SetTexID(reinterpret_cast<ImTextureID>(guiApi.GetImguiFontView(gui)));
+#if !defined(__EMSCRIPTEN__)
+            if (wantViewports)
+                RegisterViewportRenderer();
+#endif
         }
 
-        // Flatten this frame's ImDrawData (per-list vertex/index buffers + list-relative offsets)
-        // into the neutral VriImguiDrawData the renderer consumes (one buffer each, global offsets).
-        void BuildGuiDrawData(ImDrawData* dd)
+        // Flatten an ImDrawData (per-list vertex/index buffers + list-relative offsets) into the
+        // neutral VriImguiDrawData the renderer consumes (one buffer each, global offsets). Static so
+        // both the main window and each multi-viewport window can use it with their own buffers/size.
+        static void FlattenDrawData(ImDrawData*                       dd,
+                                    std::vector<VriImguiVertex>&      verts,
+                                    std::vector<uint16_t>&            indices,
+                                    std::vector<VriImguiDrawCommand>& cmds,
+                                    VriImguiDrawData&                 out,
+                                    uint32_t                          fbW,
+                                    uint32_t                          fbH)
         {
-            guiVerts.clear();
-            guiIndices.clear();
-            guiCmds.clear();
-            guiData = {};
+            verts.clear();
+            indices.clear();
+            cmds.clear();
+            out = {};
             if (!dd || dd->TotalVtxCount == 0)
                 return;
-            guiVerts.reserve(size_t(dd->TotalVtxCount));
-            guiIndices.reserve(size_t(dd->TotalIdxCount));
+            verts.reserve(size_t(dd->TotalVtxCount));
+            indices.reserve(size_t(dd->TotalIdxCount));
             uint32_t vtxBase = 0, idxBase = 0;
             for (int n = 0; n < dd->CmdListsCount; ++n)
             {
@@ -522,10 +547,10 @@ namespace vriex
                 for (int v = 0; v < cl->VtxBuffer.Size; ++v)
                 {
                     const ImDrawVert& s = cl->VtxBuffer.Data[v];
-                    guiVerts.push_back(VriImguiVertex {{s.pos.x, s.pos.y}, {s.uv.x, s.uv.y}, s.col});
+                    verts.push_back(VriImguiVertex {{s.pos.x, s.pos.y}, {s.uv.x, s.uv.y}, s.col});
                 }
                 for (int i = 0; i < cl->IdxBuffer.Size; ++i)
-                    guiIndices.push_back(static_cast<uint16_t>(cl->IdxBuffer.Data[i]));
+                    indices.push_back(static_cast<uint16_t>(cl->IdxBuffer.Data[i]));
                 for (int i = 0; i < cl->CmdBuffer.Size; ++i)
                 {
                     const ImDrawCmd& dc = cl->CmdBuffer[i];
@@ -542,25 +567,222 @@ namespace vriex
                     o.indexCount   = dc.ElemCount;
                     o.indexOffset  = idxBase + dc.IdxOffset;          // into the concatenated index buffer
                     o.vertexOffset = int32_t(vtxBase + dc.VtxOffset); // index values stay list-relative
-                    guiCmds.push_back(o);
+                    // The texture this command samples (we stored each VRI view as ImGui's texture id);
+                    // routes the font and any user image to the renderer's per-command textureView.
+                    o.textureView = reinterpret_cast<VriDescriptor*>(dc.GetTexID());
+                    cmds.push_back(o);
                 }
                 vtxBase += uint32_t(cl->VtxBuffer.Size);
                 idxBase += uint32_t(cl->IdxBuffer.Size);
             }
-            guiData.vertices          = guiVerts.data();
-            guiData.vertexCount       = uint32_t(guiVerts.size());
-            guiData.indices           = guiIndices.data();
-            guiData.indexCount        = uint32_t(guiIndices.size());
-            guiData.indexSize         = sizeof(uint16_t);
-            guiData.commands          = guiCmds.data();
-            guiData.commandCount      = uint32_t(guiCmds.size());
-            guiData.displayPos[0]     = dd->DisplayPos.x;
-            guiData.displayPos[1]     = dd->DisplayPos.y;
-            guiData.displaySize[0]    = dd->DisplaySize.x;
-            guiData.displaySize[1]    = dd->DisplaySize.y;
-            guiData.framebufferWidth  = width;
-            guiData.framebufferHeight = height;
+            out.vertices          = verts.data();
+            out.vertexCount       = uint32_t(verts.size());
+            out.indices           = indices.data();
+            out.indexCount        = uint32_t(indices.size());
+            out.indexSize         = sizeof(uint16_t);
+            out.commands          = cmds.data();
+            out.commandCount      = uint32_t(cmds.size());
+            out.displayPos[0]     = dd->DisplayPos.x;
+            out.displayPos[1]     = dd->DisplayPos.y;
+            out.displaySize[0]    = dd->DisplaySize.x;
+            out.displaySize[1]    = dd->DisplaySize.y;
+            out.framebufferWidth  = fbW;
+            out.framebufferHeight = fbH;
         }
+
+        void BuildGuiDrawData(ImDrawData* dd)
+        {
+            FlattenDrawData(dd, guiVerts, guiIndices, guiCmds, guiData, width, height);
+        }
+
+#if !defined(__EMSCRIPTEN__)
+        // ---- Multi-viewport: render ImGui's detached OS windows (opt-in, VRI_IMGUI_VIEWPORTS=1) ----
+        // Each platform window ImGui spawns gets its own VRI swapchain + VriImguiViewport (geometry
+        // buffers) + command machinery; the renderer's per-viewport buffers keep their staging from
+        // clobbering the main window's. Wired into ImGuiPlatformIO's Renderer_* callbacks, which
+        // ImGui::RenderPlatformWindowsDefault() drives once per extra window each frame.
+        struct ViewportRD
+        {
+            ExampleApp*                      app       = nullptr;
+            VriSwapChain*                    swapchain = nullptr;
+            VriImguiViewport*                gvp       = nullptr;
+            VriCommandAllocator*             alloc     = nullptr;
+            VriCommandBuffer*                cmd       = nullptr;
+            VriFence*                        fence     = nullptr;
+            uint64_t                         frameValue = 0;
+            uint32_t                         w = 1, h = 1;
+            std::vector<VriImguiVertex>      verts;
+            std::vector<uint16_t>            indices;
+            std::vector<VriImguiDrawCommand> cmds;
+            VriImguiDrawData                 data {};
+        };
+        static inline ExampleApp* s_viewportApp = nullptr; // the single app the callbacks render with
+
+        static void VpCreate(ImGuiViewport* vp)
+        {
+            ExampleApp* app = s_viewportApp;
+            ViewportRD* rd  = new ViewportRD();
+            rd->app         = app;
+            rd->w           = uint32_t(vp->Size.x > 0 ? vp->Size.x : 1);
+            rd->h           = uint32_t(vp->Size.y > 0 ? vp->Size.y : 1);
+            // ImGui_ImplSDL3 stores the SDL *window id* in PlatformHandle (the native NSWindow/HWND is
+            // in PlatformHandleRaw); resolve it back to the SDL_Window* the swapchain helper needs.
+            SDL_Window* win =
+                SDL_GetWindowFromID(static_cast<SDL_WindowID>(reinterpret_cast<uintptr_t>(vp->PlatformHandle)));
+            if (win)
+            {
+                VriSwapChainDesc scd {};
+                scd.window      = vriWindowHandleFromSDL3(win);
+                scd.format      = app->swapFormat;
+                scd.width       = rd->w;
+                scd.height      = rd->h;
+                scd.textureNum  = 3;
+                scd.presentMode = SelectPresentMode();
+                if (app->swap.CreateSwapChain(app->dev, &scd, &rd->swapchain) != VriResult_Success)
+                    rd->swapchain = nullptr;
+            }
+            rd->gvp = app->guiApi.CreateImguiViewport(app->gui);
+            app->c.CreateCommandAllocator(app->dev, VriQueueType_Graphics, &rd->alloc);
+            app->c.CreateCommandBuffer(rd->alloc, &rd->cmd);
+            app->c.CreateFence(app->dev, 0, &rd->fence);
+            vp->RendererUserData = rd;
+        }
+
+        static void VpDestroy(ImGuiViewport* vp)
+        {
+            ViewportRD* rd = static_cast<ViewportRD*>(vp->RendererUserData);
+            if (!rd)
+                return;
+            ExampleApp* app = rd->app;
+            app->c.DeviceWaitIdle(app->dev);
+            if (rd->gvp)
+                app->guiApi.DestroyImguiViewport(rd->gvp);
+            if (rd->fence)
+                app->c.DestroyFence(rd->fence);
+            if (rd->alloc)
+                app->c.DestroyCommandAllocator(rd->alloc);
+            if (rd->swapchain)
+                app->swap.DestroySwapChain(rd->swapchain);
+            delete rd;
+            vp->RendererUserData = nullptr;
+        }
+
+        static void VpSetSize(ImGuiViewport* vp, ImVec2 size)
+        {
+            ViewportRD* rd = static_cast<ViewportRD*>(vp->RendererUserData);
+            if (!rd || !rd->swapchain)
+                return;
+            rd->w = uint32_t(size.x > 0 ? size.x : 1);
+            rd->h = uint32_t(size.y > 0 ? size.y : 1);
+            rd->app->swap.Resize(rd->swapchain, rd->w, rd->h);
+        }
+
+        static void VpRender(ImGuiViewport* vp, void*)
+        {
+            ViewportRD* rd = static_cast<ViewportRD*>(vp->RendererUserData);
+            if (!rd || !rd->swapchain)
+                return;
+            ExampleApp* app = rd->app;
+            FlattenDrawData(vp->DrawData, rd->verts, rd->indices, rd->cmds, rd->data, rd->w, rd->h);
+            app->guiApi.UploadImguiDataTo(rd->gvp, &rd->data);
+
+            uint32_t index = 0;
+            if (app->swap.AcquireNextTexture(rd->swapchain, nullptr, 0, &index) == VriResult_OutOfDate)
+            {
+                app->swap.Resize(rd->swapchain, rd->w, rd->h);
+                return;
+            }
+            VriTexture* bb[8] = {};
+            uint32_t    n     = 8;
+            app->swap.GetSwapChainTextures(rd->swapchain, bb, &n);
+            VriTexture*        backbuffer = bb[index];
+            VriTextureViewDesc bvd {};
+            bvd.texture           = backbuffer;
+            bvd.viewType          = VriTextureViewType_2D;
+            bvd.format            = VriFormat_Unknown;
+            bvd.aspect            = VriImageAspect_Color;
+            VriDescriptor* bbView = nullptr;
+            app->c.CreateTextureView(app->dev, &bvd, &bbView);
+
+            auto barrier = [&](VriAccessFlags ba, VriLayout bl, VriPipelineStageFlags bs, VriAccessFlags aa,
+                               VriLayout al, VriPipelineStageFlags as) {
+                VriTextureBarrierDesc b {};
+                b.texture       = backbuffer;
+                b.before.access = ba;
+                b.before.layout = bl;
+                b.before.stages = bs;
+                b.after.access  = aa;
+                b.after.layout  = al;
+                b.after.stages  = as;
+                b.aspect        = VriImageAspect_Color;
+                VriBarrierGroupDesc g {};
+                g.textures   = &b;
+                g.textureNum = 1;
+                app->c.CmdBarrier(rd->cmd, &g);
+            };
+
+            app->c.ResetCommandAllocator(rd->alloc);
+            app->c.BeginCommandBuffer(rd->cmd);
+            app->guiApi.CmdCopyImguiDataTo(rd->cmd, rd->gvp);
+            barrier(VriAccess_None, VriLayout_Undefined, VriPipelineStage_None, VriAccess_ColorAttachmentWrite,
+                    VriLayout_ColorAttachment, VriPipelineStage_ColorAttachmentOutput);
+            VriAttachmentDesc rt {};
+            rt.view  = bbView;
+            rt.loadOp = (vp->Flags & ImGuiViewportFlags_NoRendererClear) ? VriAttachmentLoadOp_Load
+                                                                         : VriAttachmentLoadOp_Clear;
+            rt.storeOp                 = VriAttachmentStoreOp_Store;
+            rt.clearValue.color.f32[3] = 1.0f; // opaque black behind the UI
+            VriAttachmentsDesc att {};
+            att.colors            = &rt;
+            att.colorNum          = 1;
+            att.renderArea.width  = rd->w;
+            att.renderArea.height = rd->h;
+            att.layerNum          = 1;
+            app->c.CmdBeginRendering(rd->cmd, &att);
+            VriViewport vpr {0, 0, float(rd->w), float(rd->h), 0, 1};
+            app->c.CmdSetViewports(rd->cmd, &vpr, 1);
+            VriRect sc {0, 0, rd->w, rd->h};
+            app->c.CmdSetScissors(rd->cmd, &sc, 1);
+            app->guiApi.CmdDrawImguiTo(rd->cmd, app->gui, rd->gvp, &rd->data);
+            app->c.CmdEndRendering(rd->cmd);
+            barrier(VriAccess_ColorAttachmentWrite, VriLayout_ColorAttachment,
+                    VriPipelineStage_ColorAttachmentOutput, VriAccess_None, VriLayout_Present,
+                    VriPipelineStage_AllCommands);
+            app->c.EndCommandBuffer(rd->cmd);
+
+            VriFenceSubmitDesc sig {};
+            sig.fence  = rd->fence;
+            sig.value  = ++rd->frameValue;
+            sig.stages = VriPipelineStage_AllCommands;
+            VriQueueSubmitDesc sub {};
+            sub.commandBuffers   = &rd->cmd;
+            sub.commandBufferNum = 1;
+            sub.signalFences     = &sig;
+            sub.signalFenceNum   = 1;
+            app->c.QueueSubmit(app->queue, &sub);
+            app->c.Wait(rd->fence, rd->frameValue);
+            app->c.DestroyDescriptor(bbView);
+        }
+
+        static void VpSwap(ImGuiViewport* vp, void*)
+        {
+            ViewportRD* rd = static_cast<ViewportRD*>(vp->RendererUserData);
+            if (rd && rd->swapchain)
+                rd->app->swap.Present(rd->swapchain, nullptr, 0);
+        }
+
+        void RegisterViewportRenderer()
+        {
+            s_viewportApp = this;
+            ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasViewports;
+            ImGuiPlatformIO& pio       = ImGui::GetPlatformIO();
+            pio.Renderer_CreateWindow  = VpCreate;
+            pio.Renderer_DestroyWindow = VpDestroy;
+            pio.Renderer_SetWindowSize = VpSetSize;
+            pio.Renderer_RenderWindow  = VpRender;
+            pio.Renderer_SwapBuffers   = VpSwap;
+        }
+#endif
 
         // ---- one-shot upload helper (kills the staging boilerplate examples kept repeating) --
         // Usage: BeginUpload(); UploadBuffer(...)/UploadTexture(...) ...; EndUpload();
@@ -782,7 +1004,12 @@ namespace vriex
 #endif
             io.DeltaTime = dt; // real frame time (fixed 1/60 in headless) -> truthful on-screen FPS
             ImGui::NewFrame();
-            ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_FirstUseEver);
+            // Anchor the panel to the main window. With multi-viewport on, ImGui window coordinates are
+            // absolute virtual-desktop (screen) space, so a literal (8,8) would land at the screen
+            // origin and spawn a detached window; the main viewport's WorkPos offsets it back onto the
+            // main window (WorkPos is (0,0) without viewports, so single-viewport behaviour is unchanged).
+            const ImGuiViewport* mainVp = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(ImVec2(mainVp->WorkPos.x + 8, mainVp->WorkPos.y + 8), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowBgAlpha(0.7f);
             if (ImGui::Begin(name, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
             {
@@ -952,6 +1179,15 @@ namespace vriex
             swap.Present(swapchain, nullptr, 0);
             c.DestroyDescriptor(bbView);
 
+#if !defined(__EMSCRIPTEN__)
+            // Render ImGui's detached windows (each into its own swapchain) after the main window.
+            if (wantViewports)
+            {
+                ImGui::UpdatePlatformWindows();
+                ImGui::RenderPlatformWindowsDefault();
+            }
+#endif
+
             if (capturing)
             {
                 const uint8_t* px =
@@ -1041,6 +1277,11 @@ namespace vriex
         // example destroys its own resources before calling this.
         void Shutdown()
         {
+#if !defined(__EMSCRIPTEN__)
+            // Destroy ImGui's detached windows (calls VpDestroy for each) before the renderer/device.
+            if (wantViewports)
+                ImGui::DestroyPlatformWindows();
+#endif
             if (gui)
                 guiApi.DestroyImgui(gui);
 #if !defined(__EMSCRIPTEN__)

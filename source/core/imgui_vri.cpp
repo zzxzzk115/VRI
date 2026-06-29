@@ -10,6 +10,8 @@
 
 #include <cstddef>
 #include <cstring>
+#include <unordered_map>
+#include <vector>
 
 // Library-internal ImGui shaders (shaders/lib), embedded as byte arrays.
 #include "shaders/lib/imgui_dxbc.h" // g_imguiDxbcVS / g_imguiDxbcPS (D3D12)
@@ -26,7 +28,27 @@ namespace vri::core
             float translate[2];
         };
 
-        // The renderer state behind the opaque VriImgui* handle.
+        struct ImguiState;
+
+        // A frame's geometry (vertex+index device buffers + their host staging). One per ImGui
+        // viewport so several detached windows (multi-viewport) can have live geometry at once
+        // without clobbering each other's staging. ImguiState owns a default one for the main window.
+        struct ImguiViewport
+        {
+            ImguiState* owner = nullptr; // for the device + core table
+            VriBuffer*  vbuf = nullptr;
+            VriBuffer*  vstg = nullptr;
+            uint32_t    vCap = 0; // capacity in vertices
+            VriBuffer*  ibuf = nullptr;
+            VriBuffer*  istg = nullptr;
+            uint32_t    iCap = 0; // capacity in indices
+            uint64_t    vBytes   = 0;
+            uint64_t    iBytes   = 0;
+            bool        hasFrame = false;
+        };
+
+        // The renderer state behind the opaque VriImgui* handle: the shared pipeline/textures plus a
+        // default viewport's geometry buffers.
         struct ImguiState
         {
             VriCoreInterface c {}; // the device's (possibly validation-wrapped) core table
@@ -35,21 +57,17 @@ namespace vri::core
             VriPipelineLayout* layout   = nullptr;
             VriPipeline*       pipeline = nullptr;
             VriTexture*        font     = nullptr;
-            VriDescriptor*     fontView = nullptr;
+            VriDescriptor*     fontView = nullptr; // null when the host drives textures (ImGui 1.92)
             VriDescriptor*     sampler  = nullptr;
-            VriDescriptorPool* pool     = nullptr;
-            VriDescriptorSet*  set      = nullptr;
 
-            VriBuffer* vbuf = nullptr;
-            VriBuffer* vstg = nullptr;
-            uint32_t   vCap = 0; // capacity in vertices
-            VriBuffer* ibuf = nullptr;
-            VriBuffer* istg = nullptr;
-            uint32_t   iCap = 0; // capacity in indices
+            // One descriptor set per distinct texture view, cached so a stable texture allocates once.
+            // Pools are added in fixed blocks; a freed slot isn't reclaimed until DestroyImgui (texture
+            // churn is rare), so FreeImguiTexture only drops the map entry (see its comment).
+            std::vector<VriDescriptorPool*>                       pools;
+            uint32_t                                              poolUsed = 0; // sets used in pools.back()
+            std::unordered_map<VriDescriptor*, VriDescriptorSet*> texSets;
 
-            uint64_t vBytes   = 0;
-            uint64_t iBytes   = 0;
-            bool     hasFrame = false;
+            ImguiViewport mainVp; // the main window's geometry (extra viewports are created explicitly)
         };
 
         void DestroyImguiState(ImguiState* s); // defined below; used by CreateImgui's error paths
@@ -57,6 +75,48 @@ namespace vri::core
         ImguiState* Self(VriImgui* h) { return reinterpret_cast<ImguiState*>(h); }
 
         uint64_t Align4(uint64_t s) { return (s + 3ull) & ~3ull; } // WebGPU map/copy sizes must be %4
+
+        constexpr uint32_t kImguiPoolBlock = 64; // descriptor sets (= textures) per pool block
+
+        // The descriptor set that binds `view` (+ the shared sampler), allocating + caching it on first
+        // use. A null view falls back to the font atlas. Returns null if there's no texture to bind.
+        VriDescriptorSet* SetForView(ImguiState* s, VriDescriptor* view)
+        {
+            if (!view)
+                view = s->fontView;
+            if (!view)
+                return nullptr;
+            auto it = s->texSets.find(view);
+            if (it != s->texSets.end())
+                return it->second;
+
+            if (s->pools.empty() || s->poolUsed >= kImguiPoolBlock)
+            {
+                VriDescriptorPoolDesc pd {};
+                pd.descriptorSetMaxNum = kImguiPoolBlock;
+                pd.textureMaxNum       = kImguiPoolBlock;
+                pd.samplerMaxNum       = kImguiPoolBlock;
+                VriDescriptorPool* pool = nullptr;
+                if (s->c.CreateDescriptorPool(s->dev, &pd, &pool) != VriResult_Success)
+                    return nullptr;
+                s->pools.push_back(pool);
+                s->poolUsed = 0;
+            }
+            VriDescriptorSet* set = nullptr;
+            if (s->c.AllocateDescriptorSets(s->pools.back(), s->layout, 0, &set, 1) != VriResult_Success)
+                return nullptr;
+            ++s->poolUsed;
+            const VriDescriptor*         td0[1] = {view};
+            const VriDescriptor*         sd0[1] = {s->sampler};
+            VriDescriptorRangeUpdateDesc u[2] {};
+            u[0].descriptors   = td0;
+            u[0].descriptorNum = 1;
+            u[1].descriptors   = sd0;
+            u[1].descriptorNum = 1;
+            s->c.UpdateDescriptorRanges(set, 0, 2, u);
+            s->texSets[view] = set;
+            return set;
+        }
 
         // Grow a device buffer + its host staging to hold at least `count` elements of `stride`.
         void Grow(ImguiState*         s,
@@ -187,7 +247,9 @@ namespace vri::core
 
         VriResult VRI_CALL CreateImgui(VriDevice* device, const VriImguiDesc* desc, VriImgui** outImgui)
         {
-            if (!device || !desc || !outImgui || !desc->fontAtlas || !desc->uploadQueue)
+            if (!device || !desc || !outImgui)
+                return VriResult_InvalidArgument;
+            if (desc->fontAtlas && !desc->uploadQueue) // the built-in font atlas needs an upload queue
                 return VriResult_InvalidArgument;
             *outImgui = nullptr;
 
@@ -198,6 +260,7 @@ namespace vri::core
                 return VriResult_Failure;
             }
             s->dev              = device;
+            s->mainVp.owner     = s; // the main window's geometry buffers belong to this state
             VriCoreInterface& c = s->c;
 
             // Pick the shader bytecode for the device's backend. The GL backends consume SPIR-V
@@ -210,6 +273,7 @@ namespace vri::core
                 case VriGraphicsAPI_Vulkan:
                 case VriGraphicsAPI_OpenGL:
                 case VriGraphicsAPI_OpenGLES:
+                case VriGraphicsAPI_Metal: // Metal transpiles the SPIR-V to MSL at pipeline creation
                     vsCode = psCode = g_imguiSpv;
                     vsSize = psSize = sizeof(g_imguiSpv);
                     break;
@@ -223,12 +287,14 @@ namespace vri::core
                     psCode = g_imguiDxbcPS;
                     psSize = sizeof(g_imguiDxbcPS);
                     break;
-                default: // Metal/D3D11: no embedded ImGui shader for this backend yet
+                default: // D3D11: no embedded ImGui shader for this backend yet
                     delete s;
                     return VriResult_Unsupported;
             }
 
-            if (!UploadFont(s, desc->uploadQueue, desc))
+            // Built-in font atlas is optional: with ImGui 1.92 the host drives the texture lifecycle
+            // and routes every texture (font included) through per-command textureView instead.
+            if (desc->fontAtlas && !UploadFont(s, desc->uploadQueue, desc))
             {
                 DestroyImguiState(s); // declared below
                 return VriResult_Failure;
@@ -325,23 +391,27 @@ namespace vri::core
                 return VriResult_Failure;
             }
 
-            VriDescriptorPoolDesc pdsc {};
-            pdsc.descriptorSetMaxNum = 1;
-            pdsc.textureMaxNum       = 1;
-            pdsc.samplerMaxNum       = 1;
-            c.CreateDescriptorPool(s->dev, &pdsc, &s->pool);
-            c.AllocateDescriptorSets(s->pool, s->layout, 0, &s->set, 1);
-            const VriDescriptor*         td0[1] = {s->fontView};
-            const VriDescriptor*         sd0[1] = {s->sampler};
-            VriDescriptorRangeUpdateDesc u[2] {};
-            u[0].descriptors   = td0;
-            u[0].descriptorNum = 1;
-            u[1].descriptors   = sd0;
-            u[1].descriptorNum = 1;
-            c.UpdateDescriptorRanges(s->set, 0, 2, u);
+            // Pre-warm the font's descriptor set outside any render pass (others are cached lazily as
+            // their textures first appear in CmdDrawImgui).
+            if (s->fontView)
+                SetForView(s, s->fontView);
 
             *outImgui = reinterpret_cast<VriImgui*>(s);
             return VriResult_Success;
+        }
+
+        void FreeViewportBuffers(ImguiViewport* vp)
+        {
+            VriCoreInterface& c = vp->owner->c;
+            if (vp->vbuf)
+                c.DestroyBuffer(vp->vbuf);
+            if (vp->vstg)
+                c.DestroyBuffer(vp->vstg);
+            if (vp->ibuf)
+                c.DestroyBuffer(vp->ibuf);
+            if (vp->istg)
+                c.DestroyBuffer(vp->istg);
+            *vp = ImguiViewport {vp->owner};
         }
 
         void DestroyImguiState(ImguiState* s)
@@ -349,16 +419,9 @@ namespace vri::core
             if (!s)
                 return;
             VriCoreInterface& c = s->c;
-            if (s->vbuf)
-                c.DestroyBuffer(s->vbuf);
-            if (s->vstg)
-                c.DestroyBuffer(s->vstg);
-            if (s->ibuf)
-                c.DestroyBuffer(s->ibuf);
-            if (s->istg)
-                c.DestroyBuffer(s->istg);
-            if (s->pool)
-                c.DestroyDescriptorPool(s->pool);
+            FreeViewportBuffers(&s->mainVp);
+            for (VriDescriptorPool* pool : s->pools)
+                c.DestroyDescriptorPool(pool);
             if (s->pipeline)
                 c.DestroyPipeline(s->pipeline);
             if (s->layout)
@@ -376,42 +439,43 @@ namespace vri::core
 
         VriDescriptor* VRI_CALL GetImguiFontView(VriImgui* imgui) { return Self(imgui)->fontView; }
 
-        void VRI_CALL UploadImguiData(VriImgui* imgui, const VriImguiDrawData* dd)
+        // Stage one viewport's geometry into its own device buffers (+ host staging).
+        void UploadTo(ImguiViewport* vp, const VriImguiDrawData* dd)
         {
-            ImguiState* s = Self(imgui);
-            s->hasFrame   = dd && dd->vertexCount > 0 && dd->indexCount > 0;
-            if (!s->hasFrame)
+            ImguiState* s = vp->owner;
+            vp->hasFrame  = dd && dd->vertexCount > 0 && dd->indexCount > 0;
+            if (!vp->hasFrame)
                 return;
             const uint32_t idxStride = dd->indexSize ? dd->indexSize : 2;
-            Grow(s, s->vbuf, s->vstg, s->vCap, dd->vertexCount, sizeof(VriImguiVertex), VriBufferUsage_VertexBuffer);
-            Grow(s, s->ibuf, s->istg, s->iCap, dd->indexCount, idxStride, VriBufferUsage_IndexBuffer);
-            s->vBytes = Align4(uint64_t(dd->vertexCount) * sizeof(VriImguiVertex));
-            s->iBytes = Align4(uint64_t(dd->indexCount) * idxStride);
+            Grow(s, vp->vbuf, vp->vstg, vp->vCap, dd->vertexCount, sizeof(VriImguiVertex), VriBufferUsage_VertexBuffer);
+            Grow(s, vp->ibuf, vp->istg, vp->iCap, dd->indexCount, idxStride, VriBufferUsage_IndexBuffer);
+            vp->vBytes = Align4(uint64_t(dd->vertexCount) * sizeof(VriImguiVertex));
+            vp->iBytes = Align4(uint64_t(dd->indexCount) * idxStride);
             std::memcpy(
-                s->c.MapBuffer(s->vstg, 0, s->vBytes), dd->vertices, size_t(dd->vertexCount) * sizeof(VriImguiVertex));
-            s->c.UnmapBuffer(s->vstg);
-            std::memcpy(s->c.MapBuffer(s->istg, 0, s->iBytes), dd->indices, size_t(dd->indexCount) * idxStride);
-            s->c.UnmapBuffer(s->istg);
+                s->c.MapBuffer(vp->vstg, 0, vp->vBytes), dd->vertices, size_t(dd->vertexCount) * sizeof(VriImguiVertex));
+            s->c.UnmapBuffer(vp->vstg);
+            std::memcpy(s->c.MapBuffer(vp->istg, 0, vp->iBytes), dd->indices, size_t(dd->indexCount) * idxStride);
+            s->c.UnmapBuffer(vp->istg);
         }
 
-        void VRI_CALL CmdCopyImguiData(VriCommandBuffer* cmd, VriImgui* imgui)
+        void CmdCopyTo(VriCommandBuffer* cmd, ImguiViewport* vp)
         {
-            ImguiState* s = Self(imgui);
-            if (!s->hasFrame)
+            if (!vp->hasFrame)
                 return;
+            VriCoreInterface& c = vp->owner->c;
             VriBufferCopyDesc vcp {};
-            vcp.size = s->vBytes;
-            s->c.CmdCopyBuffer(cmd, s->vbuf, s->vstg, &vcp);
+            vcp.size = vp->vBytes;
+            c.CmdCopyBuffer(cmd, vp->vbuf, vp->vstg, &vcp);
             VriBufferCopyDesc icp {};
-            icp.size = s->iBytes;
-            s->c.CmdCopyBuffer(cmd, s->ibuf, s->istg, &icp);
+            icp.size = vp->iBytes;
+            c.CmdCopyBuffer(cmd, vp->ibuf, vp->istg, &icp);
             VriBufferBarrierDesc gb[2] {};
-            gb[0].buffer        = s->vbuf;
+            gb[0].buffer        = vp->vbuf;
             gb[0].before.access = VriAccess_CopyDestinationWrite;
             gb[0].before.stages = VriPipelineStage_Transfer;
             gb[0].after.access  = VriAccess_VertexBufferRead;
             gb[0].after.stages  = VriPipelineStage_VertexInput;
-            gb[1].buffer        = s->ibuf;
+            gb[1].buffer        = vp->ibuf;
             gb[1].before.access = VriAccess_CopyDestinationWrite;
             gb[1].before.stages = VriPipelineStage_Transfer;
             gb[1].after.access  = VriAccess_IndexBufferRead;
@@ -419,13 +483,16 @@ namespace vri::core
             VriBarrierGroupDesc g {};
             g.buffers   = gb;
             g.bufferNum = 2;
-            s->c.CmdBarrier(cmd, &g);
+            c.CmdBarrier(cmd, &g);
         }
 
-        void VRI_CALL CmdDrawImgui(VriCommandBuffer* cmd, VriImgui* imgui, const VriImguiDrawData* dd)
+        void VRI_CALL UploadImguiData(VriImgui* imgui, const VriImguiDrawData* dd) { UploadTo(&Self(imgui)->mainVp, dd); }
+
+        void VRI_CALL CmdCopyImguiData(VriCommandBuffer* cmd, VriImgui* imgui) { CmdCopyTo(cmd, &Self(imgui)->mainVp); }
+
+        void DrawFrom(VriCommandBuffer* cmd, ImguiState* s, ImguiViewport* vpb, const VriImguiDrawData* dd)
         {
-            ImguiState* s = Self(imgui);
-            if (!s->hasFrame || !dd || dd->displaySize[0] <= 0 || dd->displaySize[1] <= 0)
+            if (!vpb->hasFrame || !dd || dd->displaySize[0] <= 0 || dd->displaySize[1] <= 0)
                 return;
             VriCoreInterface& c   = s->c;
             const uint32_t    fbW = dd->framebufferWidth ? dd->framebufferWidth : uint32_t(dd->displaySize[0]);
@@ -440,18 +507,27 @@ namespace vri::core
             c.CmdSetPipeline(cmd, s->pipeline);
             c.CmdSetPipelineLayout(cmd, s->layout);
             c.CmdSetConstants(cmd, 0, &o, sizeof(o));
-            c.CmdSetDescriptorSet(cmd, 0, s->set);
             VriViewport vp {0, 0, float(fbW), float(fbH), 0, 1};
             c.CmdSetViewports(cmd, &vp, 1);
             VriVertexBufferBinding vb {};
-            vb.buffer = s->vbuf;
+            vb.buffer = vpb->vbuf;
             vb.offset = 0;
             c.CmdSetVertexBuffers(cmd, 0, &vb, 1);
-            c.CmdSetIndexBuffer(cmd, s->ibuf, 0, dd->indexSize == 4 ? VriIndexType_UInt32 : VriIndexType_UInt16);
+            c.CmdSetIndexBuffer(cmd, vpb->ibuf, 0, dd->indexSize == 4 ? VriIndexType_UInt32 : VriIndexType_UInt16);
 
+            VriDescriptorSet* boundSet = nullptr;
             for (uint32_t i = 0; i < dd->commandCount; ++i)
             {
                 const VriImguiDrawCommand& dc = dd->commands[i];
+                // Bind the command's texture (null -> font atlas), re-binding only when it changes.
+                VriDescriptorSet* set = SetForView(s, dc.textureView);
+                if (!set)
+                    continue; // no texture to sample (e.g. no font and no per-command view)
+                if (set != boundSet)
+                {
+                    c.CmdSetDescriptorSet(cmd, 0, set);
+                    boundSet = set;
+                }
                 // ClipRect is in display coords; convert to framebuffer pixels + clamp.
                 int cx = int(dc.clipRect[0] - dd->displayPos[0]);
                 int cy = int(dc.clipRect[1] - dd->displayPos[1]);
@@ -478,6 +554,51 @@ namespace vri::core
             }
         }
 
+        void VRI_CALL CmdDrawImgui(VriCommandBuffer* cmd, VriImgui* imgui, const VriImguiDrawData* dd)
+        {
+            ImguiState* s = Self(imgui);
+            DrawFrom(cmd, s, &s->mainVp, dd);
+        }
+
+        // ---- extra viewports (multi-viewport / detached OS windows) ----
+        // Each detached window gets its own geometry buffers (a VriImguiViewport) but shares the
+        // VriImgui's pipeline, font and texture descriptor-set cache. The host renders each window's
+        // ImDrawData through these, so their staging buffers never clobber the main window's.
+        ImguiViewport* SelfVp(VriImguiViewport* h) { return reinterpret_cast<ImguiViewport*>(h); }
+
+        VriImguiViewport* VRI_CALL CreateImguiViewport(VriImgui* imgui)
+        {
+            return reinterpret_cast<VriImguiViewport*>(new ImguiViewport {Self(imgui)});
+        }
+
+        void VRI_CALL DestroyImguiViewport(VriImguiViewport* vp)
+        {
+            if (!vp)
+                return;
+            ImguiViewport* b = SelfVp(vp);
+            FreeViewportBuffers(b);
+            delete b;
+        }
+
+        void VRI_CALL UploadImguiDataTo(VriImguiViewport* vp, const VriImguiDrawData* dd) { UploadTo(SelfVp(vp), dd); }
+
+        void VRI_CALL CmdCopyImguiDataTo(VriCommandBuffer* cmd, VriImguiViewport* vp) { CmdCopyTo(cmd, SelfVp(vp)); }
+
+        void VRI_CALL CmdDrawImguiTo(VriCommandBuffer* cmd, VriImgui* imgui, VriImguiViewport* vp,
+                                     const VriImguiDrawData* dd)
+        {
+            DrawFrom(cmd, Self(imgui), SelfVp(vp), dd);
+        }
+
+        // Drop a texture's cached descriptor set before the host destroys the view. The set's pool
+        // slot isn't reclaimed (texture churn is rare), but dropping the map entry is what matters:
+        // a later texture that reuses the freed pointer address then gets a fresh, correct set.
+        void VRI_CALL FreeImguiTexture(VriImgui* imgui, VriDescriptor* view)
+        {
+            if (imgui && view)
+                Self(imgui)->texSets.erase(view);
+        }
+
         const VriImguiInterface g_imgui = {
             CreateImgui,
             DestroyImgui,
@@ -485,6 +606,12 @@ namespace vri::core
             UploadImguiData,
             CmdCopyImguiData,
             CmdDrawImgui,
+            FreeImguiTexture,
+            CreateImguiViewport,
+            DestroyImguiViewport,
+            UploadImguiDataTo,
+            CmdCopyImguiDataTo,
+            CmdDrawImguiTo,
         };
     } // namespace
 

@@ -56,11 +56,12 @@ if has_config("vri_build_examples") then
     add_requires("libsdl3")
     -- Dear ImGui for the examples' UI. The examples draw ImDrawData through VRI
     -- (examples/common/imgui_vri.h), so we don't need an imgui render backend - only the
-    -- core, plus the SDL3 *input* backend on desktop. On wasm input is fed via Emscripten.
+    -- core, plus the SDL3 *input/platform* backend on desktop. On wasm input is fed via Emscripten.
+    -- The -docking variant adds docking + the multi-viewport (detached OS windows) platform API.
     if is_plat("wasm") then
-        add_requires("imgui v1.92.5")
+        add_requires("imgui v1.92.5-docking")
     else
-        add_requires("imgui v1.92.5", {configs = {sdl3 = true}})
+        add_requires("imgui v1.92.5-docking", {configs = {sdl3 = true}})
     end
     -- glTF model loading for example-raytracing/pathtracer (examples/common/gltf_model.h).
     -- Header-only, the same tinygltf library Sascha Willems' Vulkan-Examples use. Needed on every
