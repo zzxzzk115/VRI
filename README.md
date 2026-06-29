@@ -66,17 +66,17 @@ How each feature is supported on each backend:
 | Fragment-shader barycentrics | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Multiview (single-pass stereo) | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Multiview (single-pass stereo) | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| GPU timestamp queries | ✅ | ✅ | ❌ | 🟡 | 🟡 | ❌ | ❌ |
-| Occlusion queries | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| GPU timestamp queries | ✅ | ✅ | ✅ | 🟡 | 🟡 | ❌ | ❌ |
+| Occlusion queries | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Pipeline-statistics queries | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Calibrated GPU+CPU timestamps | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Pipeline cache | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Calibrated GPU+CPU timestamps | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Pipeline cache | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Indirect draw count (GPU-driven) | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Video memory budget | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Clear storage buffer / texture | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Built-in Dear ImGui renderer | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Built-in Dear ImGui renderer | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 Notes:
 
@@ -108,38 +108,54 @@ Notes:
 - **GPU timestamp queries** (`ext/vri_ext_query.h`) record the GPU clock at points in a command
   buffer and resolve the ticks into a buffer; scale by `VriDeviceDesc::timestampPeriodNanoseconds`
   for nanoseconds. The basis of a GPU profiler — see `example-profiler`. On **Vulkan**, **Direct3D
-  12**, **WebGPU** (desktop wgpu-native, via the `timestamp-query` + `TimestampQueryInsideEncoders`
-  features; browser WebGPU timestamps are pass-scoped and not yet wired), and **desktop OpenGL 4.4+**
-  (`glQueryCounter` + a query buffer object; GLES/WebGL have no core timer query). **Occlusion
-  queries** (samples-passed) are also supported on Vulkan + D3D12 + desktop OpenGL (WebGPU's
-  occlusion binds the query set at pass-begin, which this API doesn't express),
+  12**, **Metal** (an `MTLCounterSampleBuffer`; Apple GPUs sample only at encoder stage boundaries,
+  so each timestamp opens a one-shot blit encoder, and the counter buffer is resolved CPU-side in the
+  submit's completion handler), **WebGPU** (desktop wgpu-native, via the `timestamp-query` +
+  `TimestampQueryInsideEncoders` features; browser WebGPU timestamps are pass-scoped and not yet
+  wired), and **desktop OpenGL 4.4+** (`glQueryCounter` + a query buffer object; GLES/WebGL have no
+  core timer query). **Occlusion queries** (samples-passed) are also supported on Vulkan + D3D12 +
+  Metal (a native visibility-result buffer + `MTLVisibilityResultModeCounting`) + desktop OpenGL
+  (WebGPU's occlusion binds the query set at pass-begin, which this API doesn't express),
   **pipeline-statistics queries** (per-stage invocation counts, a portable `VriPipelineStatistics`
   struct) on Vulkan + D3D12 + desktop OpenGL 4.6 (via `ARB_pipeline_statistics_query`, one GL query
-  object per stat), and **calibrated timestamps** (a correlated GPU+CPU clock pair, for aligning GPU
-  spans with a CPU trace) on Vulkan + D3D12.
+  object per stat; Apple GPUs expose no statistic counter set), and **calibrated timestamps** (a
+  correlated GPU+CPU clock pair, for aligning GPU spans with a CPU trace) on Vulkan + D3D12 + Metal
+  (`[MTLDevice sampleTimestamps:gpuTimestamp:]`).
 - **Multiview** (single-pass layered rendering) renders to several layers of an array target in one
   pass, selected by a `viewMask` on both the graphics pipeline (`VriOutputMergerDesc::viewMask`) and
   the render pass (`VriAttachmentsDesc::viewMask`); the shader reads the per-view index via
   `SV_ViewID` (→ SPIR-V `gl_ViewIndex` / `gl_ViewID_OVR`). This is the basis of single-pass VR stereo.
-  Implemented on **Vulkan** (core 1.1 multiview) and **OpenGL / OpenGL ES** (`GL_OVR_multiview2`,
-  the standalone-headset path; SPIRV-Cross emits the `gl_ViewID_OVR` form). Exposed via
+  Implemented on **Vulkan** (core 1.1 multiview), **Metal** (SPIRV-Cross emits the instanced form —
+  the draw's instance count is multiplied by the view count and each view writes its array slice via
+  `[[render_target_array_index]]`), and **OpenGL / OpenGL ES** (`GL_OVR_multiview2`, the
+  standalone-headset path; SPIRV-Cross emits the `gl_ViewID_OVR` form). Exposed via
   `VriDeviceDesc::hasMultiview` + `maxViewCount`. D3D12 ViewInstancing is a documented follow-up.
 - **Built-in Dear ImGui renderer** (`ext/vri_ext_imgui.h`, `VRI_INTERFACE_IMGUI`) draws ImGui
   through VRI's own core interface, so a single renderer covers every backend with no per-backend
   `imgui_impl_*` and it flows through the validation layer for free. VRI does **not** depend on or
   link Dear ImGui: the application owns the ImGui environment (context, input, `NewFrame`) and each
   frame hands VRI a backend-neutral, flattened `VriImguiDrawData` (so no ImGui types cross into
-  VRI). The examples' control panel is drawn with it.
+  VRI). Each draw command carries the texture it samples (`VriImguiDrawCommand::textureView`), so
+  user images and **ImGui 1.92's dynamic, host-owned textures** work, not just the font atlas — the
+  host creates textures with the core interface, routes them through ImGui's texture id, and tells
+  the renderer to drop a cached binding (`FreeImguiTexture`) when a texture is destroyed.
+  **Docking + multi-viewport** are supported: each detached OS window ImGui spawns gets its own
+  `VriImguiViewport` (independent geometry buffers, sharing the pipeline/font/texture cache) driven
+  by the `*To` calls, so several windows render per frame without clobbering each other. The examples
+  enable docking and multi-viewport (detached OS windows) by default — drag a panel out of the main
+  window to pop it into its own OS window; opt out with `VRI_IMGUI_VIEWPORTS=0` (auto-off in headless
+  capture). The examples' control panel is drawn with it.
 - **Pipeline cache** (`ext/vri_ext_pipeline_cache.h`, `VRI_INTERFACE_PIPELINE_CACHE`) lets the
   driver reuse work (shader compilation, PSO assembly) across pipeline creations and across runs:
   pass a cache in `VriGraphicsPipelineDesc::pipelineCache`, serialize it on exit
   (`GetPipelineCacheData`), and seed the next launch (`CreatePipelineCache`) for fast warm startup.
   A stale or foreign blob is detected and ignored, so seeding is always safe. On **Vulkan**
   (`VkPipelineCache`), **Direct3D 12** (`ID3D12PipelineLibrary`, keyed by a stable hash of each
-  pipeline's definition), and **desktop OpenGL** (emulated with program binaries — a cache hit
-  restores the linked program via `glProgramBinary`, skipping the GLSL compile + link). WebGPU and
-  WebGL 2 expose no cache blob (their runtime caches shaders internally), so they report
-  `Unsupported`.
+  pipeline's definition), **Metal** (an `MTLBinaryArchive` populated at pipeline creation; the blob
+  is bridged through a temp file since Metal only serializes to a file URL), and **desktop OpenGL**
+  (emulated with program binaries — a cache hit restores the linked program via `glProgramBinary`,
+  skipping the GLSL compile + link). WebGPU and WebGL 2 expose no cache blob (their runtime caches
+  shaders internally), so they report `Unsupported`.
 - **GPU-driven draw count.** `CmdDrawIndirectCount` / `CmdDrawIndexedIndirectCount` take the *number*
   of draws from a GPU buffer (a `uint32` at an offset, clamped to `maxDrawNum`) instead of the CPU —
   so a compute pass can decide how many draws to issue. Gated by `VriDeviceDesc::hasDrawIndirectCount`.
