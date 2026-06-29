@@ -1,13 +1,15 @@
 // Multiview (single-pass layered rendering): render one fullscreen triangle to a 2-layer array
 // target in a single pass with viewMask = 0b11. The shader colors each view by SV_ViewID, so
 // layer 0 comes out red and layer 1 green -- proving the viewMask drove per-layer rendering (the
-// basis of single-pass VR stereo). Gated on VriDeviceDesc::hasMultiview; only Vulkan supports it
-// today (D3D12 ViewInstancing / GL OVR_multiview are follow-ups), so other backends self-skip.
+// basis of single-pass VR stereo). Gated on VriDeviceDesc::hasMultiview: Vulkan + desktop-GL/GLES
+// (GL_OVR_multiview2); D3D12 ViewInstancing is a follow-up, so D3D12 self-skips.
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
 
-#include "shaders/tests/multiview_spv.h" // g_multiviewSpv (Vulkan)
+#include "shaders/tests/multiview_frag_spv.h" // g_multiviewFragSpv
+#include "shaders/tests/multiview_vert_spv.h" // g_multiviewVertSpv (split per stage so the fragment
+                                              // module carries no ViewIndex - GL OVR_multiview2 rule)
 
 #include <cstdint>
 
@@ -82,8 +84,10 @@ namespace
         sh[1].stage          = VriShaderStage_Fragment;
         sh[0].entryPointName = "vertexMain";
         sh[1].entryPointName = "fragmentMain";
-        sh[0].bytecode = sh[1].bytecode = g_multiviewSpv;
-        sh[0].bytecodeSize = sh[1].bytecodeSize = sizeof(g_multiviewSpv);
+        sh[0].bytecode       = g_multiviewVertSpv;
+        sh[0].bytecodeSize   = sizeof(g_multiviewVertSpv);
+        sh[1].bytecode       = g_multiviewFragSpv;
+        sh[1].bytecodeSize   = sizeof(g_multiviewFragSpv);
 
         VriColorAttachmentDesc ca {};
         ca.format         = VriFormat_RGBA8_UNORM;

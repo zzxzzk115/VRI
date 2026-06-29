@@ -60,3 +60,28 @@ extern "C" void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr si
 #define GL_SHADER_STORAGE_BUFFER 0x90D2
 #endif
 #endif
+
+// OVR_multiview (single-pass layered rendering, for VR stereo) is an extension - not in the
+// generated glad loader nor the base GLES headers - so declare its tokens and entry point here.
+// DeviceGL loads the function pointer through the platform proc loader at init (null = unsupported).
+#if !defined(GL_MAX_VIEWS_OVR)
+#define GL_MAX_VIEWS_OVR 0x9631
+#endif
+#if !defined(GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR)
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR 0x9630
+#endif
+#if defined(VRI_GL_ES_HEADERS)
+#define VRI_GL_APIENTRYP GL_APIENTRYP
+#else
+#define VRI_GL_APIENTRYP APIENTRYP
+#endif
+namespace vri::gl
+{
+    using PFN_FramebufferTextureMultiviewOVR = void(VRI_GL_APIENTRYP)(GLenum  target,
+                                                                      GLenum  attachment,
+                                                                      GLuint  texture,
+                                                                      GLint   level,
+                                                                      GLint   baseViewIndex,
+                                                                      GLsizei numViews);
+    extern PFN_FramebufferTextureMultiviewOVR g_FramebufferTextureMultiviewOVR;
+} // namespace vri::gl

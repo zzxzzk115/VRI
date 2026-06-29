@@ -23,6 +23,7 @@
 
 #include <spirv_cross/spirv_glsl.hpp>
 
+#include <bit>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -157,7 +158,8 @@ namespace vri::gl
                                 std::vector<CombinedSamplerGL>* outCombined,
                                 std::vector<PushMemberGL>*      outPush     = nullptr,
                                 int                             inBoundary  = -1,
-                                int                             outBoundary = -1)
+                                int                             outBoundary = -1,
+                                uint32_t                        viewCount   = 0)
         {
             const uint32_t* words     = static_cast<const uint32_t*>(bytecode);
             const size_t    wordCount = bytecodeSize / 4;
@@ -194,9 +196,21 @@ namespace vri::gl
                 // (shadows vanish). Plain depth testing is monotonic either way, so it's unaffected.
                 o.vertex.fixup_clipspace =
                     !d->Features().clipControl && model != spv::ExecutionModelTessellationControl;
+                // Multiview: emit GL_OVR_multiview2 (layout(num_views=N) + gl_ViewID_OVR) so SV_ViewID
+                // / SPIR-V ViewIndex selects the eye in a single pass. The num_views declaration is
+                // only valid on the vertex stage (per-view logic belongs there); 0/1 = no multiview.
+                o.ovr_multiview_view_count = (viewCount > 1 && model == spv::ExecutionModelVertex) ? viewCount : 0;
                 comp.set_common_options(o);
                 if (entry)
                     comp.set_entry_point(entry, model);
+
+                // Multiview: our shaders are one module with both entry points, so Slang lists the
+                // ViewIndex builtin in the fragment entry point's interface even though only the
+                // vertex stage reads it. SPIRV-Cross would then try to emit gl_ViewID_OVR in the
+                // fragment (illegal without num_views, which is vertex-only) -> prune to the variables
+                // the active entry point actually uses, dropping the unused builtin.
+                if (viewCount > 1)
+                    comp.set_enabled_interface_variables(comp.get_active_interface_variables());
 
                 // GLSL has no separate texture/sampler: fuse each Vulkan (texture,
                 // sampler) pair into one combined sampler2D. Must run before
@@ -959,6 +973,9 @@ namespace vri::gl
         {
             DeviceGL*               d      = Dev(device);
             const PipelineLayoutGL* layout = reinterpret_cast<const PipelineLayoutGL*>(desc->pipelineLayout);
+            // Multiview view count (popcount of the viewMask; 0/1 = single view). Drives the
+            // GL_OVR_multiview2 emission in each stage's GLSL.
+            const uint32_t viewCount = static_cast<uint32_t>(std::popcount(desc->outputMerger.viewMask));
             // Legacy stages (geometry/tessellation) exist only on desktop GL, not on
             // GLES3/WebGL2 - reject explicitly rather than silently dropping them.
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
@@ -1054,7 +1071,8 @@ namespace vri::gl
                                                &combined,
                                                takesPush ? &pushMembers : nullptr,
                                                bIn(s.stage),
-                                               bOut(s.stage));
+                                               bOut(s.stage),
+                                               viewCount);
                 if (glsl.empty()) // SPIRV-Cross transpile error
                     return VriResult_Failure;
                 glslStages.push_back({gl, std::move(glsl)});
@@ -1411,6 +1429,16 @@ namespace vri::gl
 #endif
                             glFramebufferRenderbuffer(GL_FRAMEBUFFER, att, GL_RENDERBUFFER, v->texture->id);
                     }
+                    else if (a->viewMask != 0 && g_FramebufferTextureMultiviewOVR)
+                    {
+                        // Multiview: bind all views of the array texture in one pass (OVR_multiview).
+                        g_FramebufferTextureMultiviewOVR(GL_FRAMEBUFFER,
+                                                         att,
+                                                         v->texture->id,
+                                                         static_cast<GLint>(v->mip),
+                                                         static_cast<GLint>(v->layer),
+                                                         static_cast<GLsizei>(std::popcount(a->viewMask)));
+                    }
                     else
                     {
 #if !defined(VRI_GL_ES_HEADERS)
@@ -1434,8 +1462,16 @@ namespace vri::gl
                     const DescriptorGL* dv = Desc(a->depth->view);
                     const GLenum        attach =
                         dv->texture->glFormat == GL_DEPTH_STENCIL ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT;
+                    if (a->viewMask != 0 && g_FramebufferTextureMultiviewOVR)
+                        g_FramebufferTextureMultiviewOVR(GL_FRAMEBUFFER,
+                                                         attach,
+                                                         dv->texture->id,
+                                                         static_cast<GLint>(dv->mip),
+                                                         static_cast<GLint>(dv->layer),
+                                                         static_cast<GLsizei>(std::popcount(a->viewMask)));
+                    else
 #if !defined(VRI_GL_ES_HEADERS)
-                    if (dsa)
+                        if (dsa)
                         glNamedFramebufferTexture(fbo, attach, dv->texture->id, static_cast<GLint>(dv->mip));
                     else
 #endif
@@ -2317,7 +2353,13 @@ namespace vri::gl
             GLuint fbo = 0;
             glGenFramebuffers(1, &fbo);
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->target, t->id, mip);
+            // Array / cube textures must attach a single layer (glFramebufferTexture2D rejects a
+            // 2D_ARRAY target); honor the region's baseLayer. Plain 2D uses the 2D attach.
+            if (t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP || t->layerNum > 1)
+                glFramebufferTextureLayer(
+                    GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->id, mip, static_cast<GLint>(region->texture.baseLayer));
+            else
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->target, t->id, mip);
             glReadBuffer(GL_COLOR_ATTACHMENT0);
 
             glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);

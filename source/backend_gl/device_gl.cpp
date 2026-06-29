@@ -19,6 +19,10 @@
 
 namespace vri::gl
 {
+    // OVR_multiview entry point (declared in gl_loader.h); loaded from the platform proc loader at
+    // device init, null when the extension is absent.
+    PFN_FramebufferTextureMultiviewOVR g_FramebufferTextureMultiviewOVR = nullptr;
+
     DeviceGL::~DeviceGL()
     {
 #if defined(VRI_GL_EGL)
@@ -318,6 +322,8 @@ namespace vri::gl
             ReportError("EGL: gladLoadGLLoader failed");
             return false;
         }
+        g_FramebufferTextureMultiviewOVR = reinterpret_cast<PFN_FramebufferTextureMultiviewOVR>(
+            eglGetProcAddress("glFramebufferTextureMultiviewOVR")); // OVR_multiview (null if absent)
 #endif
         return true;
     }
@@ -403,6 +409,8 @@ namespace vri::gl
             ReportError("gladLoadGLLoader failed");
             return VriResult_Failure;
         }
+        g_FramebufferTextureMultiviewOVR = reinterpret_cast<PFN_FramebufferTextureMultiviewOVR>(
+            glfwGetProcAddress("glFramebufferTextureMultiviewOVR")); // OVR_multiview (null if absent)
 #endif
 #endif // !VRI_GL_EGL (GLFW context bring-up)
 
@@ -513,6 +521,28 @@ namespace vri::gl
         // Storage-texture clear via glClearTexImage (ARB_clear_texture, core 4.4).
         m_desc.hasClearStorageTexture = (!m_es && (major > 4 || (major == 4 && minor >= 4))) ? VRI_TRUE : VRI_FALSE;
 #endif
+        // Multiview (single-pass layered rendering) via GL_OVR_multiview2 - available on desktop GL
+        // AND GLES (the key path for standalone VR). Needs the loaded entry point + the multiview2
+        // extension (gl_ViewID_OVR with view-dependent control flow, which spirv-cross emits) + >=2
+        // views. (WebGL2/Emscripten has no proc loader here, so the pointer stays null = unsupported.)
+        bool  hasMv2   = false;
+        GLint extCount = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS, &extCount);
+        for (GLint i = 0; i < extCount; ++i)
+        {
+            const char* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
+            if (e && std::strcmp(e, "GL_OVR_multiview2") == 0)
+            {
+                hasMv2 = true;
+                break;
+            }
+        }
+        GLint maxViews = 0;
+        if (g_FramebufferTextureMultiviewOVR && hasMv2)
+            glGetIntegerv(GL_MAX_VIEWS_OVR, &maxViews);
+        const bool multiviewOk = g_FramebufferTextureMultiviewOVR != nullptr && hasMv2 && maxViews >= 2;
+        m_desc.hasMultiview    = multiviewOk ? VRI_TRUE : VRI_FALSE;
+        m_desc.maxViewCount    = multiviewOk ? static_cast<uint32_t>(maxViews) : 0u;
     }
 
     void DeviceGL::DetectFeatures()
