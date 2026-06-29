@@ -241,8 +241,8 @@ namespace vriex
         std::vector<uint16_t>            guiIndices;
         std::vector<VriImguiDrawCommand> guiCmds;
         VriImguiDrawData                 guiData {};
-        ImDrawData*                      guiDraw  = nullptr;
-        bool                             guiReady = false; // ImGui renderer + this frame's draw data
+        ImDrawData*                      guiDraw       = nullptr;
+        bool                             guiReady      = false; // ImGui renderer + this frame's draw data
         bool                             wantViewports = false; // multi-viewport (detached OS windows)
 #if !defined(__EMSCRIPTEN__)
         SDL_Window* window = nullptr;
@@ -479,7 +479,7 @@ namespace vriex
             // ---- Dear ImGui: context + VRI renderer + per-platform input ----
             ImGui::CreateContext();
             ImGui::StyleColorsDark();
-            ImGui::GetIO().IniFilename = nullptr; // don't write imgui.ini next to the examples
+            ImGui::GetIO().IniFilename = nullptr;                         // don't write imgui.ini next to the examples
             ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // dockable panels
             // Multi-viewport (detached OS windows) is opt-in (VRI_IMGUI_VIEWPORTS=1): it needs the
             // per-viewport swapchain + platform-callback wiring below and a real display to verify.
@@ -487,7 +487,7 @@ namespace vriex
             // Multi-viewport (detached OS windows) is on by default on desktop; opt out with
             // VRI_IMGUI_VIEWPORTS=0. Never in headless capture (VRI_MAX_FRAMES / VRI_CAPTURE renders
             // one offscreen target + a pixel self-check, so detached windows would break it).
-            const char* vpEnv   = std::getenv("VRI_IMGUI_VIEWPORTS");
+            const char* vpEnv    = std::getenv("VRI_IMGUI_VIEWPORTS");
             const bool  headless = std::getenv("VRI_MAX_FRAMES") || std::getenv("VRI_CAPTURE");
             wantViewports        = !headless && !(vpEnv && vpEnv[0] == '0');
             if (wantViewports)
@@ -603,12 +603,12 @@ namespace vriex
         // ImGui::RenderPlatformWindowsDefault() drives once per extra window each frame.
         struct ViewportRD
         {
-            ExampleApp*                      app       = nullptr;
-            VriSwapChain*                    swapchain = nullptr;
-            VriImguiViewport*                gvp       = nullptr;
-            VriCommandAllocator*             alloc     = nullptr;
-            VriCommandBuffer*                cmd       = nullptr;
-            VriFence*                        fence     = nullptr;
+            ExampleApp*                      app        = nullptr;
+            VriSwapChain*                    swapchain  = nullptr;
+            VriImguiViewport*                gvp        = nullptr;
+            VriCommandAllocator*             alloc      = nullptr;
+            VriCommandBuffer*                cmd        = nullptr;
+            VriFence*                        fence      = nullptr;
             uint64_t                         frameValue = 0;
             uint32_t                         w = 1, h = 1;
             std::vector<VriImguiVertex>      verts;
@@ -704,8 +704,12 @@ namespace vriex
             VriDescriptor* bbView = nullptr;
             app->c.CreateTextureView(app->dev, &bvd, &bbView);
 
-            auto barrier = [&](VriAccessFlags ba, VriLayout bl, VriPipelineStageFlags bs, VriAccessFlags aa,
-                               VriLayout al, VriPipelineStageFlags as) {
+            auto barrier = [&](VriAccessFlags        ba,
+                               VriLayout             bl,
+                               VriPipelineStageFlags bs,
+                               VriAccessFlags        aa,
+                               VriLayout             al,
+                               VriPipelineStageFlags as) {
                 VriTextureBarrierDesc b {};
                 b.texture       = backbuffer;
                 b.before.access = ba;
@@ -724,12 +728,16 @@ namespace vriex
             app->c.ResetCommandAllocator(rd->alloc);
             app->c.BeginCommandBuffer(rd->cmd);
             app->guiApi.CmdCopyImguiDataTo(rd->cmd, rd->gvp);
-            barrier(VriAccess_None, VriLayout_Undefined, VriPipelineStage_None, VriAccess_ColorAttachmentWrite,
-                    VriLayout_ColorAttachment, VriPipelineStage_ColorAttachmentOutput);
+            barrier(VriAccess_None,
+                    VriLayout_Undefined,
+                    VriPipelineStage_None,
+                    VriAccess_ColorAttachmentWrite,
+                    VriLayout_ColorAttachment,
+                    VriPipelineStage_ColorAttachmentOutput);
             VriAttachmentDesc rt {};
-            rt.view  = bbView;
-            rt.loadOp = (vp->Flags & ImGuiViewportFlags_NoRendererClear) ? VriAttachmentLoadOp_Load
-                                                                         : VriAttachmentLoadOp_Clear;
+            rt.view = bbView;
+            rt.loadOp =
+                (vp->Flags & ImGuiViewportFlags_NoRendererClear) ? VriAttachmentLoadOp_Load : VriAttachmentLoadOp_Clear;
             rt.storeOp                 = VriAttachmentStoreOp_Store;
             rt.clearValue.color.f32[3] = 1.0f; // opaque black behind the UI
             VriAttachmentsDesc att {};
@@ -745,8 +753,11 @@ namespace vriex
             app->c.CmdSetScissors(rd->cmd, &sc, 1);
             app->guiApi.CmdDrawImguiTo(rd->cmd, app->gui, rd->gvp, &rd->data);
             app->c.CmdEndRendering(rd->cmd);
-            barrier(VriAccess_ColorAttachmentWrite, VriLayout_ColorAttachment,
-                    VriPipelineStage_ColorAttachmentOutput, VriAccess_None, VriLayout_Present,
+            barrier(VriAccess_ColorAttachmentWrite,
+                    VriLayout_ColorAttachment,
+                    VriPipelineStage_ColorAttachmentOutput,
+                    VriAccess_None,
+                    VriLayout_Present,
                     VriPipelineStage_AllCommands);
             app->c.EndCommandBuffer(rd->cmd);
 

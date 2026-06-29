@@ -35,13 +35,13 @@ namespace vri::core
         // without clobbering each other's staging. ImguiState owns a default one for the main window.
         struct ImguiViewport
         {
-            ImguiState* owner = nullptr; // for the device + core table
-            VriBuffer*  vbuf = nullptr;
-            VriBuffer*  vstg = nullptr;
-            uint32_t    vCap = 0; // capacity in vertices
-            VriBuffer*  ibuf = nullptr;
-            VriBuffer*  istg = nullptr;
-            uint32_t    iCap = 0; // capacity in indices
+            ImguiState* owner    = nullptr; // for the device + core table
+            VriBuffer*  vbuf     = nullptr;
+            VriBuffer*  vstg     = nullptr;
+            uint32_t    vCap     = 0; // capacity in vertices
+            VriBuffer*  ibuf     = nullptr;
+            VriBuffer*  istg     = nullptr;
+            uint32_t    iCap     = 0; // capacity in indices
             uint64_t    vBytes   = 0;
             uint64_t    iBytes   = 0;
             bool        hasFrame = false;
@@ -93,9 +93,9 @@ namespace vri::core
             if (s->pools.empty() || s->poolUsed >= kImguiPoolBlock)
             {
                 VriDescriptorPoolDesc pd {};
-                pd.descriptorSetMaxNum = kImguiPoolBlock;
-                pd.textureMaxNum       = kImguiPoolBlock;
-                pd.samplerMaxNum       = kImguiPoolBlock;
+                pd.descriptorSetMaxNum  = kImguiPoolBlock;
+                pd.textureMaxNum        = kImguiPoolBlock;
+                pd.samplerMaxNum        = kImguiPoolBlock;
                 VriDescriptorPool* pool = nullptr;
                 if (s->c.CreateDescriptorPool(s->dev, &pd, &pool) != VriResult_Success)
                     return nullptr;
@@ -451,8 +451,9 @@ namespace vri::core
             Grow(s, vp->ibuf, vp->istg, vp->iCap, dd->indexCount, idxStride, VriBufferUsage_IndexBuffer);
             vp->vBytes = Align4(uint64_t(dd->vertexCount) * sizeof(VriImguiVertex));
             vp->iBytes = Align4(uint64_t(dd->indexCount) * idxStride);
-            std::memcpy(
-                s->c.MapBuffer(vp->vstg, 0, vp->vBytes), dd->vertices, size_t(dd->vertexCount) * sizeof(VriImguiVertex));
+            std::memcpy(s->c.MapBuffer(vp->vstg, 0, vp->vBytes),
+                        dd->vertices,
+                        size_t(dd->vertexCount) * sizeof(VriImguiVertex));
             s->c.UnmapBuffer(vp->vstg);
             std::memcpy(s->c.MapBuffer(vp->istg, 0, vp->iBytes), dd->indices, size_t(dd->indexCount) * idxStride);
             s->c.UnmapBuffer(vp->istg);
@@ -486,7 +487,10 @@ namespace vri::core
             c.CmdBarrier(cmd, &g);
         }
 
-        void VRI_CALL UploadImguiData(VriImgui* imgui, const VriImguiDrawData* dd) { UploadTo(&Self(imgui)->mainVp, dd); }
+        void VRI_CALL UploadImguiData(VriImgui* imgui, const VriImguiDrawData* dd)
+        {
+            UploadTo(&Self(imgui)->mainVp, dd);
+        }
 
         void VRI_CALL CmdCopyImguiData(VriCommandBuffer* cmd, VriImgui* imgui) { CmdCopyTo(cmd, &Self(imgui)->mainVp); }
 
@@ -584,7 +588,9 @@ namespace vri::core
 
         void VRI_CALL CmdCopyImguiDataTo(VriCommandBuffer* cmd, VriImguiViewport* vp) { CmdCopyTo(cmd, SelfVp(vp)); }
 
-        void VRI_CALL CmdDrawImguiTo(VriCommandBuffer* cmd, VriImgui* imgui, VriImguiViewport* vp,
+        void VRI_CALL CmdDrawImguiTo(VriCommandBuffer*       cmd,
+                                     VriImgui*               imgui,
+                                     VriImguiViewport*       vp,
                                      const VriImguiDrawData* dd)
         {
             DrawFrom(cmd, Self(imgui), SelfVp(vp), dd);

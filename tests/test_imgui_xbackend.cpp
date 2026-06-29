@@ -221,8 +221,12 @@ namespace
     }
 
     // Create a 1x1 solid-color sampled texture (+ view) and upload it in a one-shot submit.
-    bool MakeSolid(const VriCoreInterface& c, VriDevice* dev, VriQueue* q, uint32_t rgba, VriTexture** outTex,
-                   VriDescriptor** outView)
+    bool MakeSolid(const VriCoreInterface& c,
+                   VriDevice*              dev,
+                   VriQueue*               q,
+                   uint32_t                rgba,
+                   VriTexture**            outTex,
+                   VriDescriptor**         outView)
     {
         VriTextureDesc td {};
         td.type           = VriTextureType_2D;
@@ -246,10 +250,10 @@ namespace
             return false;
 
         VriBufferDesc sd {};
-        sd.size            = 4;
-        sd.usage           = VriBufferUsage_TransferSrc;
-        sd.memoryLocation  = VriMemoryLocation_HostUpload;
-        VriBuffer* stg     = nullptr;
+        sd.size           = 4;
+        sd.usage          = VriBufferUsage_TransferSrc;
+        sd.memoryLocation = VriMemoryLocation_HostUpload;
+        VriBuffer* stg    = nullptr;
         REQUIRE(c.CreateBuffer(dev, &sd, &stg) == VriResult_Success);
         std::memcpy(c.MapBuffer(stg, 0, 4), &rgba, 4);
         c.UnmapBuffer(stg);
@@ -261,7 +265,11 @@ namespace
         VriFence* f = nullptr;
         c.CreateFence(dev, 0, &f);
         c.BeginCommandBuffer(cmd);
-        auto bar = [&](VriAccessFlags ba, VriLayout bl, VriPipelineStageFlags bs, VriAccessFlags aa, VriLayout al,
+        auto bar = [&](VriAccessFlags        ba,
+                       VriLayout             bl,
+                       VriPipelineStageFlags bs,
+                       VriAccessFlags        aa,
+                       VriLayout             al,
                        VriPipelineStageFlags as) {
             VriTextureBarrierDesc tb {};
             tb.texture       = *outTex;
@@ -277,16 +285,24 @@ namespace
             g.textureNum = 1;
             c.CmdBarrier(cmd, &g);
         };
-        bar(VriAccess_None, VriLayout_Undefined, VriPipelineStage_None, VriAccess_CopyDestinationWrite,
-            VriLayout_CopyDestination, VriPipelineStage_Transfer);
+        bar(VriAccess_None,
+            VriLayout_Undefined,
+            VriPipelineStage_None,
+            VriAccess_CopyDestinationWrite,
+            VriLayout_CopyDestination,
+            VriPipelineStage_Transfer);
         VriBufferTextureCopyDesc up {};
         up.texture.aspect   = VriImageAspect_Color;
         up.texture.layerNum = 1;
         up.texture.width    = 1;
         up.texture.height   = 1;
         c.CmdUploadBufferToTexture(cmd, *outTex, stg, &up);
-        bar(VriAccess_CopyDestinationWrite, VriLayout_CopyDestination, VriPipelineStage_Transfer,
-            VriAccess_ShaderResourceRead, VriLayout_ShaderResource, VriPipelineStage_FragmentShader);
+        bar(VriAccess_CopyDestinationWrite,
+            VriLayout_CopyDestination,
+            VriPipelineStage_Transfer,
+            VriAccess_ShaderResourceRead,
+            VriLayout_ShaderResource,
+            VriPipelineStage_FragmentShader);
         c.EndCommandBuffer(cmd);
         VriFenceSubmitDesc sig {};
         sig.fence = f;
@@ -325,10 +341,10 @@ namespace
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
         VriImguiDesc gd {};
-        gd.uploadQueue = queue;
-        gd.colorFormat = VriFormat_RGBA8_UNORM;
-        gd.depthFormat = VriFormat_Unknown;
-        gd.fontAtlas   = nullptr; // ImGui 1.92: host owns every texture
+        gd.uploadQueue        = queue;
+        gd.colorFormat        = VriFormat_RGBA8_UNORM;
+        gd.depthFormat        = VriFormat_Unknown;
+        gd.fontAtlas          = nullptr; // ImGui 1.92: host owns every texture
         VriImgui*       imgui = nullptr;
         const VriResult cr    = gui.CreateImgui(dev, &gd, &imgui);
         if (cr == VriResult_Unsupported)
@@ -479,12 +495,12 @@ namespace
         c.QueueSubmit(queue, &submit);
         c.Wait(fence, 1);
 
-        const uint8_t* px      = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rbd.size));
-        auto           at      = [&](uint32_t x, uint32_t y) { return px + (static_cast<size_t>(y) * kW + x) * 4; };
-        const uint8_t* left    = at(kW / 4, kH / 2);     // left half -> white texture
-        const uint8_t* right   = at(3 * kW / 4, kH / 2); // right half -> blue texture
-        const bool     lWhite  = left[0] > 240 && left[1] > 240 && left[2] > 240;
-        const bool     rBlue   = right[0] < 16 && right[1] < 16 && right[2] > 240;
+        const uint8_t* px     = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rbd.size));
+        auto           at     = [&](uint32_t x, uint32_t y) { return px + (static_cast<size_t>(y) * kW + x) * 4; };
+        const uint8_t* left   = at(kW / 4, kH / 2);     // left half -> white texture
+        const uint8_t* right  = at(3 * kW / 4, kH / 2); // right half -> blue texture
+        const bool     lWhite = left[0] > 240 && left[1] > 240 && left[2] > 240;
+        const bool     rBlue  = right[0] < 16 && right[1] < 16 && right[2] > 240;
         c.UnmapBuffer(readback);
 
         // Drop one cached texture (1.92 WantDestroy path) and confirm the renderer survives a redraw.
@@ -537,10 +553,10 @@ namespace
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
         VriImguiDesc gd {};
-        gd.uploadQueue = queue;
-        gd.colorFormat = VriFormat_RGBA8_UNORM;
-        gd.depthFormat = VriFormat_Unknown;
-        gd.fontAtlas   = nullptr;
+        gd.uploadQueue        = queue;
+        gd.colorFormat        = VriFormat_RGBA8_UNORM;
+        gd.depthFormat        = VriFormat_Unknown;
+        gd.fontAtlas          = nullptr;
         VriImgui*       imgui = nullptr;
         const VriResult cr    = gui.CreateImgui(dev, &gd, &imgui);
         if (cr == VriResult_Unsupported)
@@ -562,14 +578,16 @@ namespace
         REQUIRE(vp1 != nullptr);
         REQUIRE(vp2 != nullptr);
 
-        const uint32_t       white = 0xFFFFFFFFu;
-        const VriImguiVertex left[4] = { // left half, white texture
+        const uint32_t       white   = 0xFFFFFFFFu;
+        const VriImguiVertex left[4] = {
+            // left half, white texture
             {{0, 0}, {0.5f, 0.5f}, white},
             {{float(kW) / 2, 0}, {0.5f, 0.5f}, white},
             {{float(kW) / 2, float(kH)}, {0.5f, 0.5f}, white},
             {{0, float(kH)}, {0.5f, 0.5f}, white},
         };
-        const VriImguiVertex right[4] = { // right half, blue texture
+        const VriImguiVertex right[4] = {
+            // right half, blue texture
             {{float(kW) / 2, 0}, {0.5f, 0.5f}, white},
             {{float(kW), 0}, {0.5f, 0.5f}, white},
             {{float(kW), float(kH)}, {0.5f, 0.5f}, white},
