@@ -212,6 +212,16 @@ namespace vri::gl
                 if (viewCount > 1)
                     comp.set_enabled_interface_variables(comp.get_active_interface_variables());
 
+                // A texture accessed only by texelFetch (.Load) - e.g. an integer index
+                // texture - carries no sampler to fuse, but GLSL still needs a combined
+                // sampler to fetch it. Synthesise a dummy sampler for those images first,
+                // or build_combined_image_samplers() aborts ("texelFetch without sampler").
+                if (const spirv_cross::VariableID dummy = comp.build_dummy_sampler_for_combined_images())
+                {
+                    comp.set_decoration(dummy, spv::DecorationDescriptorSet, 0);
+                    comp.set_decoration(dummy, spv::DecorationBinding, 0);
+                }
+
                 // GLSL has no separate texture/sampler: fuse each Vulkan (texture,
                 // sampler) pair into one combined sampler2D. Must run before
                 // get_shader_resources()/compile().
