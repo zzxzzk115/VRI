@@ -17,6 +17,11 @@ target("vri-webgl-triangle")
     -- port flags arrive transitively from the vri target (public ldflags).
     set_extension(".html")
     add_ldflags("-sEXIT_RUNTIME=1", "-sALLOW_MEMORY_GROWTH=1", "--emrun", {force = true})
+    -- Emscripten 6.0.2 flipped GROWABLE_ARRAYBUFFERS to default-on under
+    -- ALLOW_MEMORY_GROWTH; on Chrome 149/150 that path breaks this page (hang
+    -- after resources-created). Opt out until the resizable-ArrayBuffer path is
+    -- stable.
+    add_ldflags("-sGROWABLE_ARRAYBUFFERS=0", {force = true})
     -- spirv-cross uses C++ exceptions; enable them at link, plus assertions so a
     -- runtime abort prints a real message instead of "Aborted(undefined)".
     add_ldflags("-fexceptions", "-sASSERTIONS=2", {force = true})
@@ -38,6 +43,9 @@ target("vri-webgpu-triangle")
     -- ASYNCIFY: the backend yields with emscripten_sleep while the browser resolves
     -- the async WebGPU adapter/device/buffer-map promises.
     add_ldflags("-sEXIT_RUNTIME=1", "-sALLOW_MEMORY_GROWTH=1", "-sASYNCIFY", "--emrun", {force = true})
+    -- Same GROWABLE_ARRAYBUFFERS opt-out as vri-webgl-triangle (emscripten 6.0.2
+    -- default flip); here the page died right after device-created.
+    add_ldflags("-sGROWABLE_ARRAYBUFFERS=0", {force = true})
     add_ldflags("-fexceptions", "-sASSERTIONS=2", {force = true})
 target_end()
 end
