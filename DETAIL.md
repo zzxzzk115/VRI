@@ -4,8 +4,13 @@ Detailed notes on how VRI implements each feature across backends — the fallba
 the native extension each path uses. For the at-a-glance support matrix, see the
 [feature support table](README.md#feature-support) in the README.
 
-**✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **❌ Unsupported**
+**✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **⬜ Planned** (the API supports it; not yet in VRI) &nbsp;·&nbsp; **❌ Unsupported by the API**
 
+- **Planned (⬜).** A few cells are things the backend's API *can* do but VRI hasn't wired yet —
+  distinct from ❌ (the API genuinely can't). Currently: **Direct3D 12** geometry shaders,
+  tessellation (hull/domain), and multiview (via `ViewInstancing` + `SV_ViewID`); **Metal**
+  subgroup / wave operations (SIMD-group functions) and fragment-shader barycentrics
+  (`[[barycentric_coord]]`). The Metal ones await Apple hardware to implement and verify.
 - **Push constants / bindless** are exposed uniformly: where the backend lacks the hardware feature,
   VRI provides a transparent fallback (an emulated uniform path, or a texture-array path) that
   produces the same result.

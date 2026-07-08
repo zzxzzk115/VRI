@@ -54,7 +54,7 @@ lavapipe** (`apt install mesa-vulkan-drivers` — the usual Linux-CI choice). Se
 
 How each feature is supported on each backend:
 
-**✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **❌ Unsupported**
+**✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **⬜ Planned** (the API supports it; not yet in VRI) &nbsp;·&nbsp; **❌ Unsupported by the API**
 
 | Feature | Vulkan | Direct3D 12 | Metal | WebGPU | OpenGL | WebGL 2 | OpenGL ES |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -65,17 +65,17 @@ How each feature is supported on each backend:
 | Compute shaders | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Push constants | ✅ | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 |
 | Bindless / descriptor indexing | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 |
-| Geometry shaders | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Tessellation | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Geometry shaders | ✅ | ⬜ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Tessellation | ✅ | ⬜ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Mesh shaders | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Ray tracing | ✅ | ✅ | ✅ | 🟡 | 🟡 | ❌ | ❌ |
 | Opacity micromaps | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Variable rate shading | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Conservative rasterization | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Fragment-shader barycentrics | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Fragment-shader barycentrics | ✅ | ✅ | ⬜ | ❌ | ❌ | ❌ | ❌ |
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Subgroup / wave operations | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Multiview (single-pass stereo) | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Subgroup / wave operations | ✅ | ✅ | ⬜ | ❌ | ❌ | ❌ | ❌ |
+| Multiview (single-pass stereo) | ✅ | ⬜ | ✅ | ❌ | ✅ | ❌ | ✅ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GPU timestamp queries | ✅ | ✅ | ✅ | 🟡 | 🟡 | ❌ | ❌ |
 | Occlusion queries | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
