@@ -1,0 +1,4 @@
+# Keep shell scripts and git hooks LF so they run under /bin/sh on every platform,
+# regardless of a contributor's core.autocrlf setting.
+*.sh            text eol=lf
+scripts/hooks/* text eol=lf

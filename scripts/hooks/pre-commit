@@ -1,0 +1,45 @@
+#!/bin/sh
+# VRI pre-commit hook: run clang-format's CI check on the STAGED C/C++ files under
+# source/ examples/ tests/ and block the commit on any violation - so a formatting
+# slip never reaches CI. Same command CI runs (clang-format --dry-run --Werror).
+#
+# Install once per clone (git does not auto-run committed hooks):
+#     git config core.hooksPath scripts/hooks
+# Bypass for a single commit:
+#     git commit --no-verify
+#
+# CI pins clang-format 20.1.0 (`pip install clang-format==20.1.0`); other majors can
+# format differently, so this warns when the local version is not 20.x.
+set -eu
+
+# Staged, still-present files in the CI-checked trees with a C/C++ extension.
+files=$(git diff --cached --name-only --diff-filter=ACMR \
+        | grep -E '^(source|examples|tests)/.*\.(cpp|cc|h|hpp)$' || true)
+[ -z "$files" ] && exit 0
+
+if ! command -v clang-format >/dev/null 2>&1; then
+    echo "pre-commit: clang-format not on PATH; skipping the format check." >&2
+    echo "            Install the CI version:  pip install clang-format==20.1.0" >&2
+    exit 0
+fi
+
+ver=$(clang-format --version | sed -n 's/.*version \([0-9]\{1,\}\).*/\1/p')
+if [ "${ver:-0}" != "20" ]; then
+    echo "pre-commit: warning: clang-format ${ver:-?} found; CI pins 20.1.0 (results may differ)." >&2
+fi
+
+bad=""
+for f in $files; do
+    clang-format --dry-run --Werror "$f" >/dev/null 2>&1 || bad="$bad $f"
+done
+
+if [ -n "$bad" ]; then
+    echo "pre-commit: clang-format violations in:" >&2
+    for f in $bad; do echo "    $f" >&2; done
+    echo "" >&2
+    echo "  fix:      clang-format -i$bad" >&2
+    echo "  re-stage: git add$bad" >&2
+    echo "  (bypass once: git commit --no-verify)" >&2
+    exit 1
+fi
+exit 0
