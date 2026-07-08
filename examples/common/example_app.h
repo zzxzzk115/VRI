@@ -411,11 +411,11 @@ namespace vriex
             }
             else
             {
-                apiName = api == VriGraphicsAPI_WebGPU  ? "WebGPU" :
-                          api == VriGraphicsAPI_D3D12   ? "D3D12" :
-                          api == VriGraphicsAPI_Metal   ? "Metal" :
+                apiName = api == VriGraphicsAPI_WebGPU   ? "WebGPU" :
+                          api == VriGraphicsAPI_D3D12    ? "D3D12" :
+                          api == VriGraphicsAPI_Metal    ? "Metal" :
                           api == VriGraphicsAPI_Software ? "Software (CPU)" :
-                                                          "Vulkan";
+                                                           "Vulkan";
             }
 
             // Now the backend is known, label the window/page with it.

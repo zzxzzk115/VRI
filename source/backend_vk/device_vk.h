@@ -92,8 +92,8 @@ namespace vri::vk
         bool     m_validation                        = false;
         // Software (CPU) rendering was requested (graphicsAPI == VriGraphicsAPI_Software): pick a
         // VK_PHYSICAL_DEVICE_TYPE_CPU device (SwiftShader / lavapipe) and never a GPU.
-        bool     m_software                           = false;
-        uint64_t m_enabledFeatures                   = 0; // granted VriFeatureBits
+        bool     m_software        = false;
+        uint64_t m_enabledFeatures = 0; // granted VriFeatureBits
         // OpenXR XR_KHR_vulkan_enable2: when set, instance/device creation is routed through these
         // hooks (which forward to xrCreateVulkan*KHR). Borrowed from the caller's nativeCreateInfo.
         const VriVulkanCreateHooks* m_vkHooks = nullptr;
