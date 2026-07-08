@@ -209,6 +209,10 @@ namespace vri::vk
 
         VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
         {
+            // A swapchain must present on a queue; reject a null queue instead of dereferencing it.
+            if (!device || !desc || !desc->queue || !out)
+                return VriResult_InvalidArgument;
+
             DeviceVK*    d           = Dev(device);
             SwapChainVK* sc          = new SwapChainVK {};
             sc->device               = d;

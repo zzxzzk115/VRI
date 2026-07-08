@@ -636,6 +636,7 @@ namespace vriex
             {
                 VriSwapChainDesc scd {};
                 scd.window      = vriWindowHandleFromSDL3(win);
+                scd.queue       = app->queue; // present on the same graphics queue as the main window
                 scd.format      = app->swapFormat;
                 scd.width       = rd->w;
                 scd.height      = rd->h;
