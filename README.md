@@ -153,6 +153,13 @@ One example is opt-in because it needs an extra SDK:
 xmake f --vri_build_cuda_interop=y && xmake run example-cuda-interop
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the one-time hook setup, the clang-format convention
+(pinned to 20.1.0), and commit style. TL;DR: run `scripts/setup-hooks.sh` (or
+`scripts\setup-hooks.ps1`) once — it enables a pre-commit hook and provisions the pinned
+clang-format, so your formatting stays CI-clean automatically.
+
 ## License
 
 VRI is released under the [MIT License](LICENSE). The bundled FlightHelmet model is CC0, from the
