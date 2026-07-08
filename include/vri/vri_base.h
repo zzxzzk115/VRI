@@ -13,9 +13,10 @@
 #include <stdint.h>
 
 /* ---- versioning ------------------------------------------------------- */
-#define VRI_VERSION_MAJOR 0
-#define VRI_VERSION_MINOR 1
-#define VRI_VERSION_PATCH 0
+/* VRI_VERSION_MAJOR/MINOR/PATCH are generated from set_version() in the root
+ * xmake.lua (via add_configfiles) into vri/vri_version.h - the version lives in
+ * exactly one place. Bump it there, not here. */
+#include <vri/vri_version.h>
 
 /* ---- ABI / calling-convention macros ---------------------------------- */
 #if defined(_WIN32)

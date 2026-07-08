@@ -7,6 +7,14 @@ target("vri")
     -- public C/C++ headers
     add_includedirs("$(projectdir)/include", {public = true})
 
+    -- vri/vri_version.h is generated from set_version() in the root xmake.lua, so the
+    -- version macros live in exactly one place (no hand-edited header to drift). Output
+    -- lands in the build dir, which is put on the public include path and installed with
+    -- the package headers.
+    add_configfiles("$(projectdir)/include/vri/vri_version.h.in", {filename = "vri/vri_version.h"})
+    add_includedirs("$(builddir)", {public = true})
+    add_headerfiles("$(builddir)/(vri/vri_version.h)")
+
     -- internal headers (core, backends)
     add_includedirs(os.scriptdir(), {public = false})
 
