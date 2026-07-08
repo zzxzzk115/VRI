@@ -26,3 +26,6 @@ vsxmake*/
 # clangd: the root .clangd is generated (clangd.config rule copies it from
 # .clangd.win/.clangd.nowin). The per-directory include/vri/.clangd is tracked.
 /.clangd
+
+# Repo-local clang-format provisioned by scripts/setup-hooks (pinned to CI's 20.1.0).
+scripts/.cf-venv/
