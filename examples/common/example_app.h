@@ -40,8 +40,8 @@
 
 namespace vriex
 {
-    // VRI_API (vulkan|webgpu|opengl|d3d12) or, on the web, ?backend=webgpu|webgl override
-    // the backend; otherwise VriGraphicsAPI_Auto lets VRI pick (WebGPU first, then WebGL).
+    // VRI_API (vulkan|webgpu|opengl|d3d12|metal|software) or, on the web, ?backend=webgpu|webgl
+    // override the backend; otherwise VriGraphicsAPI_Auto lets VRI pick (WebGPU first, then WebGL).
     inline VriGraphicsAPI SelectApi()
     {
         const char*    env = std::getenv("VRI_API");
@@ -56,6 +56,8 @@ namespace vriex
             api = VriGraphicsAPI_Vulkan;
         else if (env && (std::strcmp(env, "metal") == 0 || std::strcmp(env, "mtl") == 0))
             api = VriGraphicsAPI_Metal;
+        else if (env && (std::strcmp(env, "software") == 0 || std::strcmp(env, "sw") == 0))
+            api = VriGraphicsAPI_Software; // CPU rendering via a software Vulkan ICD (SwiftShader)
 #if defined(__EMSCRIPTEN__)
         const int b = EM_ASM_INT({
             var s = location.search;
@@ -409,10 +411,11 @@ namespace vriex
             }
             else
             {
-                apiName =
-                    api == VriGraphicsAPI_WebGPU ?
-                        "WebGPU" :
-                        (api == VriGraphicsAPI_D3D12 ? "D3D12" : (api == VriGraphicsAPI_Metal ? "Metal" : "Vulkan"));
+                apiName = api == VriGraphicsAPI_WebGPU  ? "WebGPU" :
+                          api == VriGraphicsAPI_D3D12   ? "D3D12" :
+                          api == VriGraphicsAPI_Metal   ? "Metal" :
+                          api == VriGraphicsAPI_Software ? "Software (CPU)" :
+                                                          "Vulkan";
             }
 
             // Now the backend is known, label the window/page with it.

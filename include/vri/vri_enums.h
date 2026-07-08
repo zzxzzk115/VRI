@@ -23,6 +23,12 @@ typedef enum VriGraphicsAPI
     VriGraphicsAPI_D3D11,
     VriGraphicsAPI_D3D12,
     VriGraphicsAPI_Metal,
+    // Software (CPU) rendering: the Vulkan backend driven by a software Vulkan implementation
+    // (SwiftShader / Mesa lavapipe) instead of a GPU, so rendering works on machines with no
+    // usable GPU (CI, headless, minimal VMs). Full Vulkan feature set at CPU speed. The device
+    // reports VriAdapterType_Software; a request fails with Unsupported if no software Vulkan
+    // device is present.
+    VriGraphicsAPI_Software,
     // Let VRI pick the best available backend for the platform (tries a platform-ordered
     // list of the compiled-in backends until one creates a device). Query the actual
     // choice afterwards via VriDeviceDesc::graphicsAPI.

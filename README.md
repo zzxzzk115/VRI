@@ -37,9 +37,18 @@ Think "[NRI](https://github.com/NVIDIA-RTX/NRI), but with more graphics APIs and
 | **OpenGL** | Windows, Linux (and macOS, capped at 4.1) |
 | **WebGL 2** | **Web** |
 | **OpenGL ES** | Linux / embedded (e.g. Raspberry Pi) |
+| **Software (CPU)** | Windows, Linux, macOS — anywhere with a software Vulkan ICD |
 
 On the web, VRI runs through **two** backends — WebGPU and WebGL 2 — both via Emscripten. The
 desktop application requests `Auto` and VRI picks the best backend for the platform.
+
+**Software (CPU) rendering** (`VriGraphicsAPI_Software`) runs the Vulkan backend on a software
+Vulkan implementation — no GPU required — so rendering works on headless CI, minimal VMs, and
+machines with no usable GPU. It has the full Vulkan feature set at CPU speed, and is the last
+`Auto` fallback (only reached when no GPU backend can create a device). It needs a software Vulkan
+ICD present: **[SwiftShader](https://github.com/google/swiftshader)** (cross-platform) or **Mesa
+lavapipe** (`apt install mesa-vulkan-drivers` — the usual Linux-CI choice). See
+[DETAIL.md](DETAIL.md#software-cpu-rendering) for how VRI selects it.
 
 ## Feature support
 
@@ -108,7 +117,7 @@ xmake run example-cube   # hosts the page in your browser
 
 Every example runs across the backends and the web, with a Dear ImGui control panel (rendered
 through VRI's built-in ImGui renderer, `ext/vri_ext_imgui.h`). Backend is auto-selected; override on desktop with
-`VRI_API=vulkan|webgpu|opengl|d3d12|metal`, or in the browser with `?backend=webgpu|webgl`.
+`VRI_API=vulkan|webgpu|opengl|d3d12|metal|software`, or in the browser with `?backend=webgpu|webgl`.
 
 ```sh
 xmake run example-triangle            # hello triangle

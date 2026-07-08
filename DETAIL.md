@@ -102,3 +102,61 @@ the native extension each path uses. For the at-a-glance support matrix, see the
   report `Unsupported`. **`CmdClearStorageTexture`** clears a storage texture to a color the same way
   (`vkCmdClearColorImage` / `ClearUnorderedAccessView{Float,Uint}` / `glClearTexImage`, GL 4.4),
   gated by `hasClearStorageTexture`.
+
+## Software (CPU) rendering
+
+`VriGraphicsAPI_Software` renders **without a GPU** by running VRI's Vulkan backend on top of a
+*software Vulkan implementation* — a CPU ICD that JITs SPIR-V shaders. This is the same approach
+Chrome and the Android emulator use for their GPU-less fallback. It exposes the **full Vulkan
+feature set** (the whole Vulkan column above) at CPU speed, and the device reports
+`VriAdapterType_Software`.
+
+**Selecting it.** Pass `VriGraphicsAPI_Software` to `vriCreateDevice`, or run the examples with
+`VRI_API=software`. It is also the **last `Auto` fallback** on every non-web platform, so a machine
+with no usable GPU still renders instead of failing outright. If no software Vulkan device is
+present, a `Software` request returns `VriResult_Unsupported` — it never silently falls back to a
+GPU, because "software" means the CPU path specifically.
+
+**Providing the ICD (bring-your-own).** VRI does not bundle a software renderer; it uses whichever
+software Vulkan ICD is on the system, resolved in this order: (1) a caller-set `VK_ICD_FILENAMES` /
+`VK_DRIVER_FILES` (the standard Vulkan loader env vars) is respected as-is; (2) otherwise, a
+**[SwiftShader](https://github.com/google/swiftshader)** manifest (`vk_swiftshader_icd.json`)
+sitting next to the executable is selected automatically. If neither is found, the request fails
+with a message naming both options.
+
+Per platform:
+
+- **Linux** — `sudo apt install mesa-vulkan-drivers` installs **lavapipe**; the loader discovers it
+  automatically, so `VRI_API=software` just works with no env var. This is the standard headless-CI
+  setup (equivalents: `dnf install mesa-vulkan-drivers`, `pacman -S vulkan-swrast`, …).
+
+  ```sh
+  sudo apt install -y mesa-vulkan-drivers
+  VRI_API=software xmake run example-triangle
+  ```
+
+- **Windows** — download a Mesa build that includes lavapipe (e.g.
+  [pal1000/mesa-dist-win](https://github.com/pal1000/mesa-dist-win/releases), the
+  `mesa3d-<ver>-release-msvc.7z`), extract it, and point the loader at the ICD manifest:
+
+  ```powershell
+  $env:VK_ICD_FILENAMES = "C:\path\to\mesa\x64\lvp_icd.x86_64.json"
+  $env:VRI_API = "software"
+  xmake run example-triangle
+  ```
+
+  Or build **SwiftShader** and drop `vk_swiftshader.dll` + `vk_swiftshader_icd.json` next to the
+  app for zero-config auto-discovery (no env var needed).
+
+- **macOS** — build **SwiftShader** (`vk_swiftshader.dylib` + manifest) and either set
+  `VK_ICD_FILENAMES` or place it beside the app. Note **MoltenVK is *not* a software renderer** — it
+  maps Vulkan onto the Metal GPU; for a genuine no-GPU path use SwiftShader.
+
+  ```sh
+  cmake -S swiftshader -B swiftshader/build -DSWIFTSHADER_BUILD_TESTS=OFF
+  cmake --build swiftshader/build --config Release
+  export VK_ICD_FILENAMES=.../swiftshader/build/Darwin/vk_swiftshader_icd.json
+  VRI_API=software xmake run example-triangle
+  ```
+
+The selection logic lives in `source/backend_vk/software_icd_vk.cpp`.

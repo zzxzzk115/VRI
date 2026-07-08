@@ -7,6 +7,7 @@
 #include "pipeline_cache_vk.h"
 #include "query_vk.h"
 #include "rt_vk.h"
+#include "software_icd_vk.h"
 #include "swapchain_vk.h"
 #include "vrs_vk.h"
 
@@ -99,6 +100,12 @@ namespace vri::vk
         if (desc.callbackInterface)
             m_callback = *desc.callbackInterface;
         m_validation = desc.enableValidation != VRI_FALSE;
+        m_software   = desc.graphicsAPI == VriGraphicsAPI_Software;
+
+        // Software mode: opt a bundled SwiftShader ICD into the loader (if present and the app
+        // didn't already choose one) BEFORE the first Vulkan call, so it is scanned at init.
+        if (m_software)
+            TrySelectSoftwareICD();
 
         // OpenXR XR_KHR_vulkan_enable2: adopt the instance/device creation hooks (Vulkan only).
         const auto* hooks = static_cast<const VriVulkanCreateHooks*>(desc.nativeCreateInfo);
@@ -235,6 +242,27 @@ namespace vri::vk
         }
         std::vector<VkPhysicalDevice> devices(count);
         vkEnumeratePhysicalDevices(m_instance, &count, devices.data());
+
+        // Software rendering: require a CPU-type device (SwiftShader / lavapipe) and never fall
+        // back to a GPU - "software" means the CPU path specifically, so a missing software ICD is
+        // an honest Unsupported rather than a silent hardware substitute. Takes precedence over
+        // adapterIndex (the software device is picked by type, not position).
+        if (m_software)
+        {
+            for (VkPhysicalDevice d : devices)
+            {
+                VkPhysicalDeviceProperties props;
+                vkGetPhysicalDeviceProperties(d, &props);
+                if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
+                {
+                    m_physicalDevice = d;
+                    return VriResult_Success;
+                }
+            }
+            ReportError("software rendering requested but no software Vulkan device found "
+                        "(install SwiftShader or Mesa lavapipe, or point VK_ICD_FILENAMES at one)");
+            return VriResult_Unsupported;
+        }
 
         if (adapterIndex < count)
         {
@@ -802,7 +830,9 @@ namespace vri::vk
                 m_desc.adapter.sharedMemorySize += mem.memoryHeaps[i].size;
         }
 
-        m_desc.graphicsAPI                     = VriGraphicsAPI_Vulkan;
+        // Report Software when driven on a software Vulkan ICD, so callers see the CPU path they
+        // asked for (the adapter also reports VriAdapterType_Software from the CPU device type).
+        m_desc.graphicsAPI                     = m_software ? VriGraphicsAPI_Software : VriGraphicsAPI_Vulkan;
         m_desc.apiVersionMajor                 = VK_API_VERSION_MAJOR(props.apiVersion);
         m_desc.apiVersionMinor                 = VK_API_VERSION_MINOR(props.apiVersion);
         m_desc.viewportMaxNum                  = props.limits.maxViewports;

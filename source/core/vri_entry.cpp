@@ -54,6 +54,11 @@ namespace
 #if defined(VRI_BACKEND_VULKAN)
             case VriGraphicsAPI_Vulkan:
                 return vri::vk::CreateDevice(desc, result);
+            // Software (CPU) rendering runs the Vulkan backend against a software Vulkan ICD
+            // (SwiftShader / lavapipe); the backend forces a VK_PHYSICAL_DEVICE_TYPE_CPU device
+            // and reports Unsupported if none is present.
+            case VriGraphicsAPI_Software:
+                return vri::vk::CreateDevice(desc, result);
 #endif
 #if defined(VRI_BACKEND_WGPU)
             case VriGraphicsAPI_WebGPU:
@@ -84,16 +89,26 @@ namespace
     // prefers the most capable / best-tested backend per platform.
     const VriGraphicsAPI* AutoOrder(uint32_t& count)
     {
+        // Software (CPU) rendering is the LAST candidate on every non-web platform: only reached
+        // when no GPU backend could create a device, and only succeeds when a software Vulkan ICD
+        // is present - so a GPU-less machine still renders instead of failing outright.
 #if defined(__EMSCRIPTEN__)
         static const VriGraphicsAPI o[] = {VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGLES};
 #elif defined(_WIN32)
-        static const VriGraphicsAPI o[] = {
-            VriGraphicsAPI_Vulkan, VriGraphicsAPI_D3D12, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL};
+        static const VriGraphicsAPI o[] = {VriGraphicsAPI_Vulkan,
+                                           VriGraphicsAPI_D3D12,
+                                           VriGraphicsAPI_WebGPU,
+                                           VriGraphicsAPI_OpenGL,
+                                           VriGraphicsAPI_Software};
 #elif defined(__APPLE__)
-        static const VriGraphicsAPI o[] = {
-            VriGraphicsAPI_Metal, VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL};
+        static const VriGraphicsAPI o[] = {VriGraphicsAPI_Metal,
+                                           VriGraphicsAPI_Vulkan,
+                                           VriGraphicsAPI_WebGPU,
+                                           VriGraphicsAPI_OpenGL,
+                                           VriGraphicsAPI_Software};
 #else // Linux / Android
-        static const VriGraphicsAPI o[] = {VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL};
+        static const VriGraphicsAPI o[] = {
+            VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL, VriGraphicsAPI_Software};
 #endif
         count = static_cast<uint32_t>(sizeof(o) / sizeof(o[0]));
         return o;

@@ -271,6 +271,7 @@ namespace vri::core
             switch (c.GetDeviceDesc(device)->graphicsAPI)
             {
                 case VriGraphicsAPI_Vulkan:
+                case VriGraphicsAPI_Software: // software rendering is the Vulkan backend on a CPU ICD
                 case VriGraphicsAPI_OpenGL:
                 case VriGraphicsAPI_OpenGLES:
                 case VriGraphicsAPI_Metal: // Metal transpiles the SPIR-V to MSL at pipeline creation
