@@ -12,31 +12,44 @@
 
 #include <cstdint>
 
-#include "shaders/tests/triangle_tess_spv.h" // g_triangleTessSpv (vertex/hull/domain/fragment; SPIR-V only)
+#include "shaders/tests/triangle_tess_dxbc.h" // g_triangleTessDxbcVS/HS/DS/PS (D3D12; fxc sm_5)
+#include "shaders/tests/triangle_tess_spv.h"  // g_triangleTessSpv            (Vulkan / GL, transpiled)
 
 namespace
 {
     constexpr uint32_t kW = 64;
     constexpr uint32_t kH = 64;
 
-    void MakeTessShaders(VriShaderDesc sh[4])
+    void MakeTessShaders(VriShaderDesc sh[4], VriGraphicsAPI api)
     {
         sh[0].stage          = VriShaderStage_Vertex;
-        sh[0].bytecode       = g_triangleTessSpv;
-        sh[0].bytecodeSize   = sizeof(g_triangleTessSpv);
         sh[0].entryPointName = "vertexMain";
         sh[1].stage          = VriShaderStage_TessControl;
-        sh[1].bytecode       = g_triangleTessSpv;
-        sh[1].bytecodeSize   = sizeof(g_triangleTessSpv);
         sh[1].entryPointName = "hullMain";
         sh[2].stage          = VriShaderStage_TessEval;
-        sh[2].bytecode       = g_triangleTessSpv;
-        sh[2].bytecodeSize   = sizeof(g_triangleTessSpv);
         sh[2].entryPointName = "domainMain";
         sh[3].stage          = VriShaderStage_Fragment;
-        sh[3].bytecode       = g_triangleTessSpv;
-        sh[3].bytecodeSize   = sizeof(g_triangleTessSpv);
         sh[3].entryPointName = "fragmentMain";
+        if (api == VriGraphicsAPI_D3D12)
+        {
+            // D3D12 consumes per-stage DXBC (fxc sm_5 expresses the hull/domain stages).
+            sh[0].bytecode     = g_triangleTessDxbcVS;
+            sh[0].bytecodeSize = sizeof(g_triangleTessDxbcVS);
+            sh[1].bytecode     = g_triangleTessDxbcHS;
+            sh[1].bytecodeSize = sizeof(g_triangleTessDxbcHS);
+            sh[2].bytecode     = g_triangleTessDxbcDS;
+            sh[2].bytecodeSize = sizeof(g_triangleTessDxbcDS);
+            sh[3].bytecode     = g_triangleTessDxbcPS;
+            sh[3].bytecodeSize = sizeof(g_triangleTessDxbcPS);
+        }
+        else
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                sh[i].bytecode     = g_triangleTessSpv;
+                sh[i].bytecodeSize = sizeof(g_triangleTessSpv);
+            }
+        }
     }
 
     bool RunTess(VriGraphicsAPI api, bool& ran, bool& hasTess)
@@ -57,7 +70,7 @@ namespace
         hasTess = c.GetDeviceDesc(dev)->hasTessellation != VRI_FALSE;
 
         VriShaderDesc sh[4] {};
-        MakeTessShaders(sh);
+        MakeTessShaders(sh, api);
         VriColorAttachmentDesc ca {};
         ca.format         = VriFormat_RGBA8_UNORM;
         ca.colorWriteMask = VriColorWrite_RGBA;
@@ -250,5 +263,16 @@ TEST_CASE("tessellation parity: hull/domain tessellate a triangle green (or Unsu
     else
     {
         MESSAGE("OpenGL unavailable - skipped");
+    }
+
+    const bool d3d12 = RunTess(VriGraphicsAPI_D3D12, ran, hasTess);
+    if (ran)
+    {
+        CHECK(d3d12);
+        MESSAGE("D3D12 tessellation=", hasTess);
+    }
+    else
+    {
+        MESSAGE("D3D12 unavailable - skipped");
     }
 }

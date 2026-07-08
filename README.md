@@ -65,8 +65,8 @@ How each feature is supported on each backend:
 | Compute shaders | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Push constants | ✅ | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 |
 | Bindless / descriptor indexing | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 |
-| Geometry shaders | ✅ | ⬜ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| Tessellation | ✅ | ⬜ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Geometry shaders | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Tessellation | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Mesh shaders | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Ray tracing | ✅ | ✅ | ✅ | 🟡 | 🟡 | ❌ | ❌ |
 | Opacity micromaps | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |

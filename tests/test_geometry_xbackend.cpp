@@ -9,27 +9,40 @@
 
 #include <cstdint>
 
-#include "shaders/tests/triangle_gs_spv.h" // g_triangleGsSpv (vertex/geometry/fragment; SPIR-V only)
+#include "shaders/tests/triangle_gs_dxbc.h" // g_triangleGsDxbcVS/GS/PS (D3D12; fxc sm_5)
+#include "shaders/tests/triangle_gs_spv.h"  // g_triangleGsSpv          (Vulkan / GL, transpiled)
 
 namespace
 {
     constexpr uint32_t kW = 64;
     constexpr uint32_t kH = 64;
 
-    void MakeGsShaders(VriShaderDesc sh[3])
+    void MakeGsShaders(VriShaderDesc sh[3], VriGraphicsAPI api)
     {
         sh[0].stage          = VriShaderStage_Vertex;
-        sh[0].bytecode       = g_triangleGsSpv;
-        sh[0].bytecodeSize   = sizeof(g_triangleGsSpv);
         sh[0].entryPointName = "vertexMain";
         sh[1].stage          = VriShaderStage_Geometry;
-        sh[1].bytecode       = g_triangleGsSpv;
-        sh[1].bytecodeSize   = sizeof(g_triangleGsSpv);
         sh[1].entryPointName = "geometryMain";
         sh[2].stage          = VriShaderStage_Fragment;
-        sh[2].bytecode       = g_triangleGsSpv;
-        sh[2].bytecodeSize   = sizeof(g_triangleGsSpv);
         sh[2].entryPointName = "fragmentMain";
+        if (api == VriGraphicsAPI_D3D12)
+        {
+            // D3D12 consumes per-stage DXBC (fxc sm_5 expresses the geometry stage).
+            sh[0].bytecode     = g_triangleGsDxbcVS;
+            sh[0].bytecodeSize = sizeof(g_triangleGsDxbcVS);
+            sh[1].bytecode     = g_triangleGsDxbcGS;
+            sh[1].bytecodeSize = sizeof(g_triangleGsDxbcGS);
+            sh[2].bytecode     = g_triangleGsDxbcPS;
+            sh[2].bytecodeSize = sizeof(g_triangleGsDxbcPS);
+        }
+        else
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                sh[i].bytecode     = g_triangleGsSpv;
+                sh[i].bytecodeSize = sizeof(g_triangleGsSpv);
+            }
+        }
     }
 
     bool RunGeometry(VriGraphicsAPI api, bool& ran, bool& hasGeom)
@@ -50,7 +63,7 @@ namespace
         hasGeom = c.GetDeviceDesc(dev)->hasGeometryShader != VRI_FALSE;
 
         VriShaderDesc sh[3] {};
-        MakeGsShaders(sh);
+        MakeGsShaders(sh, api);
         VriColorAttachmentDesc ca {};
         ca.format         = VriFormat_RGBA8_UNORM;
         ca.colorWriteMask = VriColorWrite_RGBA;
@@ -242,5 +255,16 @@ TEST_CASE("geometry-shader parity: GS re-emits the triangle green (or Unsupporte
     else
     {
         MESSAGE("OpenGL unavailable - skipped");
+    }
+
+    const bool d3d12 = RunGeometry(VriGraphicsAPI_D3D12, ran, hasGeom);
+    if (ran)
+    {
+        CHECK(d3d12);
+        MESSAGE("D3D12 geometry=", hasGeom);
+    }
+    else
+    {
+        MESSAGE("D3D12 unavailable - skipped");
     }
 }
