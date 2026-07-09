@@ -7,9 +7,11 @@
 
 #include <vri/vri.h>
 
-#include "shaders/tests/multiview_frag_spv.h" // g_multiviewFragSpv
-#include "shaders/tests/multiview_vert_spv.h" // g_multiviewVertSpv (split per stage so the fragment
-                                              // module carries no ViewIndex - GL OVR_multiview2 rule)
+#include "shaders/tests/multiview_frag_dxil.h" // g_multiviewFragDxilPS (D3D12)
+#include "shaders/tests/multiview_frag_spv.h"  // g_multiviewFragSpv
+#include "shaders/tests/multiview_vert_dxil.h" // g_multiviewVertDxilVS (D3D12; SV_ViewID via ViewInstancing, sm_6_1)
+#include "shaders/tests/multiview_vert_spv.h"  // g_multiviewVertSpv (split per stage so the fragment
+                                               // module carries no ViewIndex - GL OVR_multiview2 rule)
 
 #include <cstdint>
 
@@ -84,10 +86,20 @@ namespace
         sh[1].stage          = VriShaderStage_Fragment;
         sh[0].entryPointName = "vertexMain";
         sh[1].entryPointName = "fragmentMain";
-        sh[0].bytecode       = g_multiviewVertSpv;
-        sh[0].bytecodeSize   = sizeof(g_multiviewVertSpv);
-        sh[1].bytecode       = g_multiviewFragSpv;
-        sh[1].bytecodeSize   = sizeof(g_multiviewFragSpv);
+        if (api == VriGraphicsAPI_D3D12)
+        {
+            sh[0].bytecode     = g_multiviewVertDxilVS;
+            sh[0].bytecodeSize = sizeof(g_multiviewVertDxilVS);
+            sh[1].bytecode     = g_multiviewFragDxilPS;
+            sh[1].bytecodeSize = sizeof(g_multiviewFragDxilPS);
+        }
+        else
+        {
+            sh[0].bytecode     = g_multiviewVertSpv;
+            sh[0].bytecodeSize = sizeof(g_multiviewVertSpv);
+            sh[1].bytecode     = g_multiviewFragSpv;
+            sh[1].bytecodeSize = sizeof(g_multiviewFragSpv);
+        }
 
         VriColorAttachmentDesc ca {};
         ca.format         = VriFormat_RGBA8_UNORM;

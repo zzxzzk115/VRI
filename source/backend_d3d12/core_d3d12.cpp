@@ -393,8 +393,30 @@ namespace vri::d3d12
                 v->cpu                            = d->AllocRtv();
                 D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
                 rtv.Format                        = v->texture->format;
+                // Array RTV for a layered target (viewType 2DArray, or > 1 layer): multiview
+                // (ViewInstancing) targets one array slice per view, so the RTV must span them.
+                uint32_t layers = desc->layerNum;
+                if (layers == 0)
+                    layers = v->texture->layerNum > desc->baseLayer ? v->texture->layerNum - desc->baseLayer : 1;
+                const bool array = desc->viewType == VriTextureViewType_2DArray || layers > 1;
                 if (v->texture->sampleCount > 1)
-                    rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+                {
+                    if (array)
+                    {
+                        rtv.ViewDimension                    = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY;
+                        rtv.Texture2DMSArray.FirstArraySlice = desc->baseLayer;
+                        rtv.Texture2DMSArray.ArraySize       = layers;
+                    }
+                    else
+                        rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+                }
+                else if (array)
+                {
+                    rtv.ViewDimension                  = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+                    rtv.Texture2DArray.MipSlice        = desc->baseMip;
+                    rtv.Texture2DArray.FirstArraySlice = desc->baseLayer;
+                    rtv.Texture2DArray.ArraySize       = layers;
+                }
                 else
                 {
                     rtv.ViewDimension      = D3D12_RTV_DIMENSION_TEXTURE2D;
@@ -605,10 +627,12 @@ namespace vri::d3d12
                                                  VriTexture*                     src,
                                                  const VriBufferTextureCopyDesc* region)
         {
-            CommandBufferD3D12*                c        = CB(cmd);
-            TextureD3D12*                      t        = Tex(src);
-            BufferD3D12*                       b        = Buf(dst);
-            const UINT                         sub      = region ? region->texture.mip : 0;
+            CommandBufferD3D12* c = CB(cmd);
+            TextureD3D12*       t = Tex(src);
+            BufferD3D12*        b = Buf(dst);
+            // Subresource = mip + arrayLayer * mipNum (baseLayer selects the array slice), matching
+            // the upload path - so a per-layer readback of an array target reads the right slice.
+            const UINT sub = (region ? region->texture.mip : 0) + (region ? region->texture.baseLayer : 0) * t->mipNum;
             D3D12_RESOURCE_DESC                rd       = t->resource->GetDesc();
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp       = {};
             UINT                               rows     = 0;
@@ -1092,6 +1116,16 @@ namespace vri::d3d12
             return HexName(h);
         }
 
+        // One packed pipeline-state-stream subobject: a type tag followed by its payload, aligned to
+        // void*. Used to build a graphics PSO with a ViewInstancing subobject (multiview), which the
+        // classic D3D12_GRAPHICS_PIPELINE_STATE_DESC can't express.
+        template<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type, typename T>
+        struct alignas(void*) PsoSub
+        {
+            D3D12_PIPELINE_STATE_SUBOBJECT_TYPE type = Type;
+            T                                   value {};
+        };
+
         VriResult VRI_CALL CreateGraphicsPipeline(VriDevice*                     device,
                                                   const VriGraphicsPipelineDesc* desc,
                                                   VriPipeline**                  out)
@@ -1254,6 +1288,83 @@ namespace vri::d3d12
             p->topology       = ToD3DTopology(desc->inputAssembly.topology, desc->tessellation.patchControlPoints);
             p->stencilEnabled = desc->depthStencil.stencilTest != VRI_FALSE;
             p->stencilRef     = desc->depthStencil.front.reference;
+
+            // Multiview: D3D12 ViewInstancing fans one draw out to N view instances, each writing its
+            // own render-target array slice while the shader reads SV_ViewID (single-pass stereo).
+            // The classic PSO desc can't carry ViewInstancing, so build a pipeline-state stream from
+            // the same state. (Pipeline cache is skipped on this path.)
+            if (desc->outputMerger.viewMask != 0)
+            {
+                ComPtr<ID3D12Device2> dev2;
+                if (FAILED(d->Device()->QueryInterface(IID_PPV_ARGS(&dev2))))
+                {
+                    delete p;
+                    d->ReportError("multiview: ID3D12Device2 unavailable");
+                    return VriResult_Unsupported;
+                }
+                D3D12_VIEW_INSTANCE_LOCATION locs[4]   = {};
+                uint32_t                     viewCount = 0;
+                for (uint32_t bit = 0; bit < 32 && viewCount < 4; ++bit)
+                    if (desc->outputMerger.viewMask & (1u << bit))
+                    {
+                        locs[viewCount].RenderTargetArrayIndex = viewCount; // view N -> array slice N
+                        ++viewCount;
+                    }
+                D3D12_VIEW_INSTANCING_DESC vi = {};
+                vi.ViewInstanceCount          = viewCount;
+                vi.pViewInstanceLocations     = locs;
+
+                D3D12_RT_FORMAT_ARRAY rtfmt = {};
+                rtfmt.NumRenderTargets      = pd.NumRenderTargets;
+                for (UINT i = 0; i < pd.NumRenderTargets; ++i)
+                    rtfmt.RTFormats[i] = pd.RTVFormats[i];
+
+                struct Stream
+                {
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE, ID3D12RootSignature*>  rootSig;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS, D3D12_SHADER_BYTECODE>             vs;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS, D3D12_SHADER_BYTECODE>             ps;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS, D3D12_SHADER_BYTECODE>             gs;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS, D3D12_SHADER_BYTECODE>             hs;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS, D3D12_SHADER_BYTECODE>             ds;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT, D3D12_INPUT_LAYOUT_DESC> inputLayout;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, D3D12_PRIMITIVE_TOPOLOGY_TYPE> topo;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER, D3D12_RASTERIZER_DESC>                 rast;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND, D3D12_BLEND_DESC>                           blend;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, D3D12_DEPTH_STENCIL_DESC>           depth;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK, UINT>                            sampleMask;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, D3D12_RT_FORMAT_ARRAY> rtv;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, DXGI_FORMAT>            dsv;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, DXGI_SAMPLE_DESC>                sample;
+                    PsoSub<D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VIEW_INSTANCING, D3D12_VIEW_INSTANCING_DESC>  viewInst;
+                } stream;
+                stream.rootSig.value     = pd.pRootSignature;
+                stream.vs.value          = pd.VS;
+                stream.ps.value          = pd.PS;
+                stream.gs.value          = pd.GS;
+                stream.hs.value          = pd.HS;
+                stream.ds.value          = pd.DS;
+                stream.inputLayout.value = pd.InputLayout;
+                stream.topo.value        = pd.PrimitiveTopologyType;
+                stream.rast.value        = pd.RasterizerState;
+                stream.blend.value       = pd.BlendState;
+                stream.depth.value       = pd.DepthStencilState;
+                stream.sampleMask.value  = pd.SampleMask;
+                stream.rtv.value         = rtfmt;
+                stream.dsv.value         = pd.DSVFormat;
+                stream.sample.value      = pd.SampleDesc;
+                stream.viewInst.value    = vi;
+
+                D3D12_PIPELINE_STATE_STREAM_DESC sdesc = {sizeof(stream), &stream};
+                if (FAILED(dev2->CreatePipelineState(&sdesc, IID_PPV_ARGS(&p->pso))))
+                {
+                    delete p;
+                    d->ReportError("CreatePipelineState (multiview) failed");
+                    return VriResult_Failure;
+                }
+                *out = ToHandle(p);
+                return VriResult_Success;
+            }
 
             // Pipeline cache: load a matching PSO from the library, else create it and store it.
             PipelineCacheD3D12* cache = desc->pipelineCache ? PipeCache(desc->pipelineCache) : nullptr;

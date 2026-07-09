@@ -357,7 +357,17 @@ namespace vri::d3d12
                 o0.ConservativeRasterizationTier >= D3D12_CONSERVATIVE_RASTERIZATION_TIER_1 ? VRI_TRUE : VRI_FALSE;
         D3D12_FEATURE_DATA_D3D12_OPTIONS3 o3 = {};
         if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &o3, sizeof(o3))))
+        {
             m_desc.hasFragmentShaderBarycentric = o3.BarycentricsSupported ? VRI_TRUE : VRI_FALSE;
+            // Multiview via ViewInstancing (Tier 1+): each view instance renders to its own render-
+            // target array slice while the shader reads SV_ViewID - single-pass stereo. VRI's viewMask
+            // maps to the view-instance count + per-view RT-array-index locations in the pipeline.
+            if (o3.ViewInstancingTier >= D3D12_VIEW_INSTANCING_TIER_1)
+            {
+                m_desc.hasMultiview = VRI_TRUE;
+                m_desc.maxViewCount = D3D12_MAX_VIEW_INSTANCE_COUNT; // 4
+            }
+        }
         m_desc.hasCustomBorderColor          = VRI_TRUE; // D3D12 sampler border color is always a float4
         D3D12_FEATURE_DATA_D3D12_OPTIONS1 o1 = {};
         if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &o1, sizeof(o1))))

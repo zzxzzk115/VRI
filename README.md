@@ -75,7 +75,7 @@ How each feature is supported on each backend:
 | Fragment-shader barycentrics | ✅ | ✅ | ⬜ | ❌ | ❌ | ❌ | ❌ |
 | Custom sampler border color | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Subgroup / wave operations | ✅ | ✅ | ⬜ | ❌ | ❌ | ❌ | ❌ |
-| Multiview (single-pass stereo) | ✅ | ⬜ | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Multiview (single-pass stereo) | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ |
 | External memory / interop (CUDA) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GPU timestamp queries | ✅ | ✅ | ✅ | 🟡 | 🟡 | ❌ | ❌ |
 | Occlusion queries | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |

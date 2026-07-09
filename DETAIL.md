@@ -7,10 +7,9 @@ the native extension each path uses. For the at-a-glance support matrix, see the
 **✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **⬜ Planned** (the API supports it; not yet in VRI) &nbsp;·&nbsp; **❌ Unsupported by the API**
 
 - **Planned (⬜).** A few cells are things the backend's API *can* do but VRI hasn't wired yet —
-  distinct from ❌ (the API genuinely can't). Currently: **Direct3D 12** multiview (via
-  `ViewInstancing` + `SV_ViewID`); **Metal** subgroup / wave operations (SIMD-group functions) and
-  fragment-shader barycentrics (`[[barycentric_coord]]`). The Metal ones await Apple hardware to
-  implement and verify.
+  distinct from ❌ (the API genuinely can't). Currently: **Metal** subgroup / wave operations
+  (SIMD-group functions) and fragment-shader barycentrics (`[[barycentric_coord]]`) — these await
+  Apple hardware to implement and verify.
 - **Push constants / bindless** are exposed uniformly: where the backend lacks the hardware feature,
   VRI provides a transparent fallback (an emulated uniform path, or a texture-array path) that
   produces the same result.
@@ -56,11 +55,13 @@ the native extension each path uses. For the at-a-glance support matrix, see the
   pass, selected by a `viewMask` on both the graphics pipeline (`VriOutputMergerDesc::viewMask`) and
   the render pass (`VriAttachmentsDesc::viewMask`); the shader reads the per-view index via
   `SV_ViewID` (→ SPIR-V `gl_ViewIndex` / `gl_ViewID_OVR`). This is the basis of single-pass VR stereo.
-  Implemented on **Vulkan** (core 1.1 multiview), **Metal** (SPIRV-Cross emits the instanced form —
-  the draw's instance count is multiplied by the view count and each view writes its array slice via
-  `[[render_target_array_index]]`), and **OpenGL / OpenGL ES** (`GL_OVR_multiview2`, the
-  standalone-headset path; SPIRV-Cross emits the `gl_ViewID_OVR` form). Exposed via
-  `VriDeviceDesc::hasMultiview` + `maxViewCount`. D3D12 ViewInstancing is a documented follow-up.
+  Implemented on **Vulkan** (core 1.1 multiview), **Direct3D 12** (`ViewInstancing` — one draw fans
+  out to N view instances, each routed to its own render-target array slice via the pipeline's
+  per-view `RenderTargetArrayIndex`; the shader reads `SV_ViewID`), **Metal** (SPIRV-Cross emits the
+  instanced form — the draw's instance count is multiplied by the view count and each view writes its
+  array slice via `[[render_target_array_index]]`), and **OpenGL / OpenGL ES** (`GL_OVR_multiview2`,
+  the standalone-headset path; SPIRV-Cross emits the `gl_ViewID_OVR` form). Exposed via
+  `VriDeviceDesc::hasMultiview` + `maxViewCount`.
 - **Built-in Dear ImGui renderer** (`ext/vri_ext_imgui.h`, `VRI_INTERFACE_IMGUI`) draws ImGui
   through VRI's own core interface, so a single renderer covers every backend with no per-backend
   `imgui_impl_*` and it flows through the validation layer for free. VRI does **not** depend on or
