@@ -131,13 +131,14 @@ namespace vri::gl
     // individually via glUniform. One entry per leaf member, captured at pipeline build.
     struct PushMemberGL
     {
-        std::string name;          // GLSL uniform name, e.g. "vriPush.color"
-        uint32_t    offset;        // byte offset within the push-constant blob
-        uint32_t    basetype;      // 0 = float, 1 = int, 2 = uint
-        uint32_t    vecsize;       // 1..4
-        uint32_t    columns;       // 1 = vector, >1 = matrix (NxN)
-        uint32_t    count;         // array length (1 if not an array)
-        int         location = -1; // glGetUniformLocation after link
+        std::string name;              // GLSL uniform name, e.g. "vriPush.color"
+        uint32_t    offset;            // byte offset within the push-constant blob
+        uint32_t    basetype;          // 0 = float, 1 = int, 2 = uint
+        uint32_t    vecsize;           // 1..4
+        uint32_t    columns;           // 1 = vector, >1 = matrix (NxN)
+        uint32_t    count;             // array length (1 if not an array)
+        bool        transpose = false; // matrices only: GL_TRUE for column-major (Slang default)
+        int         location  = -1;    // glGetUniformLocation after link
     };
 
     struct PipelineLayoutGL

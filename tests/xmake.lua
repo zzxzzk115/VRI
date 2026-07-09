@@ -19,6 +19,7 @@ target("vri-tests")
     add_files("test_texture_xbackend.cpp")    -- sampled-texture (separate texture+sampler) parity
     add_files("test_texelfetch_xbackend.cpp") -- texelFetch on a sampler-less integer texture (GL dummy sampler)
     add_files("test_vertex_xbackend.cpp")     -- vertex-buffer + indexed-draw parity
+    add_files("test_pushconstant_xbackend.cpp") -- float4x4 in a push constant (GL _MatrixStorage flatten)
     add_files("test_depth_xbackend.cpp")      -- depth attachment + depth-test parity
     add_files("test_blend_xbackend.cpp")      -- alpha-blending parity
     add_files("test_cull_xbackend.cpp")       -- back-face culling + winding parity

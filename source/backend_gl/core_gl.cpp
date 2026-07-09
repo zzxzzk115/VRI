@@ -329,7 +329,17 @@ namespace vri::gl
                             pm.vecsize  = mt.vecsize;
                             pm.columns  = mt.columns;
                             pm.count    = mt.array.empty() ? 1u : mt.array[0];
-                            bool dup    = false;
+                            // Matrix upload transpose: SPIRV-Cross emits the same `v * M` GLSL for a
+                            // matrix regardless of storage, so the push blob (raw bytes, correct on
+                            // Vulkan/D3D12) must go to glUniformMatrix with the right transpose flag or
+                            // the matrix is loaded transposed (translation lands in the wrong slot and
+                            // is lost). A column-major matrix (Slang's default, matching glm) needs
+                            // GL_TRUE; a row-major one loads as-is. Note the SPIR-V decoration is
+                            // inverted vs Slang's source qualifier: Slang column_major -> SPIR-V
+                            // RowMajor, so transpose == "member is RowMajor-decorated".
+                            if (mt.columns > 1)
+                                pm.transpose = comp.has_member_decoration(pc.base_type_id, m, spv::DecorationRowMajor);
+                            bool dup = false;
                             for (const PushMemberGL& e : *outPush)
                                 if (e.name == pm.name)
                                 {
@@ -1747,16 +1757,17 @@ namespace vri::gl
             {
                 if (pm.location < 0 || pm.offset >= size)
                     continue;
-                const void*    p   = bytes + pm.offset;
-                const GLint    loc = pm.location;
-                const GLsizei  n   = static_cast<GLsizei>(pm.count);
-                const GLfloat* f   = static_cast<const GLfloat*>(p);
+                const void*     p   = bytes + pm.offset;
+                const GLint     loc = pm.location;
+                const GLsizei   n   = static_cast<GLsizei>(pm.count);
+                const GLfloat*  f   = static_cast<const GLfloat*>(p);
+                const GLboolean tr  = pm.transpose ? GL_TRUE : GL_FALSE;
                 if (pm.columns == 4)
-                    glUniformMatrix4fv(loc, n, GL_FALSE, f);
+                    glUniformMatrix4fv(loc, n, tr, f);
                 else if (pm.columns == 3)
-                    glUniformMatrix3fv(loc, n, GL_FALSE, f);
+                    glUniformMatrix3fv(loc, n, tr, f);
                 else if (pm.columns == 2)
-                    glUniformMatrix2fv(loc, n, GL_FALSE, f);
+                    glUniformMatrix2fv(loc, n, tr, f);
                 else if (pm.basetype == 1) // int
                 {
                     const GLint* v = static_cast<const GLint*>(p);
