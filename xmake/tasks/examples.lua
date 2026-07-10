@@ -13,6 +13,9 @@ task("examples")
     }
     on_run(function ()
         import("core.base.option")
+        import("core.project.config")
+
+        config.load()
 
         local function load_examples()
             local text = io.readfile(path.join(os.projectdir(), "xmake", "examples.lua"))
@@ -21,7 +24,17 @@ task("examples")
                 local name = entry:match("name%s*=%s*\"([^\"]+)\"")
                 local target = entry:match("target%s*=%s*\"([^\"]+)\"") or ("example-" .. name)
                 local desktop_only = entry:find("desktop_only%s*=%s*true") ~= nil
-                if name and not (desktop_only and is_plat("wasm")) then
+                -- Opt-in examples are only built when their config option is on (mirrors
+                -- _vri_example_enabled in xmake/examples.lua) - skip them here too, or the
+                -- run gate would fail on a binary the build legitimately never produced.
+                local enabled = true
+                if entry:find("requires_cuda%s*=%s*true") and not config.get("vri_build_cuda_interop") then
+                    enabled = false
+                end
+                if entry:find("requires_openxr%s*=%s*true") and not config.get("vri_build_openxr") then
+                    enabled = false
+                end
+                if name and enabled and not (desktop_only and is_plat("wasm")) then
                     table.insert(out, target)
                 end
             end
