@@ -143,6 +143,18 @@ xmake run example-raytracing          # ray-traced glTF model
 xmake run example-pathtracer          # progressive path tracer with global illumination
 ```
 
+Desktop feature demos (these exercise capabilities the web backends don't expose):
+
+```sh
+xmake run example-conservativeraster  # normal vs conservative rasterization, side by side
+xmake run example-bordercolor         # ClampToBorder sampling with preset + custom border colors
+xmake run example-geometryshader      # geometry-stage normal visualization on a lit torus
+xmake run example-tessellation        # hull/domain terrain with an ImGui tess-factor slider
+xmake run example-barycentrics        # SV_Barycentrics: raw weights / solid wireframe / overlay
+xmake run example-vrs                 # per-draw variable rate shading with a GPU-time readout
+xmake run example-queries             # occlusion + pipeline-statistics queries, stall-free readback
+```
+
 A console-only example (no window/UI) demonstrates GPU timing:
 
 ```sh

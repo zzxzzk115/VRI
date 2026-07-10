@@ -21,6 +21,15 @@ local _vri_examples = {
     -- and a compute-BVH software fallback on OpenGL and WebGPU (wasm).
     {name = "raytracing"},
     {name = "pathtracer"},
+    -- Desktop-only feature demos: these exercise capabilities the web backends
+    -- (WebGPU / WebGL 2) don't expose, so they are excluded from the wasm build.
+    {name = "conservativeraster", desktop_only = true},
+    {name = "bordercolor", desktop_only = true},
+    {name = "geometryshader", desktop_only = true},
+    {name = "tessellation", desktop_only = true},
+    {name = "barycentrics", desktop_only = true},
+    {name = "vrs", desktop_only = true},
+    {name = "queries", desktop_only = true},
     -- Headless GPU profiler built on the timestamp query interface (console-only, no UI).
     {name = "profiler", desktop_only = true},
     -- CUDA <-> VRI external-memory interop. Desktop-only, and opt-in via

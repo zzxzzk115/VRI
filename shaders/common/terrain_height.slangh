@@ -1,0 +1,34 @@
+// Shared procedural terrain for examples/tessellation: the height field, its analytic
+// normal, and the height colormap. Included by terrain_tess.slang (domain shader) and
+// terrain_basic.slang (the VS-displacement fallback where tessellation is unavailable),
+// so both paths shade the exact same surface.
+#pragma once
+
+float TerrainHeight(float2 xz)
+{
+    return 0.35 * sin(xz.x * 2.1) * cos(xz.y * 1.7)
+         + 0.18 * sin(xz.x * 4.7 + 1.3) * cos(xz.y * 3.9 + 0.6);
+}
+
+float3 TerrainNormal(float2 xz)
+{
+    // analytic partial derivatives of TerrainHeight
+    float dhdx = 0.35 * 2.1 * cos(xz.x * 2.1) * cos(xz.y * 1.7)
+               + 0.18 * 4.7 * cos(xz.x * 4.7 + 1.3) * cos(xz.y * 3.9 + 0.6);
+    float dhdz = -0.35 * 1.7 * sin(xz.x * 2.1) * sin(xz.y * 1.7)
+               - 0.18 * 3.9 * sin(xz.x * 4.7 + 1.3) * sin(xz.y * 3.9 + 0.6);
+    return normalize(float3(-dhdx, 1.0, -dhdz));
+}
+
+float3 TerrainColor(float h, float3 n)
+{
+    const float3 lightDir = normalize(float3(0.4, 0.9, 0.3));
+    float diff = max(dot(n, lightDir), 0.0);
+    // valley green -> slope brown -> peak white
+    float t = saturate(h * 1.4 + 0.5);
+    float3 low = float3(0.16, 0.42, 0.2);
+    float3 mid = float3(0.45, 0.36, 0.24);
+    float3 high = float3(0.92, 0.94, 0.98);
+    float3 base = t < 0.5 ? lerp(low, mid, t * 2.0) : lerp(mid, high, t * 2.0 - 1.0);
+    return base * (0.25 + 0.75 * diff);
+}

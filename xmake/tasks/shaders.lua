@@ -86,7 +86,7 @@ task("shaders")
                 -- DXBC (FXC, sm_5_1) cannot express these stages, hence DXIL.
                 -- multiview_vert reads SV_ViewID (D3D12 ViewInstancing) which needs SM6.1; the paired
                 -- fragment carries no ViewID so plain sm_6_0 suffices.
-                local dxilProfiles = { triangle_mesh = "sm_6_5", rt_triangle = "lib_6_3", rt_gltf = "lib_6_5", rt_gltf_rayquery = "cs_6_5", rt_gltf_software = "cs_6_5", rt_pathtrace = "cs_6_5", rt_pathtrace_software = "cs_6_5", mesh_frag = "sm_6_0", rayquery = "cs_6_5", rt_rayquery = "cs_6_5", barycentric = "sm_6_1", wave = "cs_6_0", multiview_vert = "sm_6_1", multiview_frag = "sm_6_0" }
+                local dxilProfiles = { triangle_mesh = "sm_6_5", rt_triangle = "lib_6_3", rt_gltf = "lib_6_5", rt_gltf_rayquery = "cs_6_5", rt_gltf_software = "cs_6_5", rt_pathtrace = "cs_6_5", rt_pathtrace_software = "cs_6_5", mesh_frag = "sm_6_0", rayquery = "cs_6_5", rt_rayquery = "cs_6_5", barycentric = "sm_6_1", barywire = "sm_6_1", wave = "cs_6_0", multiview_vert = "sm_6_1", multiview_frag = "sm_6_0" }
                 local prof = dxilProfiles[base]
                 if prof then
                     local dxilHeader = path.join(dir, base .. "_dxil.h")
