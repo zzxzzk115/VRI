@@ -391,6 +391,12 @@ namespace vri::vk
             r |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
         if (s & VriPipelineStage_VertexShader)
             r |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+        if (s & VriPipelineStage_TessControlShader)
+            r |= VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT;
+        if (s & VriPipelineStage_TessEvalShader)
+            r |= VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT;
+        if (s & VriPipelineStage_GeometryShader)
+            r |= VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT;
         if (s & VriPipelineStage_FragmentShader)
             r |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
         if (s & VriPipelineStage_EarlyFragmentTests)
@@ -403,6 +409,12 @@ namespace vri::vk
             r |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         if (s & VriPipelineStage_RayTracingShader)
             r |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+        if (s & VriPipelineStage_AccelerationStructureBuild)
+            r |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+        if (s & VriPipelineStage_MeshShader)
+            r |= VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT;
+        if (s & VriPipelineStage_TaskShader)
+            r |= VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT;
         if (s & VriPipelineStage_Transfer)
             r |= VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
         if (s & VriPipelineStage_AllGraphics)
