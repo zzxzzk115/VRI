@@ -2,6 +2,9 @@
 .xmake/
 build/
 
+# Assembled website (scripts/build_site.sh / .ps1)
+_site/
+
 # VS Code
 .vscode/
 

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VRI — one render hardware interface, every backend</title>
+  <meta name="description" content="VRI is a cross-platform Render Hardware Interface: write your renderer once, run it on Vulkan, Direct3D 12, Metal, WebGPU, and OpenGL — desktop, embedded, and the web.">
+  <link rel="stylesheet" href="style.css?v={{VRI_SHA}}">
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <a class="brand" href="./"><span class="dot"></span>VRI<span class="sub">· render hardware interface</span></a>
+      <nav class="nav">
+        <a class="active" href="./">Home</a>
+        <a href="examples/">Examples</a>
+        <a href="https://github.com/zzxzzk115/VRI">GitHub</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>VRI</h1>
+      <p class="tagline">One explicit rendering API. Every backend, every platform.</p>
+      <p class="blurb">
+        Write your renderer once — VRI runs it on <b>Vulkan</b>, <b>Direct3D&nbsp;12</b>,
+        <b>Metal</b>, <b>WebGPU</b>, and <b>OpenGL</b>, on desktop, mobile/embedded, and the web.
+        A C&nbsp;ABI core with a header-only C++23 wrapper, honest capability queries,
+        one diagnostics sink, and shaders authored in Slang.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="examples/">&#9654;&#xFE0E; Run the examples in your browser</a>
+        <a class="btn ghost" href="https://github.com/zzxzzk115/VRI">GitHub &#8599;</a>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>write once</h2>
+      <p class="note">An explicit, modern surface (command buffers, descriptor sets, explicit synchronization) — à la Vulkan/D3D12 — that maps onto each platform's native graphics API.</p>
+      <div class="panel">
+        <pre class="code"><span class="c">// C ABI core, or a std::expected-based RAII layer in C++23:</span>
+<span class="k">auto</span> device    = vri::Device::Create({ .graphicsAPI = <span class="f">VriGraphicsAPI_Auto</span> });
+<span class="k">auto</span> swapchain = device-&gt;<span class="f">CreateSwapchain</span>({ .window = window });
+<span class="k">auto</span> pipeline  = device-&gt;<span class="f">CreateGraphicsPipeline</span>({ .shaders = { vs, fs }, ... });
+
+cmd.<span class="f">BeginRendering</span>({ .colors = { backbuffer } });
+cmd.<span class="f">SetPipeline</span>(*pipeline);
+cmd.<span class="f">Draw</span>({ .vertexNum = 3 });   <span class="c">// same image on every backend</span>
+cmd.<span class="f">EndRendering</span>();</pre>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>run everywhere</h2>
+      <p class="note">The desktop application requests <code>Auto</code> and VRI picks the best backend. On the web VRI runs through WebGPU and WebGL&nbsp;2, both via Emscripten. A software (CPU) fallback renders with no GPU at all.</p>
+      <div class="panel tablewrap">
+        <table>
+          <thead><tr><th>Backend</th><th>Platforms</th></tr></thead>
+          <tbody>
+            <tr><td>Vulkan</td><td>Windows, Linux (and macOS via MoltenVK)</td></tr>
+            <tr><td>Direct3D 12</td><td>Windows</td></tr>
+            <tr><td>Metal</td><td>macOS (Apple Silicon)</td></tr>
+            <tr><td>WebGPU</td><td>Windows, Linux, macOS, <b>Web</b></td></tr>
+            <tr><td>OpenGL</td><td>Windows, Linux (and macOS, capped at 4.1)</td></tr>
+            <tr><td>WebGL 2</td><td><b>Web</b></td></tr>
+            <tr><td>OpenGL ES</td><td>Linux / embedded (e.g. Raspberry Pi)</td></tr>
+            <tr><td>Software (CPU)</td><td>Windows, Linux, macOS — anywhere with a software Vulkan ICD</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>feature support</h2>
+      <p class="note">Every optional feature is queryable. If a backend can't do something, it tells you — it never silently no-ops.</p>
+      <div class="panel tablewrap">
+        <div class="legend">&#9989; native &nbsp;·&nbsp; &#128993; emulated / simulated &nbsp;·&nbsp; &#11036; planned &nbsp;·&nbsp; &#10060; unsupported by the API</div>
+        <table>
+          <thead>
+            <tr><th>Feature</th><th>Vulkan</th><th>D3D12</th><th>Metal</th><th>WebGPU</th><th>OpenGL</th><th>WebGL 2</th><th>GL ES</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Core rendering &amp; swapchain</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td></tr>
+            <tr><td>Depth / stencil, blending, MRT</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td></tr>
+            <tr><td>MSAA + resolve</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td></tr>
+            <tr><td>Mipmaps, instancing, cubemaps</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td></tr>
+            <tr><td>Compute shaders</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Push constants</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#128993;</td><td>&#128993;</td><td>&#128993;</td><td>&#128993;</td></tr>
+            <tr><td>Bindless / descriptor indexing</td><td>&#9989;</td><td>&#9989;</td><td>&#128993;</td><td>&#128993;</td><td>&#128993;</td><td>&#128993;</td><td>&#128993;</td></tr>
+            <tr><td>Geometry shaders</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Tessellation</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Mesh shaders</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Ray tracing</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#128993;</td><td>&#128993;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Opacity micromaps</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Variable rate shading</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Conservative rasterization</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Fragment-shader barycentrics</td><td>&#9989;</td><td>&#9989;</td><td>&#11036;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Custom sampler border color</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Subgroup / wave operations</td><td>&#9989;</td><td>&#9989;</td><td>&#11036;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Multiview (single-pass stereo)</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#9989;</td></tr>
+            <tr><td>External memory / interop (CUDA)</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>GPU timestamp queries</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#128993;</td><td>&#128993;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Occlusion queries</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Pipeline-statistics queries</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Calibrated GPU+CPU timestamps</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Pipeline cache</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Indirect draw count (GPU-driven)</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Video memory budget</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Clear storage buffer / texture</td><td>&#9989;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td><td>&#9989;</td><td>&#10060;</td><td>&#10060;</td></tr>
+            <tr><td>Built-in Dear ImGui renderer</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td><td>&#9989;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note" style="margin-top:12px">Per-backend implementation notes — fallbacks, caveats, and the native extension each feature uses — are in <a href="https://github.com/zzxzzk115/VRI/blob/master/DETAIL.md">DETAIL.md</a>.</p>
+    </section>
+
+    <footer>
+      <div>VRI is released under the <a href="https://github.com/zzxzzk115/VRI/blob/master/LICENSE">MIT License</a>.</div>
+      <div>Think "<a href="https://github.com/NVIDIA-RTX/NRI">NRI</a>, but with more graphics APIs and more platforms."</div>
+    </footer>
+  </div>
+</body>
+</html>

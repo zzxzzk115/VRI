@@ -35,6 +35,8 @@
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .3px; }
     .dot { width: 9px; height: 9px; border-radius: 999px; background: linear-gradient(180deg, var(--accent-2), var(--accent)); box-shadow: 0 0 12px rgba(122, 162, 255, .7); }
     .sub { color: var(--muted); font-weight: 400; font-size: 12px; }
+    a.sub { text-decoration: none; }
+    a.sub:hover { color: var(--text); }
     .switch { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
     .seg { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 6px 14px; cursor: pointer; transition: background .15s ease, color .15s ease; }
     .seg + .seg { border-left: 1px solid var(--line); }
@@ -77,6 +79,9 @@
   <div class="layout">
     <header class="topbar">
       <span class="brand"><span class="dot"></span><span id="brand">VRI</span><span class="sub" id="sub"></span></span>
+      <!-- Resolves to the gallery index when deployed next to it on the website;
+           harmless (a directory listing) under local emrun. -->
+      <a class="sub" href="./">&larr; gallery</a>
       <span class="switch" role="group" aria-label="Backend">
         <button class="seg" id="seg-webgpu" type="button">WebGPU</button>
         <button class="seg" id="seg-webgl" type="button">WebGL</button>

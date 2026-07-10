@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/zzxzzk115/VRI/actions/workflows/ci.yml/badge.svg)](https://github.com/zzxzzk115/VRI/actions/workflows/ci.yml)
 
+**Try it in your browser:** every web-capable example runs live at
+**[zzxzzk115.github.io/VRI](https://zzxzzk115.github.io/VRI/)** — see the
+[example gallery](https://zzxzzk115.github.io/VRI/examples/) (WebGPU / WebGL 2).
+
 **VRI** is a cross-platform **Render Hardware Interface**: one explicit, modern rendering API
 (command buffers, descriptor sets, explicit synchronization) that runs on many graphics backends
 and platforms. Write your renderer once — VRI runs it on Vulkan, Direct3D 12, Metal, WebGPU, and
