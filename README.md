@@ -141,6 +141,7 @@ xmake run example-deferred            # deferred shading with a G-buffer + many 
 xmake run example-rayquery            # ray-traced hard shadows (HW ray query / compute fallback)
 xmake run example-raytracing          # ray-traced glTF model
 xmake run example-pathtracer          # progressive path tracer with global illumination
+xmake run example-waveops             # wave/subgroup intrinsics visualized (compute/fragment fallbacks)
 ```
 
 Desktop feature demos (these exercise capabilities the web backends don't expose):

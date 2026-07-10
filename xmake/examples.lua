@@ -30,6 +30,9 @@ local _vri_examples = {
     {name = "barycentrics", desktop_only = true},
     {name = "vrs", desktop_only = true},
     {name = "queries", desktop_only = true},
+    -- Wave/subgroup visualization: wave intrinsics on Vulkan/D3D12, explicit compute or
+    -- fragment fallbacks elsewhere - so it runs on the web too.
+    {name = "waveops"},
     -- Headless GPU profiler built on the timestamp query interface (console-only, no UI).
     {name = "profiler", desktop_only = true},
     -- CUDA <-> VRI external-memory interop. Desktop-only, and opt-in via

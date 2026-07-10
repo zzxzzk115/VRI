@@ -20,5 +20,6 @@ var VRI_EXAMPLES = [
     { name: "deferred",           title: "Deferred Shading",     desc: "A three-target G-buffer lit by six moving point lights.",                                                    tags: ["deferred", "mrt"] },
     { name: "rayquery",           title: "Ray Query Shadows",    desc: "Ray-traced hard shadows: hardware ray query with a software compute fallback.",                              tags: ["raytracing"] },
     { name: "raytracing",         title: "Ray Traced glTF",      desc: "The FlightHelmet glTF model traced by a raygen/miss/closest-hit pipeline (or inline ray query).",            tags: ["raytracing", "gltf"] },
-    { name: "pathtracer",         title: "Path Tracer",          desc: "A progressive path tracer with diffuse global illumination, accumulating over frames.",                      tags: ["raytracing", "gi"] }
+    { name: "pathtracer",         title: "Path Tracer",          desc: "A progressive path tracer with diffuse global illumination, accumulating over frames.",                      tags: ["raytracing", "gi"] },
+    { name: "waveops",            title: "Wave Operations",      desc: "Subgroup/wave intrinsics visualized as bands whose stripe period is the hardware wave size (compute/fragment fallbacks on the web).", tags: ["compute", "subgroups"] }
 ];
