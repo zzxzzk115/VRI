@@ -29,6 +29,13 @@ target("vri")
     -- defined while building the library (controls dllexport on Windows)
     add_defines("VRI_BUILD")
 
+    if is_plat("wasm") then
+        -- Emscripten 6.0.2 flipped GROWABLE_ARRAYBUFFERS to default-on under
+        -- ALLOW_MEMORY_GROWTH. Chrome rejects those resizable views in WebGPU
+        -- queue.writeBuffer, so keep the fixed-view path for browser builds.
+        add_ldflags("-sGROWABLE_ARRAYBUFFERS=0", {public = true, force = true})
+    end
+
     -- backend selection (implementations land Phase 1+).
     -- Each backend is gated on its option AND on platform support, so a sticky option
     -- value from a previous config (xmake remembers explicit --flags across `xmake f`)
