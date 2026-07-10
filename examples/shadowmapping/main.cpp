@@ -259,7 +259,7 @@ int main(int, char**)
     dpd.shaders                         = dsh;
     dpd.shaderNum                       = 2;
     dpd.vertexInput.attributes          = attrs;
-    dpd.vertexInput.attributeNum        = useDxbc ? 2u : 1u;
+    dpd.vertexInput.attributeNum        = (useDxbc || useWgsl) ? 2u : 1u;
     dpd.vertexInput.streams             = &stream;
     dpd.vertexInput.streamNum           = 1;
     dpd.inputAssembly.topology          = VriPrimitiveTopology_TriangleList;

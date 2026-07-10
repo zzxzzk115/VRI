@@ -347,7 +347,7 @@ int main(int, char**)
                                         sizeof(g_skyboxReflectDxbcPS),
                                         /*depthOn*/ true,
                                         VriCullMode_Back,
-                                        useDxbc ? 2u : 1u);
+                                        (useDxbc || useWgsl) ? 2u : 1u);
 
     // ---- descriptor sets (one per pipeline; both bind the same cubemap + sampler) ----
     VriDescriptorPoolDesc pdsc {};

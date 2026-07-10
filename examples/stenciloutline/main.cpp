@@ -259,7 +259,7 @@ int main(int, char**)
                                             /*depthWrite*/ false,
                                             VriCompareOp_Less,
                                             stencilFace(VriCompareOp_NotEqual, VriStencilOp_Keep, 0x00u),
-                                            useDxbc ? 2u : 1u);
+                                            (useDxbc || useWgsl) ? 2u : 1u);
 
     VriDescriptorPoolDesc pdsc {};
     pdsc.descriptorSetMaxNum  = 1;
