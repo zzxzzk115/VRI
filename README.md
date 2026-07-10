@@ -154,6 +154,7 @@ xmake run example-tessellation        # hull/domain terrain with an ImGui tess-f
 xmake run example-barycentrics        # SV_Barycentrics: raw weights / solid wireframe / overlay
 xmake run example-vrs                 # per-draw variable rate shading with a GPU-time readout
 xmake run example-queries             # occlusion + pipeline-statistics queries, stall-free readback
+xmake run example-gpudriven           # GPU frustum culling + CmdDrawIndexedIndirectCount
 ```
 
 A console-only example (no window/UI) demonstrates GPU timing:
