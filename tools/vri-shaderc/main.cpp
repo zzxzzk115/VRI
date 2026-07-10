@@ -266,13 +266,16 @@ int main(int argc, char** argv)
     options[1].value.kind = slang::CompilerOptionValueKind::Int;
     options[1].value.intValue0 = 1;
 
-    const char* searchPaths[] = {dir.c_str()};
+    // Includes resolve from the shader's own bucket or from the shared shaders/common
+    // bucket (tests + examples both include the software-RT helper .slangh from there).
+    const std::string commonDir = dir + "/../common";
+    const char* searchPaths[] = {dir.c_str(), commonDir.c_str()};
 
     slang::SessionDesc sessionDesc = {};
     sessionDesc.targets = &target;
     sessionDesc.targetCount = 1;
     sessionDesc.searchPaths = searchPaths;
-    sessionDesc.searchPathCount = 1;
+    sessionDesc.searchPathCount = 2;
     sessionDesc.compilerOptionEntries = options;
     sessionDesc.compilerOptionEntryCount = d3d ? 0 : (wgsl ? 1 : 2); // SPIR-V-only options
 
