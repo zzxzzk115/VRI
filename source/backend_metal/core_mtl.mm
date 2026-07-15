@@ -1125,12 +1125,17 @@ namespace vri::mtl
             if (!c->renderEnc) return;
             if (b.type == VriDescriptorType_AccelerationStructure && dsc->accel)
             {
+                // NOTE: MTLRenderCommandEncoder has no mesh/object acceleration-structure
+                // binding (ray queries from the mesh/object stage aren't exposed), so AS
+                // bindings stay vertex/fragment only.
                 if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
                 if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentAccelerationStructure:dsc->accel atBufferIndex:b.mslIndex];
                 if (dsc->accelObj) // keep the TLAS's referenced BLASes resident (see the compute path above)
                 {
-                    MTLRenderStages st = (MTLRenderStages)(((b.stages & VriShaderStage_Vertex) ? MTLRenderStageVertex : 0) |
-                                                           ((b.stages & VriShaderStage_Fragment) ? MTLRenderStageFragment : 0));
+                    MTLRenderStages st = (MTLRenderStages)(((b.stages & VriShaderStage_Vertex)   ? MTLRenderStageVertex : 0) |
+                                                           ((b.stages & VriShaderStage_Fragment) ? MTLRenderStageFragment : 0) |
+                                                           ((b.stages & VriShaderStage_Mesh)     ? MTLRenderStageMesh : 0) |
+                                                           ((b.stages & VriShaderStage_Task)     ? MTLRenderStageObject : 0));
                     for (id<MTLAccelerationStructure> blas in dsc->accelObj->instancedAS)
                         [c->renderEnc useResource:blas usage:MTLResourceUsageRead stages:st];
                 }
@@ -1139,16 +1144,22 @@ namespace vri::mtl
             {
                 if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexSamplerState:dsc->sampler atIndex:b.mslIndex];
                 if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentSamplerState:dsc->sampler atIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Mesh)     [c->renderEnc setMeshSamplerState:dsc->sampler atIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Task)     [c->renderEnc setObjectSamplerState:dsc->sampler atIndex:b.mslIndex];
             }
             else if (IsTextureType(b.type) && dsc->texture)
             {
                 if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexTexture:dsc->texture atIndex:b.mslIndex];
                 if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentTexture:dsc->texture atIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Mesh)     [c->renderEnc setMeshTexture:dsc->texture atIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Task)     [c->renderEnc setObjectTexture:dsc->texture atIndex:b.mslIndex];
             }
             else if (IsBufferType(b.type) && dsc->buffer)
             {
                 if (b.stages & VriShaderStage_Vertex)   [c->renderEnc setVertexBuffer:dsc->buffer offset:dsc->bufferOffset atIndex:b.mslIndex];
                 if (b.stages & VriShaderStage_Fragment) [c->renderEnc setFragmentBuffer:dsc->buffer offset:dsc->bufferOffset atIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Mesh)     [c->renderEnc setMeshBuffer:dsc->buffer offset:dsc->bufferOffset atIndex:b.mslIndex];
+                if (b.stages & VriShaderStage_Task)     [c->renderEnc setObjectBuffer:dsc->buffer offset:dsc->bufferOffset atIndex:b.mslIndex];
             }
         }
 
@@ -1173,6 +1184,8 @@ namespace vri::mtl
             {
                 if (st & VriShaderStage_Vertex)   [c->renderEnc setVertexBytes:data length:size atIndex:idx];
                 if (st & VriShaderStage_Fragment) [c->renderEnc setFragmentBytes:data length:size atIndex:idx];
+                if (st & VriShaderStage_Mesh)     [c->renderEnc setMeshBytes:data length:size atIndex:idx];
+                if (st & VriShaderStage_Task)     [c->renderEnc setObjectBytes:data length:size atIndex:idx];
             }
         }
 
