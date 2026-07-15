@@ -125,8 +125,8 @@ namespace vri::vk
                 }
                 else if (g.type == VriAsGeometryType_Aabbs)
                 {
-                    const VriAsAabbsDesc&                        a  = g.aabbs;
-                    vg.geometryType                                = VK_GEOMETRY_TYPE_AABBS_KHR;
+                    const VriAsAabbsDesc& a                         = g.aabbs;
+                    vg.geometryType                                 = VK_GEOMETRY_TYPE_AABBS_KHR;
                     VkAccelerationStructureGeometryAabbsDataKHR& va = vg.geometry.aabbs;
                     va.sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
                     va.stride = a.stride ? a.stride : 24; // 6 floats, tightly packed

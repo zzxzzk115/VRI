@@ -16,17 +16,17 @@
 #define VRI_EXT_RAYTRACING_H
 
 #include "../vri_base.h"
-#include "../vri_handles.h"
+#include "../vri_command.h"
 #include "../vri_enums.h"
 #include "../vri_flags.h"
 #include "../vri_format.h"
+#include "../vri_handles.h"
 #include "../vri_pipeline.h"
-#include "../vri_command.h"
 
 VRI_EXTERN_C_BEGIN
 
 typedef struct VriAccelerationStructure VriAccelerationStructure;
-typedef struct VriMicromap VriMicromap; /* opacity micromap (see ext/vri_ext_omm.h) */
+typedef struct VriMicromap              VriMicromap; /* opacity micromap (see ext/vri_ext_omm.h) */
 
 #define VRI_SHADER_UNUSED 0xFFFFFFFFu
 
@@ -52,8 +52,8 @@ typedef enum VriAccelerationStructureBuildBits
 typedef enum VriAsGeometryType
 {
     VriAsGeometryType_Triangles = 0,
-    VriAsGeometryType_Aabbs,            /* BLAS of procedural primitives (custom intersection) */
-    VriAsGeometryType_Instances,        /* TLAS: a buffer of VkAccelerationStructureInstance-layout records */
+    VriAsGeometryType_Aabbs,     /* BLAS of procedural primitives (custom intersection) */
+    VriAsGeometryType_Instances, /* TLAS: a buffer of VkAccelerationStructureInstance-layout records */
     VriAsGeometryType_MaxEnum = 0x7fffffff
 } VriAsGeometryType;
 
@@ -72,16 +72,16 @@ typedef struct VriAsTrianglesDesc
     uint64_t     vertexOffset;
     uint32_t     vertexCount;
     uint32_t     vertexStride;
-    VriFormat    vertexFormat;   /* e.g. VriFormat_RGB32_SFLOAT */
-    VriBuffer*   indexBuffer;    /* optional (NULL => non-indexed) */
+    VriFormat    vertexFormat; /* e.g. VriFormat_RGB32_SFLOAT */
+    VriBuffer*   indexBuffer;  /* optional (NULL => non-indexed) */
     uint64_t     indexOffset;
     uint32_t     indexCount;
     VriIndexType indexType;
     VriBuffer*   transformBuffer; /* optional 3x4 row-major float transform */
     uint64_t     transformOffset;
     /* optional opacity micromap attachment (requires VriFeature_OpacityMicromap) */
-    VriMicromap* micromap;         /* NULL => no OMM */
-    VriBuffer*   ommIndexBuffer;   /* per-triangle index into the micromap */
+    VriMicromap* micromap;       /* NULL => no OMM */
+    VriBuffer*   ommIndexBuffer; /* per-triangle index into the micromap */
     uint64_t     ommIndexOffset;
     VriIndexType ommIndexType;
 } VriAsTrianglesDesc;
@@ -110,7 +110,7 @@ typedef struct VriAsGeometryDesc
     VriAsGeometryType  type;
     VriAsGeometryFlags flags;
     VriAsTrianglesDesc triangles; /* used when type == Triangles */
-    VriAsAabbsDesc     aabbs;      /* used when type == Aabbs */
+    VriAsAabbsDesc     aabbs;     /* used when type == Aabbs */
     VriAsInstancesDesc instances; /* used when type == Instances */
 } VriAsGeometryDesc;
 
@@ -133,7 +133,7 @@ typedef struct VriBuildAccelerationStructureDesc
 typedef enum VriShaderGroupType
 {
     VriShaderGroupType_General = 0,       /* raygen / miss / callable: generalShader set */
-    VriShaderGroupType_TrianglesHitGroup,/* closestHit (+ optional anyHit) */
+    VriShaderGroupType_TrianglesHitGroup, /* closestHit (+ optional anyHit) */
     VriShaderGroupType_ProceduralHitGroup,
     VriShaderGroupType_MaxEnum = 0x7fffffff
 } VriShaderGroupType;
@@ -141,7 +141,7 @@ typedef enum VriShaderGroupType
 typedef struct VriShaderGroupDesc
 {
     VriShaderGroupType type;
-    uint32_t           generalShader;      /* index into shaders[] or VRI_SHADER_UNUSED */
+    uint32_t           generalShader; /* index into shaders[] or VRI_SHADER_UNUSED */
     uint32_t           closestHitShader;
     uint32_t           anyHitShader;
     uint32_t           intersectionShader;
@@ -150,7 +150,7 @@ typedef struct VriShaderGroupDesc
 typedef struct VriRayTracingPipelineDesc
 {
     VriPipelineLayout*        pipelineLayout;
-    const VriShaderDesc*      shaders;     /* raygen/miss/hit/... stages */
+    const VriShaderDesc*      shaders; /* raygen/miss/hit/... stages */
     uint32_t                  shaderNum;
     const VriShaderGroupDesc* groups;
     uint32_t                  groupNum;
@@ -181,22 +181,32 @@ typedef struct VriRayTracingInterface
 {
     /* Create an AS sized for the given geometry (counts/formats). Owns its backing
        store + scratch; build it later with CmdBuildAccelerationStructure. */
-    VriResult (VRI_CALL *CreateAccelerationStructure)(VriDevice* device, const VriAccelerationStructureDesc* desc, VriAccelerationStructure** outAS);
-    void      (VRI_CALL *DestroyAccelerationStructure)(VriAccelerationStructure* as);
-    uint64_t  (VRI_CALL *GetAccelerationStructureDeviceAddress)(const VriAccelerationStructure* as);
+    VriResult(VRI_CALL* CreateAccelerationStructure)(VriDevice*                          device,
+                                                     const VriAccelerationStructureDesc* desc,
+                                                     VriAccelerationStructure**          outAS);
+    void(VRI_CALL* DestroyAccelerationStructure)(VriAccelerationStructure* as);
+    uint64_t(VRI_CALL* GetAccelerationStructureDeviceAddress)(const VriAccelerationStructure* as);
 
     /* Create a descriptor for binding a TLAS (VriDescriptorType_AccelerationStructure).
        Destroy it with the core DestroyDescriptor, like any other VriDescriptor. */
-    VriResult (VRI_CALL *CreateAccelerationStructureDescriptor)(VriDevice* device, VriAccelerationStructure* as, VriDescriptor** outDescriptor);
+    VriResult(VRI_CALL* CreateAccelerationStructureDescriptor)(VriDevice*                device,
+                                                               VriAccelerationStructure* as,
+                                                               VriDescriptor**           outDescriptor);
 
-    VriResult (VRI_CALL *CreateRayTracingPipeline)(VriDevice* device, const VriRayTracingPipelineDesc* desc, VriPipeline** outPipeline);
+    VriResult(VRI_CALL* CreateRayTracingPipeline)(VriDevice*                       device,
+                                                  const VriRayTracingPipelineDesc* desc,
+                                                  VriPipeline**                    outPipeline);
     /* Copy the opaque shader-group handles for [firstGroup, firstGroup+groupNum)
        into `dst` (dstSize must be >= groupNum * shaderGroupHandleSize). The app
        writes these into the SBT buffer at shaderGroupBaseAlignment strides. */
-    VriResult (VRI_CALL *GetShaderGroupHandles)(VriPipeline* pipeline, uint32_t firstGroup, uint32_t groupNum, size_t dstSize, void* dst);
+    VriResult(VRI_CALL* GetShaderGroupHandles)(VriPipeline* pipeline,
+                                               uint32_t     firstGroup,
+                                               uint32_t     groupNum,
+                                               size_t       dstSize,
+                                               void*        dst);
 
-    void (VRI_CALL *CmdBuildAccelerationStructure)(VriCommandBuffer* cmd, const VriBuildAccelerationStructureDesc* desc);
-    void (VRI_CALL *CmdTraceRays)(VriCommandBuffer* cmd, const VriDispatchRaysDesc* desc);
+    void(VRI_CALL* CmdBuildAccelerationStructure)(VriCommandBuffer* cmd, const VriBuildAccelerationStructureDesc* desc);
+    void(VRI_CALL* CmdTraceRays)(VriCommandBuffer* cmd, const VriDispatchRaysDesc* desc);
 
     /* ---- compaction (shrink a built AS to its exact size) ---------------------
        Build the source AS with VriAccelerationStructureBuild_AllowCompaction, then:
@@ -209,16 +219,22 @@ typedef struct VriRayTracingInterface
     /* Write src's compacted size (uint64) into dstBuffer at dstOffset. dstBuffer must be a
        device buffer usable as the size sink (StorageBuffer + TransferSrc); copy it to a
        HostReadback buffer to read the value. */
-    void (VRI_CALL *CmdWriteAccelerationStructureCompactedSize)(VriCommandBuffer* cmd, VriAccelerationStructure* as,
-                                                                VriBuffer* dstBuffer, uint64_t dstOffset);
+    void(VRI_CALL* CmdWriteAccelerationStructureCompactedSize)(VriCommandBuffer*         cmd,
+                                                               VriAccelerationStructure* as,
+                                                               VriBuffer*                dstBuffer,
+                                                               uint64_t                  dstOffset);
     /* Create an AS with an explicit backing size and no geometry/scratch -- the destination of a
        compacting copy. */
-    VriResult (VRI_CALL *CreateAccelerationStructureCompacted)(VriDevice* device, VriAccelerationStructureType type,
-                                                               uint64_t size, VriAccelerationStructure** outAS);
+    VriResult(VRI_CALL* CreateAccelerationStructureCompacted)(VriDevice*                   device,
+                                                              VriAccelerationStructureType type,
+                                                              uint64_t                     size,
+                                                              VriAccelerationStructure**   outAS);
     /* Copy src into dst; compact == VRI_TRUE shrinks (dst sized from the compacted-size query,
        src built with AllowCompaction). */
-    void (VRI_CALL *CmdCopyAccelerationStructure)(VriCommandBuffer* cmd, VriAccelerationStructure* dst,
-                                                  VriAccelerationStructure* src, VriBool compact);
+    void(VRI_CALL* CmdCopyAccelerationStructure)(VriCommandBuffer*         cmd,
+                                                 VriAccelerationStructure* dst,
+                                                 VriAccelerationStructure* src,
+                                                 VriBool                   compact);
 } VriRayTracingInterface;
 
 VRI_EXTERN_C_END
