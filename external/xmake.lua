@@ -23,17 +23,22 @@ if has_config("vri_backend_wgpu") then
     add_requires("webgpu-sdk v0.1.2")
 end
 
--- OpenGL / OpenGL ES / WebGL backend: spirv-cross (SPIR-V -> GLSL/ESSL) always;
--- on wasm the GL loader (WebGL2) and GLFW come from Emscripten ports, so glad/glfw
+-- SPIRV-Cross is required by any backend that transpiles VRI's SPIR-V IR: the GL
+-- family (SPIR-V -> GLSL/ESSL) and the native Metal backend (SPIR-V -> MSL). It
+-- must be required whenever EITHER is enabled - the Metal backend add_packages()es
+-- it in source/xmake.lua, which is a no-op (missing include -> spirv_msl.hpp not
+-- found) unless the package is required here.
+-- On wasm the GL loader (WebGL2) and GLFW come from Emscripten ports, so glad/glfw
 -- packages are native-only.
-if has_config("vri_backend_gl") then
+if has_config("vri_backend_gl") or has_config("vri_backend_metal") then
     -- Pin a recent spirv-cross: 1.3.268 emits invalid tessellation-control GLSL
     -- (non-array output, not indexed by gl_InvocationID); vulkan-sdk-1.4.335 fixes it.
     add_requires("spirv-cross vulkan-sdk-1.4.335")
     -- glad (GL loader) is needed for every desktop-GL build (Windows/macOS/Linux-desktop);
     -- the native OpenGL ES build uses system GLES headers instead. glfw provides the context
     -- on Windows/macOS only - Linux (both desktop GL and GLES) uses EGL directly, no glfw.
-    if not is_plat("wasm") then
+    -- GL-only: the Metal backend shares spirv-cross above but needs neither loader.
+    if has_config("vri_backend_gl") and not is_plat("wasm") then
         if not has_config("vri_backend_gl_es") then
             add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
         end
