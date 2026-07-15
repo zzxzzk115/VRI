@@ -68,6 +68,21 @@ namespace vri::mtl
             for (uint32_t i = 0; i < desc->geometryCount; ++i)
             {
                 const VriAsGeometryDesc& g = desc->geometries[i];
+                if (g.type == VriAsGeometryType_Aabbs)
+                {
+                    // Procedural primitives: Metal bounding-box geometry (custom
+                    // intersection runs in the ray-query / intersection function).
+                    const VriAsAabbsDesc& a = g.aabbs;
+                    MTLAccelerationStructureBoundingBoxGeometryDescriptor* box =
+                        [MTLAccelerationStructureBoundingBoxGeometryDescriptor descriptor];
+                    box.boundingBoxBuffer = Buf(a.buffer)->buffer;
+                    box.boundingBoxBufferOffset = a.offset;
+                    box.boundingBoxStride = a.stride ? a.stride : 24; // 6 floats
+                    box.boundingBoxCount = a.count;
+                    box.opaque = (g.flags & VriAsGeometry_Opaque) ? YES : NO;
+                    [geoms addObject:box];
+                    continue;
+                }
                 if (g.type != VriAsGeometryType_Triangles)
                     continue;
                 const VriAsTrianglesDesc& t = g.triangles;

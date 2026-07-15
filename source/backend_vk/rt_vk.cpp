@@ -123,6 +123,17 @@ namespace vri::vk
                         vt.pNext = &omm;
                     }
                 }
+                else if (g.type == VriAsGeometryType_Aabbs)
+                {
+                    const VriAsAabbsDesc&                        a  = g.aabbs;
+                    vg.geometryType                                = VK_GEOMETRY_TYPE_AABBS_KHR;
+                    VkAccelerationStructureGeometryAabbsDataKHR& va = vg.geometry.aabbs;
+                    va.sType  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+                    va.stride = a.stride ? a.stride : 24; // 6 floats, tightly packed
+                    if (withAddr)
+                        va.data.deviceAddress = BufAddr(d, BUF(a.buffer)->buffer) + a.offset;
+                    prims = a.count;
+                }
                 else // instances (TLAS)
                 {
                     const VriAsInstancesDesc& in                        = g.instances;

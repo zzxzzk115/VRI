@@ -52,6 +52,7 @@ typedef enum VriAccelerationStructureBuildBits
 typedef enum VriAsGeometryType
 {
     VriAsGeometryType_Triangles = 0,
+    VriAsGeometryType_Aabbs,            /* BLAS of procedural primitives (custom intersection) */
     VriAsGeometryType_Instances,        /* TLAS: a buffer of VkAccelerationStructureInstance-layout records */
     VriAsGeometryType_MaxEnum = 0x7fffffff
 } VriAsGeometryType;
@@ -85,6 +86,18 @@ typedef struct VriAsTrianglesDesc
     VriIndexType ommIndexType;
 } VriAsTrianglesDesc;
 
+/* Procedural primitives for custom intersection (e.g. spheres, gaussian splats).
+ * `buffer` holds tightly- or `stride`-packed AABBs, each 6 floats
+ * (minX, minY, minZ, maxX, maxY, maxZ); the ray-query / intersection shader
+ * does the real hit test inside each box. */
+typedef struct VriAsAabbsDesc
+{
+    VriBuffer* buffer;
+    uint64_t   offset;
+    uint32_t   count;
+    uint32_t   stride; /* bytes between AABBs; 0 => tightly packed (24 bytes) */
+} VriAsAabbsDesc;
+
 typedef struct VriAsInstancesDesc
 {
     VriBuffer* instanceBuffer; /* array of VkAccelerationStructureInstanceKHR-layout records */
@@ -97,6 +110,7 @@ typedef struct VriAsGeometryDesc
     VriAsGeometryType  type;
     VriAsGeometryFlags flags;
     VriAsTrianglesDesc triangles; /* used when type == Triangles */
+    VriAsAabbsDesc     aabbs;      /* used when type == Aabbs */
     VriAsInstancesDesc instances; /* used when type == Instances */
 } VriAsGeometryDesc;
 
