@@ -51,6 +51,7 @@ namespace vri::mtl
         // bound state, applied at draw/dispatch
         const struct PipelineLayoutMTL* boundLayout;
         const struct PipelineMTL*       boundPipeline;
+        bool                        renderPipelineDeferred; // graphics pipeline set before an encoder existed
         id<MTLBuffer>               indexBuffer;
         uint64_t                    indexOffset;
         MTLIndexType                indexType;

@@ -232,6 +232,7 @@ namespace vri::mtl
             if (c->blitEnc) { [c->blitEnc endEncoding]; [c->blitEnc release]; c->blitEnc = nil; }
             if (!c->computeEnc) c->computeEnc = [[c->cmd computeCommandEncoder] retain];
         }
+        void ApplyRenderPipeline(CommandBufferMTL* c); // applies boundPipeline to the live render encoder
 
         // ---- queries -------------------------------------------------------
         const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
@@ -298,7 +299,7 @@ namespace vri::mtl
             CommandBufferMTL* c = CB(cmd);
             c->cmd = [[c->queue commandBuffer] retain];
             c->renderEnc = nil; c->computeEnc = nil; c->blitEnc = nil;
-            c->boundLayout = nullptr; c->boundPipeline = nullptr;
+            c->boundLayout = nullptr; c->boundPipeline = nullptr; c->renderPipelineDeferred = false;
             c->indexBuffer = nil; c->indexOffset = 0; c->indexType = MTLIndexTypeUInt16;
             // Query state resets each begin; the visibility buffer (occlusion) is reused across resets.
             c->visNextSlot = 0;
@@ -1039,6 +1040,15 @@ namespace vri::mtl
             rp.visibilityResultBuffer = c->visBuffer;
 
             c->renderEnc = [[c->cmd renderCommandEncoderWithDescriptor:rp] retain];
+            // Apply a graphics pipeline that was bound before this encoder existed (CmdSetPipeline can
+            // legally run before CmdBeginRendering; on Metal the pipeline must land on a live encoder).
+            // Only a genuinely-deferred pipeline is re-applied - not a stale one left bound by a prior
+            // pass (whose attachment formats would mismatch this render pass).
+            if (c->renderPipelineDeferred && c->boundPipeline && !c->boundPipeline->isCompute)
+            {
+                c->renderPipelineDeferred = false;
+                ApplyRenderPipeline(c);
+            }
         }
 
         void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
@@ -1069,18 +1079,14 @@ namespace vri::mtl
 
         void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->boundLayout = PLc(layout); }
 
-        void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
+        // Apply the bound graphics pipeline's state to the active render encoder. A Metal render
+        // pipeline can only be set on a live encoder, but VRI's contract (like Vulkan/D3D12) lets
+        // CmdSetPipeline run before CmdBeginRendering - so this is called from BOTH: from
+        // CmdSetPipeline when an encoder is already open, and from CmdBeginRendering to (re)apply
+        // the pipeline that was bound before the encoder existed.
+        void ApplyRenderPipeline(CommandBufferMTL* c)
         {
-            CommandBufferMTL* c = CB(cmd);
-            PipelineMTL* p = Pipe(pipeline);
-            c->boundPipeline = p;
-            if (p->isCompute)
-            {
-                EnsureCompute(c);
-                [c->computeEnc setComputePipelineState:p->compute];
-                return;
-            }
-            if (!c->renderEnc) return;
+            const PipelineMTL* p = c->boundPipeline;
             [c->renderEnc setRenderPipelineState:p->render];
             [c->renderEnc setCullMode:p->cull];
             [c->renderEnc setFrontFacingWinding:p->winding];
@@ -1096,6 +1102,24 @@ namespace vri::mtl
                 [c->renderEnc setVertexBytes:vm length:sizeof(vm) atIndex:kMtlViewMaskBufferIndex];
                 [c->renderEnc setFragmentBytes:vm length:sizeof(vm) atIndex:kMtlViewMaskBufferIndex];
             }
+        }
+
+        void VRI_CALL CmdSetPipeline(VriCommandBuffer* cmd, VriPipeline* pipeline)
+        {
+            CommandBufferMTL* c = CB(cmd);
+            PipelineMTL* p = Pipe(pipeline);
+            c->boundPipeline = p;
+            if (p->isCompute)
+            {
+                EnsureCompute(c);
+                [c->computeEnc setComputePipelineState:p->compute];
+                return;
+            }
+            // Defer to CmdBeginRendering when set before the render pass opens (valid per the VRI
+            // contract; a Metal render pipeline can only be applied to a live encoder).
+            if (!c->renderEnc) { c->renderPipelineDeferred = true; return; }
+            c->renderPipelineDeferred = false;
+            ApplyRenderPipeline(c);
         }
 
         void BindOne(CommandBufferMTL* c, const DescriptorSetMTL::Bound& b)
