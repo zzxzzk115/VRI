@@ -1298,10 +1298,24 @@ namespace vri::mtl
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // Metal auto-tracks hazards
 
         // ---- copies (blit encoder) -----------------------------------------
-        // Metal's blit fillBuffer fills a single byte, not an arbitrary uint32; unsupported here.
-        void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer*, uint64_t, uint64_t, uint32_t)
+        // Metal's blit fillBuffer fills a single BYTE, not an arbitrary uint32. That still covers the
+        // overwhelmingly common case - clearing counters / accumulation buffers to a byte-uniform value
+        // (0x00000000, 0xFFFFFFFF, ...) - which is exactly what CmdClearStorageBuffer is used for. Only a
+        // genuinely non-byte-uniform uint32 (e.g. 0x00000001) has no direct blit and is diagnosed.
+        void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
         {
-            CB(cmd)->device->ReportError("CmdClearStorageBuffer: unsupported on Metal");
+            CommandBufferMTL* c = CB(cmd);
+            const uint8_t     b = (uint8_t)(value & 0xFFu);
+            if (value != (uint32_t)b * 0x01010101u)
+            {
+                c->device->ReportError("CmdClearStorageBuffer: only byte-uniform values (0x00/0xFF/... repeated) are "
+                                       "supported on Metal");
+                return;
+            }
+            id<MTLBuffer> buf = Buf(buffer)->buffer;
+            const uint64_t len = size ? size : ((uint64_t)buf.length - offset);
+            EnsureBlit(c);
+            [c->blitEnc fillBuffer:buf range:NSMakeRange((NSUInteger)offset, (NSUInteger)len) value:b];
         }
         // Metal clears textures via a render pass loadAction, not an out-of-pass command.
         void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture*, const VriClearColor*)
