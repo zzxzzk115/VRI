@@ -19,7 +19,8 @@ namespace vri::mtl
         uint32_t             height;
         VriPresentMode       presentMode;
         id<CAMetalDrawable>  drawable; // current acquired frame (retained until Present)
-        TextureMTL           current;  // stable handle; its texture is refreshed each acquire
+        id<MTLTexture>       backing;  // owned render target; blitted to the drawable at Present
+        TextureMTL           current;  // stable handle wrapping `backing` (readable, unlike a drawable)
     };
 
     inline VriSwapChain* ToHandle(SwapChainMTL* s) { return reinterpret_cast<VriSwapChain*>(s); }

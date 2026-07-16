@@ -32,7 +32,24 @@ namespace vri::mtl
             sc->current.layerNum = 1;
             sc->current.sampleNum = 1;
             sc->current.texelSize = TexelSize(requested);
-            sc->current.owned = false; // swapchain-managed (drawable owns the texture)
+            sc->current.owned = false; // swapchain-managed
+        }
+
+        // Owned render target the frame draws into. CAMetalLayer drawables are not reliably
+        // readable/blittable as a *source* on Apple GPUs (a mid-frame readback returns black), so we
+        // render to this texture instead and blit it onto the drawable at Present. It also makes
+        // headless swapchain readback (screenshots / --dump-frame) work, matching MoltenVK.
+        void MakeBacking(SwapChainMTL* sc)
+        {
+            if (sc->backing) { [sc->backing release]; sc->backing = nil; }
+            MTLTextureDescriptor* td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:sc->format
+                                                                                         width:sc->width
+                                                                                        height:sc->height
+                                                                                     mipmapped:NO];
+            td.usage       = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+            td.storageMode = MTLStorageModePrivate;
+            sc->backing         = [sc->device->Device() newTextureWithDescriptor:td]; // +1 owned
+            sc->current.texture = sc->backing;
         }
 
         VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
@@ -66,6 +83,7 @@ namespace vri::mtl
                 sc->layer.maximumDrawableCount = desc->textureNum < 2 ? 2 : (desc->textureNum > 3 ? 3 : desc->textureNum);
 
             ConfigureCurrent(sc, desc->format);
+            MakeBacking(sc);
             *out = ToHandle(sc);
             return VriResult_Success;
         }
@@ -75,6 +93,7 @@ namespace vri::mtl
             if (!swapChain) return;
             SwapChainMTL* sc = SC(swapChain);
             if (sc->drawable) [sc->drawable release];
+            if (sc->backing) [sc->backing release];
             if (sc->layer) [sc->layer release];
             delete sc;
         }
@@ -92,10 +111,12 @@ namespace vri::mtl
             SwapChainMTL* sc = SC(swapChain);
             if (sc->drawable) { [sc->drawable release]; sc->drawable = nil; }
 
+            sc->layer.framebufferOnly = NO; // re-assert (SDL's Metal view may reset it) so we can blit to the drawable
             sc->drawable = [[sc->layer nextDrawable] retain]; // blocks until a backbuffer is free
             if (!sc->drawable)
                 return VriResult_OutOfDate;
-            sc->current.texture = [sc->drawable texture]; // owned by the drawable
+            // current.texture stays = backing (the readable render target); the drawable only receives
+            // a blit at Present, so it never needs to be read from.
 
             // nextDrawable is synchronous, so the acquire is already satisfied: signal the
             // fence on the CPU timeline immediately (the GPU never has to wait on it).
@@ -114,10 +135,25 @@ namespace vri::mtl
             if (waitFence)
                 [pc encodeWaitForEvent:Fen(waitFence)->event value:waitValue];
             if (sc->drawable)
+            {
+                // Copy the frame (rendered into `backing`) onto the drawable, then present. Runs after
+                // the already-committed render work on the in-order queue, so `backing` is complete.
+                id<MTLBlitCommandEncoder> blit = [pc blitCommandEncoder];
+                [blit copyFromTexture:sc->backing
+                          sourceSlice:0
+                          sourceLevel:0
+                         sourceOrigin:MTLOriginMake(0, 0, 0)
+                           sourceSize:MTLSizeMake(sc->width, sc->height, 1)
+                            toTexture:[sc->drawable texture]
+                     destinationSlice:0
+                     destinationLevel:0
+                    destinationOrigin:MTLOriginMake(0, 0, 0)];
+                [blit endEncoding];
                 [pc presentDrawable:sc->drawable];
+            }
             [pc commit];
             if (sc->drawable) { [sc->drawable release]; sc->drawable = nil; }
-            sc->current.texture = nil;
+            // current.texture stays = backing (stable across frames).
             return VriResult_Success;
         }
 
@@ -129,6 +165,7 @@ namespace vri::mtl
             sc->layer.drawableSize = CGSizeMake(width, height);
             sc->current.width = width;
             sc->current.height = height;
+            MakeBacking(sc); // resize the owned render target too
             return VriResult_Success;
         }
 
