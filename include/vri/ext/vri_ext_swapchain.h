@@ -100,6 +100,14 @@ typedef struct VriSwapChainInterface
                                             uint32_t*     outIndex);
     VriResult(VRI_CALL* Present)(VriSwapChain* swapChain, VriFence* waitFence, uint64_t waitValue);
     VriResult(VRI_CALL* Resize)(VriSwapChain* swapChain, uint32_t width, uint32_t height);
+
+    /* The extent the swapchain was ACTUALLY created with. May differ from the size passed to
+       CreateSwapChain/Resize: window systems (Vulkan surface currentExtent) dictate the real
+       size, and during rapid resizes the caller's window metrics lag behind. Hosts must size
+       render areas/viewports from THIS, not from the requested size - a render area larger
+       than the backbuffer is undefined behavior (GPU faults, black window). May be null in
+       backends that predate it; fall back to the requested size then. */
+    VriResult(VRI_CALL* GetSwapChainExtent)(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight);
 } VriSwapChainInterface;
 
 VRI_EXTERN_C_END

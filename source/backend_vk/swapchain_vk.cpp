@@ -333,6 +333,18 @@ namespace vri::vk
                 sc, width, height, sc->requestedFormat, sc->requestedTextureNum, sc->requestedPresentMode);
         }
 
+        VriResult VRI_CALL GetSwapChainExtent(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight)
+        {
+            const SwapChainVK* sc = SC(swapChain);
+            if (!outWidth || !outHeight)
+                return VriResult_InvalidArgument;
+            // The surface's currentExtent won over the requested size at build time (Vulkan
+            // mandates it); this is what render areas/viewports must be sized from.
+            *outWidth  = sc->extent.width;
+            *outHeight = sc->extent.height;
+            return VriResult_Success;
+        }
+
         const VriSwapChainInterface g_swapChainVK = {
             CreateSwapChain,
             DestroySwapChain,
@@ -340,6 +352,7 @@ namespace vri::vk
             AcquireNextTexture,
             Present,
             Resize,
+            GetSwapChainExtent,
         };
     } // namespace
 
