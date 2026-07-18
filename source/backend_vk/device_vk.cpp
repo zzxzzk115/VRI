@@ -928,7 +928,12 @@ namespace vri::vk
             m_ext.CmdDrawMeshTasksIndirect = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(
                 vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksIndirectEXT"));
         }
-        if (m_enabledFeatures & VriFeature_RayTracing)
+        // Acceleration-structure entry points serve BOTH the SBT pipeline (RayTracing) and
+        // inline ray query - a ray-query-only device still creates/builds AS through the
+        // ray-tracing interface, so load them for either feature. The SBT-pipeline entry
+        // points below resolve to null when only ray query was granted (extension not
+        // enabled), matching the interface's gating on hasRayTracing.
+        if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
             auto L = [&](const char* n) { return vkGetDeviceProcAddr(m_device, n); };
             m_ext.CreateAccelerationStructure =
