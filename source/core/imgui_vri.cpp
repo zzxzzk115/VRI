@@ -67,6 +67,16 @@ namespace vri::core
             uint32_t                                              poolUsed = 0; // sets used in pools.back()
             std::unordered_map<VriDescriptor*, VriDescriptorSet*> texSets;
 
+            // Geometry buffers replaced by Grow(), kept alive a few uploads: in-flight frames still
+            // reference them (CmdDraw vertex/index binds, CmdCopy staging reads) - destroying them
+            // at grow time is a use-after-free the first time the UI's vertex count grows.
+            struct RetiredBuffer
+            {
+                VriBuffer* buffer;
+                uint32_t   uploadsLeft;
+            };
+            std::vector<RetiredBuffer> retired;
+
             ImguiViewport mainVp; // the main window's geometry (extra viewports are created explicitly)
         };
 
@@ -132,10 +142,13 @@ namespace vri::core
             uint32_t next = cap ? cap : 4096;
             while (next < count)
                 next *= 2;
+            // Retire, don't destroy: frames in flight still consume the old buffers. They are
+            // freed a few UploadImguiData calls (frames) later.
+            constexpr uint32_t kRetireUploads = 4; // > any reasonable host's frames-in-flight
             if (buf)
-                s->c.DestroyBuffer(buf);
+                s->retired.push_back({buf, kRetireUploads});
             if (stg)
-                s->c.DestroyBuffer(stg);
+                s->retired.push_back({stg, kRetireUploads});
             VriBufferDesc bd {};
             bd.size           = uint64_t(next) * stride;
             bd.usage          = usage | VriBufferUsage_TransferDst;
@@ -420,6 +433,9 @@ namespace vri::core
             if (!s)
                 return;
             VriCoreInterface& c = s->c;
+            for (const auto& retired : s->retired) // host idles the device before DestroyImgui
+                c.DestroyBuffer(retired.buffer);
+            s->retired.clear();
             FreeViewportBuffers(&s->mainVp);
             for (VriDescriptorPool* pool : s->pools)
                 c.DestroyDescriptorPool(pool);
@@ -490,7 +506,22 @@ namespace vri::core
 
         void VRI_CALL UploadImguiData(VriImgui* imgui, const VriImguiDrawData* dd)
         {
-            UploadTo(&Self(imgui)->mainVp, dd);
+            ImguiState* s = Self(imgui);
+            // Age grow-retired geometry buffers (one tick per frame); free the expired ones.
+            for (auto it = s->retired.begin(); it != s->retired.end();)
+            {
+                if (it->uploadsLeft == 0)
+                {
+                    s->c.DestroyBuffer(it->buffer);
+                    it = s->retired.erase(it);
+                }
+                else
+                {
+                    --it->uploadsLeft;
+                    ++it;
+                }
+            }
+            UploadTo(&s->mainVp, dd);
         }
 
         void VRI_CALL CmdCopyImguiData(VriCommandBuffer* cmd, VriImgui* imgui) { CmdCopyTo(cmd, &Self(imgui)->mainVp); }
