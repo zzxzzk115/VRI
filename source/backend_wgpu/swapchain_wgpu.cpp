@@ -257,6 +257,18 @@ namespace vri::wgpu
             return VriResult_Success;
         }
 
+        VriResult VRI_CALL GetSwapChainExtent(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight)
+        {
+            const SwapChainWGPU* sc = SC(swapChain);
+            if (!outWidth || !outHeight)
+                return VriResult_InvalidArgument;
+            // wgpuSurfaceConfigure takes the size verbatim, so the created extent matches the
+            // last Create/Resize request.
+            *outWidth  = sc->width;
+            *outHeight = sc->height;
+            return VriResult_Success;
+        }
+
         const VriSwapChainInterface g_swapChainWGPU = {
             CreateSwapChain,
             DestroySwapChain,
@@ -264,6 +276,7 @@ namespace vri::wgpu
             AcquireNextTexture,
             Present,
             Resize,
+            GetSwapChainExtent,
         };
     } // namespace
 

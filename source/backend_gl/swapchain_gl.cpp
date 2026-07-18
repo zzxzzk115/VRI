@@ -569,6 +569,18 @@ namespace vri::gl
             s->currentIndex = 0;
             return VriResult_Success;
         }
+
+        VriResult VRI_CALL GetSwapChainExtent(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight)
+        {
+            const SwapChainGL* s = Swap(swapChain);
+            if (!outWidth || !outHeight)
+                return VriResult_InvalidArgument;
+            // The backbuffers are our own FBO textures sized verbatim from the request (clamped
+            // to >= 1 above); the present blit scales onto the real window surface.
+            *outWidth  = s->width;
+            *outHeight = s->height;
+            return VriResult_Success;
+        }
     } // namespace
 
     const VriSwapChainInterface* GetSwapChainInterfaceGL()
@@ -580,6 +592,7 @@ namespace vri::gl
             AcquireNextTexture,
             Present,
             Resize,
+            GetSwapChainExtent,
         };
         return &table;
     }

@@ -166,6 +166,18 @@ namespace vri::d3d12
             }
             return WrapBackbuffers(s) ? VriResult_Success : VriResult_Failure;
         }
+
+        VriResult VRI_CALL GetSwapChainExtent(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight)
+        {
+            const SwapChainD3D12* s = SC(swapChain);
+            if (!outWidth || !outHeight)
+                return VriResult_InvalidArgument;
+            // ResizeBuffers takes the size verbatim (clamped to >= 1 above), so the created
+            // extent matches the last successful Create/Resize request.
+            *outWidth  = s->width;
+            *outHeight = s->height;
+            return VriResult_Success;
+        }
     } // namespace
 
     const VriSwapChainInterface* GetSwapChainInterfaceD3D12()
@@ -177,6 +189,7 @@ namespace vri::d3d12
             AcquireNextTexture,
             Present,
             Resize,
+            GetSwapChainExtent,
         };
         return &table;
     }

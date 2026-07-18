@@ -169,6 +169,18 @@ namespace vri::mtl
             return VriResult_Success;
         }
 
+        VriResult VRI_CALL GetSwapChainExtent(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight)
+        {
+            const SwapChainMTL* sc = SC(swapChain);
+            if (!outWidth || !outHeight)
+                return VriResult_InvalidArgument;
+            // CAMetalLayer takes whatever drawableSize we set, so the created extent IS the
+            // requested one (unlike Vulkan's surface-dictated currentExtent).
+            *outWidth  = sc->width;
+            *outHeight = sc->height;
+            return VriResult_Success;
+        }
+
         const VriSwapChainInterface g_swapChainMTL = {
             CreateSwapChain,
             DestroySwapChain,
@@ -176,6 +188,7 @@ namespace vri::mtl
             AcquireNextTexture,
             Present,
             Resize,
+            GetSwapChainExtent,
         };
     } // namespace
 
