@@ -5,9 +5,10 @@
 // and one GPU texture per glTF texture. Node transforms are BAKED into the vertices at load
 // (PreTransformVertices), so the geometry is world-space and needs no per-node transform plumbing.
 //
-// The vertex/index buffers are created with AccelerationBuildInput | StorageBuffer usage so the
-// same model can feed a BLAS build AND be read back in a closesthit shader (see examples/raytracing)
-// - while staying usable as ordinary vertex/index buffers for a raster pass.
+// The vertex/index buffers carry AccelerationBuildInput | StorageBuffer usage so the same model can
+// feed a BLAS build AND be read back in a closesthit shader (see examples/raytracing), plus the
+// VertexBuffer / IndexBuffer bits so a plain raster pass can bind them directly - without those a
+// raster consumer had to re-upload the CPU copy (keepCpuGeometry) into its own buffers.
 //
 // Define TINYGLTF_IMPLEMENTATION in exactly ONE translation unit before including this header.
 #pragma once
@@ -320,15 +321,17 @@ namespace vriex
             const uint64_t vbSize = (uint64_t)vertexCount * sizeof(GltfVertex);
             const uint64_t ibSize = (uint64_t)indexCount * sizeof(uint32_t);
             VriBufferDesc  vbd {};
-            vbd.size           = vbSize;
-            vbd.usage          = VriBufferUsage_AccelerationBuildInput | VriBufferUsage_StorageBuffer;
+            vbd.size = vbSize;
+            vbd.usage =
+                VriBufferUsage_AccelerationBuildInput | VriBufferUsage_StorageBuffer | VriBufferUsage_VertexBuffer;
             vbd.memoryLocation = VriMemoryLocation_HostUpload;
             c.CreateBuffer(app.dev, &vbd, &vertexBuffer);
             std::memcpy(c.MapBuffer(vertexBuffer, 0, vbSize), verts.data(), vbSize);
             c.UnmapBuffer(vertexBuffer);
             VriBufferDesc ibd {};
-            ibd.size           = ibSize;
-            ibd.usage          = VriBufferUsage_AccelerationBuildInput | VriBufferUsage_StorageBuffer;
+            ibd.size = ibSize;
+            ibd.usage =
+                VriBufferUsage_AccelerationBuildInput | VriBufferUsage_StorageBuffer | VriBufferUsage_IndexBuffer;
             ibd.memoryLocation = VriMemoryLocation_HostUpload;
             c.CreateBuffer(app.dev, &ibd, &indexBuffer);
             std::memcpy(c.MapBuffer(indexBuffer, 0, ibSize), indices.data(), ibSize);
