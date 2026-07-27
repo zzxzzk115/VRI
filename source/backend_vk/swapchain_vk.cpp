@@ -30,6 +30,57 @@ namespace vri::vk
         inline DeviceVK*    Dev(VriDevice* h) { return reinterpret_cast<DeviceVK*>(h); }
         inline QueueVK*     Q(VriQueue* h) { return reinterpret_cast<QueueVK*>(h); }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+        // Android / Wayland / Xlib surface creation without pulling <android/native_window.h>,
+        // <wayland-client.h> or <X11/Xlib.h> into the build: the create-info structs are declared
+        // here with ABI-identical layouts (the real ones differ only in the *names* of the opaque
+        // pointer types) and the entry points are resolved through the loader. That keeps the
+        // Vulkan backend free of platform-SDK build dependencies, exactly as the Metal path above
+        // avoids needing QuartzCore at build time.
+        constexpr VkStructureType kXlibSurfaceCreateInfo    = static_cast<VkStructureType>(1000004000);
+        constexpr VkStructureType kWaylandSurfaceCreateInfo = static_cast<VkStructureType>(1000006000);
+        constexpr VkStructureType kAndroidSurfaceCreateInfo = static_cast<VkStructureType>(1000008000);
+
+        struct XlibSurfaceCreateInfo
+        {
+            VkStructureType sType;
+            const void*     pNext;
+            VkFlags         flags;
+            void*           dpy;    // Display*
+            unsigned long   window; // Window (an XID)
+        };
+        struct WaylandSurfaceCreateInfo
+        {
+            VkStructureType sType;
+            const void*     pNext;
+            VkFlags         flags;
+            void*           display; // struct wl_display*
+            void*           surface; // struct wl_surface*
+        };
+        struct AndroidSurfaceCreateInfo
+        {
+            VkStructureType sType;
+            const void*     pNext;
+            VkFlags         flags;
+            void*           window; // ANativeWindow*
+        };
+
+        // One helper for all three: they share the shape "resolve entry point, fill sType, call".
+        template<typename CreateInfo>
+        VkSurfaceKHR CreateSurfaceFrom(DeviceVK* d, const char* entryPoint, CreateInfo& ci, VkStructureType sType)
+        {
+            using Pfn = VkResult (*)(VkInstance, const CreateInfo*, const VkAllocationCallbacks*, VkSurfaceKHR*);
+            auto fn   = reinterpret_cast<Pfn>(vkGetInstanceProcAddr(d->Instance(), entryPoint));
+            if (!fn)
+                return VK_NULL_HANDLE; // instance extension not enabled / not supported by the loader
+            ci.sType             = sType;
+            VkSurfaceKHR surface = VK_NULL_HANDLE;
+            if (fn(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
+                return VK_NULL_HANDLE;
+            return surface;
+        }
+#endif
+
         VkSurfaceKHR CreateSurface(DeviceVK* d, const VriWindowHandle& window)
         {
             VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -51,9 +102,34 @@ namespace vri::vk
             ci.pLayer                      = static_cast<const CAMetalLayer*>(window.handle.cocoa.layer);
             if (vkCreateMetalSurfaceEXT(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
                 return VK_NULL_HANDLE;
+#elif defined(__ANDROID__)
+            if (window.type != VriWindowSystem_Android || window.handle.android.window == nullptr)
+                return VK_NULL_HANDLE;
+            AndroidSurfaceCreateInfo aci {};
+            aci.window = window.handle.android.window;
+            surface    = CreateSurfaceFrom(d, "vkCreateAndroidSurfaceKHR", aci, kAndroidSurfaceCreateInfo);
 #else
-            (void)d;
-            (void)window;
+            // Linux/BSD: whichever window system the app handed us. Both surface extensions are
+            // requested at instance creation when the loader reports them, so a Wayland-only or
+            // X11-only system still gets the one it has.
+            if (window.type == VriWindowSystem_Wayland)
+            {
+                if (!window.handle.wayland.display || !window.handle.wayland.surface)
+                    return VK_NULL_HANDLE;
+                WaylandSurfaceCreateInfo wci {};
+                wci.display = window.handle.wayland.display;
+                wci.surface = window.handle.wayland.surface;
+                surface     = CreateSurfaceFrom(d, "vkCreateWaylandSurfaceKHR", wci, kWaylandSurfaceCreateInfo);
+            }
+            else if (window.type == VriWindowSystem_Xlib)
+            {
+                if (!window.handle.xlib.display || !window.handle.xlib.window)
+                    return VK_NULL_HANDLE;
+                XlibSurfaceCreateInfo xci {};
+                xci.dpy    = window.handle.xlib.display;
+                xci.window = static_cast<unsigned long>(window.handle.xlib.window);
+                surface    = CreateSurfaceFrom(d, "vkCreateXlibSurfaceKHR", xci, kXlibSurfaceCreateInfo);
+            }
 #endif
             return surface;
         }

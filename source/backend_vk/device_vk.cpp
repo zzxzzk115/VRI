@@ -58,6 +58,18 @@ namespace vri::vk
                     return true;
             return false;
         }
+
+        bool HasInstanceExtension(const char* name)
+        {
+            uint32_t count = 0;
+            vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+            std::vector<VkExtensionProperties> exts(count);
+            vkEnumerateInstanceExtensionProperties(nullptr, &count, exts.data());
+            for (const VkExtensionProperties& e : exts)
+                if (std::strcmp(e.extensionName, name) == 0)
+                    return true;
+            return false;
+        }
     } // namespace
 
     DeviceVK::~DeviceVK()
@@ -141,9 +153,18 @@ namespace vri::vk
         extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
 #if defined(_WIN32)
         extensions.push_back("VK_KHR_win32_surface");
-#elif defined(__linux__)
-        extensions.push_back("VK_KHR_xlib_surface");
-        extensions.push_back("VK_KHR_wayland_surface");
+#elif defined(__ANDROID__)
+        // __ANDROID__ implies __linux__, so this must come first: Android has neither an
+        // Xlib nor a Wayland surface extension, and asking for one fails instance creation.
+        extensions.push_back("VK_KHR_android_surface");
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+        // Only ask for the ones the loader actually has: a Wayland-only session (no libX11 in
+        // the container/image) reports no VK_KHR_xlib_surface, and requesting a missing
+        // instance extension is a hard VK_ERROR_EXTENSION_NOT_PRESENT, not a downgrade.
+        if (HasInstanceExtension("VK_KHR_xlib_surface"))
+            extensions.push_back("VK_KHR_xlib_surface");
+        if (HasInstanceExtension("VK_KHR_wayland_surface"))
+            extensions.push_back("VK_KHR_wayland_surface");
 #elif defined(__APPLE__)
         // MoltenVK: the loader only enumerates the portability (Metal) device when the
         // instance opts in, and VK_EXT_layer_settings lets us turn on Metal argument buffers
