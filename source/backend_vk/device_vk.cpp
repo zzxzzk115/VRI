@@ -498,7 +498,14 @@ namespace vri::vk
         features2.features.tessellationShader      = baseSup.tessellationShader;
         features2.features.fillModeNonSolid        = baseSup.fillModeNonSolid;        // polygonMode Line/Point
         features2.features.pipelineStatisticsQuery = baseSup.pipelineStatisticsQuery; // pipeline-statistics queries
-        m_hasPipelineStats                         = baseSup.pipelineStatisticsQuery;
+        // VriSamplerDesc has always exposed anisotropyEnable/maxAnisotropy and the backend forwards
+        // both into VkSamplerCreateInfo - but Vulkan requires this feature to be enabled first, so
+        // without it an anisotropic sampler was a validation error rather than a request. Universally
+        // supported on desktop GPUs; gated on the queried bit anyway (some GLES-class drivers lack it).
+        features2.features.samplerAnisotropy = baseSup.samplerAnisotropy;
+        m_hasSamplerAnisotropy               = baseSup.samplerAnisotropy == VK_TRUE;
+        m_maxSamplerAnisotropy               = physProps.limits.maxSamplerAnisotropy;
+        m_hasPipelineStats                   = baseSup.pipelineStatisticsQuery;
 
         std::vector<const char*> extensions;
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);

@@ -10,6 +10,7 @@
 #include "device_vk.h"
 #include "objects_vk.h"
 
+#include <algorithm>
 #include <cstring>
 #include <deque>
 #include <vector>
@@ -543,12 +544,15 @@ namespace vri::vk
             ci.addressModeV        = toAddr(desc->addressModeV);
             ci.addressModeW        = toAddr(desc->addressModeW);
             ci.mipLodBias          = desc->mipLodBias;
-            ci.anisotropyEnable    = desc->anisotropyEnable ? VK_TRUE : VK_FALSE;
-            ci.maxAnisotropy       = desc->maxAnisotropy;
-            ci.compareEnable       = desc->compareEnable ? VK_TRUE : VK_FALSE;
-            ci.compareOp           = ToVkCompareOp(desc->compareOp);
-            ci.minLod              = desc->minLod;
-            ci.maxLod              = desc->maxLod;
+            // Anisotropy is a device feature with a per-device ceiling: honour the request only
+            // where it is enabled, and clamp to the limit rather than tripping validation.
+            const bool aniso    = desc->anisotropyEnable && d->HasSamplerAnisotropy();
+            ci.anisotropyEnable = aniso ? VK_TRUE : VK_FALSE;
+            ci.maxAnisotropy = aniso ? std::min(std::max(desc->maxAnisotropy, 1.0f), d->MaxSamplerAnisotropy()) : 1.0f;
+            ci.compareEnable = desc->compareEnable ? VK_TRUE : VK_FALSE;
+            ci.compareOp     = ToVkCompareOp(desc->compareOp);
+            ci.minLod        = desc->minLod;
+            ci.maxLod        = desc->maxLod;
 
             VkSamplerCustomBorderColorCreateInfoEXT custom = {
                 VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};

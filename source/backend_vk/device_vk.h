@@ -67,7 +67,11 @@ namespace vri::vk
         };
         const ExtFunctions& Ext() const { return m_ext; }
         uint64_t            EnabledFeatures() const { return m_enabledFeatures; }
-        VkTimeDomainKHR     HostTimeDomain() const { return m_hostTimeDomain; }
+        // Sampler anisotropy: enabled only when the physical device supports it, and requests are
+        // clamped to this limit (asking for more than maxSamplerAnisotropy is a validation error).
+        bool            HasSamplerAnisotropy() const { return m_hasSamplerAnisotropy; }
+        float           MaxSamplerAnisotropy() const { return m_maxSamplerAnisotropy; }
+        VkTimeDomainKHR HostTimeDomain() const { return m_hostTimeDomain; }
 
         void ReportError(const char* message) const;
         void ReportWarning(const char* message) const;
@@ -102,6 +106,8 @@ namespace vri::vk
         bool            m_hasBarycentric          = false;
         bool            m_hasCustomBorderColor    = false;
         bool            m_hasPipelineStats        = false;
+        bool            m_hasSamplerAnisotropy    = false;
+        float           m_maxSamplerAnisotropy    = 1.0f;
         bool            m_hasCalibratedTimestamps = false;
         bool            m_hasDrawIndirectCount    = false;
         bool            m_hasMemoryBudget         = false;
