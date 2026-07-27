@@ -169,8 +169,14 @@ namespace vriex
         VriCommandAllocator*  alloc     = nullptr;
         VriCommandBuffer*     cmd       = nullptr;
         VriFence*             fence     = nullptr;
-        VriGraphicsAPI        api       = VriGraphicsAPI_Auto;
-        const char*           apiName   = "Vulkan";
+        // Uploads run on their own timeline, so BeginUpload/EndUpload can be called as many times
+        // as an example needs (textures, then geometry, then ...). A timeline semaphore may only be
+        // signalled with a strictly increasing value, so sharing `fence` - which the frame loop also
+        // signals - capped uploads at exactly one batch.
+        VriFence*      uploadFence = nullptr;
+        uint64_t       uploadValue = 0;
+        VriGraphicsAPI api         = VriGraphicsAPI_Auto;
+        const char*    apiName     = "Vulkan";
         char apiLabel[64] = {}; // backs apiName for the GL family ("OpenGL 4.6" / "OpenGL ES 3.1" / "WebGL2 (ES 3.0)")
         bool useWgsl = false, useDxbc = false;
 
@@ -478,6 +484,7 @@ namespace vriex
             c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
             c.CreateCommandBuffer(alloc, &cmd);
             c.CreateFence(dev, 0, &fence);
+            c.CreateFence(dev, 0, &uploadFence);
 
             // ---- Dear ImGui: context + VRI renderer + per-platform input ----
             ImGui::CreateContext();
@@ -898,15 +905,15 @@ namespace vriex
         {
             c.EndCommandBuffer(cmd);
             VriFenceSubmitDesc sig {};
-            sig.fence = fence;
-            sig.value = 1; // before the first frame (frameValue starts at 1 -> first frame signals 2)
+            sig.fence = uploadFence;
+            sig.value = ++uploadValue; // strictly increasing, so repeated upload batches are legal
             VriQueueSubmitDesc sub {};
             sub.commandBuffers   = &cmd;
             sub.commandBufferNum = 1;
             sub.signalFences     = &sig;
             sub.signalFenceNum   = 1;
             c.QueueSubmit(queue, &sub);
-            c.Wait(fence, 1);
+            c.Wait(uploadFence, uploadValue);
             for (VriBuffer* stg : uploadStaging)
                 c.DestroyBuffer(stg);
             uploadStaging.clear();
@@ -1305,6 +1312,8 @@ namespace vriex
             ImGui::DestroyContext();
             if (fence)
                 c.DestroyFence(fence);
+            if (uploadFence)
+                c.DestroyFence(uploadFence);
             if (alloc)
                 c.DestroyCommandAllocator(alloc);
             if (captureBuf)
