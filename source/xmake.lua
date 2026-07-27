@@ -1,17 +1,22 @@
 -- The VRI library target.
 
+-- VRI's own root, derived from this file's location rather than $(projectdir): when VRI is
+-- included as a subproject/submodule, $(projectdir) is the CONSUMER's directory and every
+-- path below would miss. os.scriptdir() here is <vri>/source.
+local vri_root = path.directory(os.scriptdir())
+
 target("vri")
     set_kind("static")
     set_languages("cxx23")
 
     -- public C/C++ headers
-    add_includedirs("$(projectdir)/include", {public = true})
+    add_includedirs(path.join(vri_root, "include"), {public = true})
 
     -- vri/vri_version.h is generated from set_version() in the root xmake.lua, so the
     -- version macros live in exactly one place (no hand-edited header to drift). Output
     -- lands in the build dir, which is put on the public include path and installed with
     -- the package headers.
-    add_configfiles("$(projectdir)/include/vri/vri_version.h.in", {filename = "vri/vri_version.h"})
+    add_configfiles(path.join(vri_root, "include/vri/vri_version.h.in"), {filename = "vri/vri_version.h"})
     add_includedirs("$(builddir)", {public = true})
     add_headerfiles("$(builddir)/(vri/vri_version.h)")
 
@@ -19,12 +24,12 @@ target("vri")
     add_includedirs(os.scriptdir(), {public = false})
 
     -- repo root, so the built-in ImGui renderer can embed "shaders/lib/imgui_*.h"
-    add_includedirs("$(projectdir)", {public = false})
+    add_includedirs(vri_root, {public = false})
 
     -- backend-agnostic core
     add_files("core/*.cpp")
-    add_headerfiles("$(projectdir)/include/(vri/**.h)")
-    add_headerfiles("$(projectdir)/include/(vri/**.hpp)")
+    add_headerfiles(path.join(vri_root, "include/(vri/**.h)"))
+    add_headerfiles(path.join(vri_root, "include/(vri/**.hpp)"))
 
     -- defined while building the library (controls dllexport on Windows)
     add_defines("VRI_BUILD")

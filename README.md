@@ -109,6 +109,23 @@ xmake
 xmake run vri-tests
 ```
 
+The Vulkan backend needs only the loader, not the LunarG SDK: on Linux a distro
+`libvulkan-dev` (plus `libwayland-dev` / `libx11-dev` for whichever window system SDL3 or
+GLFW uses) is enough, and the build links `-lvulkan` when no `VULKAN_SDK` tree is present.
+The SDK is only required for the optional host tool `vri-shaderc`.
+
+### As a subproject
+
+`includes()` this repository from a parent xmake project and depend on the `vri` target;
+examples, tests and host tools switch themselves off in that case.
+
+```lua
+includes("external/vri")
+
+target("my-app")
+    add_deps("vri")
+```
+
 ### Web (Emscripten)
 
 ```sh

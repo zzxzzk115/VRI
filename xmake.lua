@@ -14,25 +14,29 @@ if is_plat("android") then
 end
 
 -- root ?
+-- False when another xmake project includes this file (VRI as a subproject/submodule). In that
+-- case xmake's project dir belongs to the CONSUMER, so every includes()/add_repositories() path
+-- below is anchored to os.scriptdir() instead of being project-relative, and the examples, tests
+-- and host tools - which only make sense in a standalone checkout - default to off.
 local is_root = (os.projectdir() == os.scriptdir())
 set_config("root", is_root)
 set_config("project_dir", os.scriptdir())
 
 -- global options
 option("vri_build_examples") -- build examples?
-    set_default(not is_plat("android") and not is_plat("wasm"))
+    set_default(is_root and not is_plat("android") and not is_plat("wasm"))
     set_showmenu(true)
     set_description("Enable VRI examples")
 option_end()
 
 option("vri_build_tests") -- build tests?
-    set_default(not is_plat("android") and not is_plat("wasm"))
+    set_default(is_root and not is_plat("android") and not is_plat("wasm"))
     set_showmenu(true)
     set_description("Enable VRI tests")
 option_end()
 
 option("vri_build_tools") -- build host tools (vri-shaderc)?
-    set_default(not is_plat("android") and not is_plat("wasm"))
+    set_default(is_root and not is_plat("android") and not is_plat("wasm"))
     set_showmenu(true)
     set_description("Enable VRI host tools (vri-shaderc)")
 option_end()
@@ -138,10 +142,18 @@ end
 -- add rules
 rule("clangd.config")
     on_config(function (target)
+        -- Only meaningful in a standalone checkout: it drops a .clangd next to VRI's own
+        -- sources. When VRI is a subproject the consumer owns its editor config, and the
+        -- template files are not in the consumer's project dir at all - so skip, and use
+        -- absolute paths rather than relying on the working directory.
+        if not get_config("root") then
+            return
+        end
+        local dir = get_config("project_dir") or os.projectdir()
         if is_host("windows") then
-            os.cp(".clangd.win", ".clangd")
+            os.cp(path.join(dir, ".clangd.win"), path.join(dir, ".clangd"))
         else
-            os.cp(".clangd.nowin", ".clangd")
+            os.cp(path.join(dir, ".clangd.nowin"), path.join(dir, ".clangd"))
         end
     end)
 rule_end()
@@ -160,9 +172,21 @@ rule("vulkansdk")
         import("lib.detect.find_library")
         import("detect.sdks.find_vulkansdk")
 
+        -- Distro install (libvulkan-dev): there is no VULKAN_SDK tree, so find_vulkansdk()
+        -- either fails outright or reports link dirs that don't hold libvulkan.so. Without
+        -- this fallback the rule links nothing and every vk* symbol stays undefined unless
+        -- the user passes --ldflags="-lvulkan" by hand.
+        local function fallback_syslink()
+            if target:is_plat("linux") or target:is_plat("bsd") then
+                target:add("syslinks", "vulkan", { public = true })
+                return true
+            end
+            return false
+        end
+
         local vulkansdk = find_vulkansdk()
         if vulkansdk then
-            target:add("runevs", "PATH", vulkansdk.bindir)
+            target:add("runenvs", "PATH", vulkansdk.bindir)
 
             local suffix
             if target:is_plat("windows") then
@@ -181,13 +205,17 @@ rule("vulkansdk")
             end
 
             if not find_library(util, vulkansdk.linkdirs) then
-                wprint(format("The Vulkan loader %s for %s is not found!", util, target:arch()))
+                if not fallback_syslink() then
+                    wprint(format("The Vulkan loader %s for %s is not found!", util, target:arch()))
+                end
                 return
             end
 
             local lib_name = target:is_plat("windows") and util or "lib" .. util
             local lib_path = path.join(vulkansdk.linkdirs[1], lib_name .. suffix)
             target:add("links", lib_path, { public = true })
+        else
+            fallback_syslink()
         end
     end)
 rule_end()
@@ -236,8 +264,9 @@ add_rules("clangd.config")
 
 -- add repositories
 add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")
--- local package overrides (prebuilt Slang 2026.11 for vri-shaderc; see the package)
-add_repositories("vri-local-repo xmake/xmake-repo")
+-- local package overrides (prebuilt Slang 2026.11 for vri-shaderc; see the package).
+-- Anchored to os.scriptdir() so it still resolves when VRI is included as a subproject.
+add_repositories("vri-local-repo " .. path.join(os.scriptdir(), "xmake", "xmake-repo"))
 
 -- vri-shaderc links a prebuilt Slang that can emit tessellation SPIR-V (the Vulkan
 -- SDK's 2025.11 crashes on hull shaders). Local-developer tool only (tools are off
@@ -247,36 +276,36 @@ if has_config("vri_build_tools") then
 end
 
 -- shared registries/helpers
-includes("xmake/examples.lua")
+includes(path.join(os.scriptdir(), "xmake", "examples.lua"))
 
 -- tasks (e.g. `xmake shaders` to compile test .slang -> SPIR-V headers)
-includes("xmake/tasks/shaders.lua")
-includes("xmake/tasks/examples.lua")
+includes(path.join(os.scriptdir(), "xmake", "tasks", "shaders.lua"))
+includes(path.join(os.scriptdir(), "xmake", "tasks", "examples.lua"))
 
 -- include external libraries
-includes("external")
+includes(path.join(os.scriptdir(), "external"))
 
 -- include source
-includes("source")
+includes(path.join(os.scriptdir(), "source"))
 
 -- host tools (vri-shaderc, ...)
 if has_config("vri_build_tools") then
-    includes("tools")
+    includes(path.join(os.scriptdir(), "tools"))
 end
 
 -- include tests
 if has_config("vri_build_tests") then
-    includes("tests")
+    includes(path.join(os.scriptdir(), "tests"))
 end
 
 -- if build examples, then include examples
 if has_config("vri_build_examples") then
-    includes("examples")
+    includes(path.join(os.scriptdir(), "examples"))
 end
 
 -- Emscripten end-to-end tests (tests/wasm/): headless triangles that render via the
 -- GL (WebGL2) and/or WebGPU backends and report a pass/fail pixel check. Browser-run
 -- via emrun. Wasm-only, so they live outside the desktop `tests` target but with it.
 if is_plat("wasm") then
-    includes("tests/wasm")
+    includes(path.join(os.scriptdir(), "tests", "wasm"))
 end
