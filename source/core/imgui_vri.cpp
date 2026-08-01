@@ -58,7 +58,10 @@ namespace vri::core
             VriPipeline*       pipeline = nullptr;
             VriTexture*        font     = nullptr;
             VriDescriptor*     fontView = nullptr; // null when the host drives textures (ImGui 1.92)
-            VriDescriptor*     sampler  = nullptr;
+
+            // Both samplers exist for the lifetime of the renderer; a view picks one via texFilters.
+            VriDescriptor* samplerLinear  = nullptr; // the default for every texture
+            VriDescriptor* samplerNearest = nullptr; // opt-in, for pixel-art / inspection content
 
             // One descriptor set per distinct texture view, cached so a stable texture allocates once.
             // Pools are added in fixed blocks; a freed slot isn't reclaimed until DestroyImgui (texture
@@ -66,6 +69,10 @@ namespace vri::core
             std::vector<VriDescriptorPool*>                       pools;
             uint32_t                                              poolUsed = 0; // sets used in pools.back()
             std::unordered_map<VriDescriptor*, VriDescriptorSet*> texSets;
+
+            // Per-view sampling filter. Absent = Linear, so the map stays empty unless a host opts a
+            // texture into Nearest -- the common case costs nothing.
+            std::unordered_map<VriDescriptor*, VriFilter> texFilters;
 
             // Geometry buffers replaced by Grow(), kept alive a few uploads: in-flight frames still
             // reference them (CmdDraw vertex/index binds, CmdCopy staging reads) - destroying them
@@ -116,8 +123,15 @@ namespace vri::core
             if (s->c.AllocateDescriptorSets(s->pools.back(), s->layout, 0, &set, 1) != VriResult_Success)
                 return nullptr;
             ++s->poolUsed;
+            // The sampler is baked into the set, so the set is only valid for the view's *current*
+            // filter -- SetImguiTextureFilter drops the cache entry when that changes.
+            VriFilter filter = VriFilter_Linear;
+            if (auto f = s->texFilters.find(view); f != s->texFilters.end())
+                filter = f->second;
+
             const VriDescriptor*         td0[1] = {view};
-            const VriDescriptor*         sd0[1] = {s->sampler};
+            const VriDescriptor*         sd0[1] = {filter == VriFilter_Nearest ? s->samplerNearest
+                                                                               : s->samplerLinear};
             VriDescriptorRangeUpdateDesc u[2] {};
             u[0].descriptors   = td0;
             u[0].descriptorNum = 1;
@@ -314,15 +328,23 @@ namespace vri::core
                 return VriResult_Failure;
             }
 
+            // Two samplers, identical apart from the filter. Linear is the default every texture
+            // gets; Nearest is opted into per view via SetImguiTextureFilter, for content whose
+            // texels must survive magnification (pixel art, texture inspectors, image diffs).
             VriSamplerDesc smp {};
-            smp.magFilter    = VriFilter_Linear;
-            smp.minFilter    = VriFilter_Linear;
             smp.mipmapMode   = VriMipmapMode_Nearest;
             smp.addressModeU = VriAddressMode_Repeat;
             smp.addressModeV = VriAddressMode_Repeat;
             smp.addressModeW = VriAddressMode_Repeat;
             smp.maxLod       = 1.0f;
-            c.CreateSampler(s->dev, &smp, &s->sampler);
+
+            smp.magFilter = VriFilter_Linear;
+            smp.minFilter = VriFilter_Linear;
+            c.CreateSampler(s->dev, &smp, &s->samplerLinear);
+
+            smp.magFilter = VriFilter_Nearest;
+            smp.minFilter = VriFilter_Nearest;
+            c.CreateSampler(s->dev, &smp, &s->samplerNearest);
 
             // pipeline layout: push constant (ortho, vertex) + Texture@0 + Sampler@1 (fragment)
             VriDescriptorRangeDesc ranges[2] {};
@@ -443,8 +465,10 @@ namespace vri::core
                 c.DestroyPipeline(s->pipeline);
             if (s->layout)
                 c.DestroyPipelineLayout(s->layout);
-            if (s->sampler)
-                c.DestroyDescriptor(s->sampler);
+            if (s->samplerLinear)
+                c.DestroyDescriptor(s->samplerLinear);
+            if (s->samplerNearest)
+                c.DestroyDescriptor(s->samplerNearest);
             if (s->fontView)
                 c.DestroyDescriptor(s->fontView);
             if (s->font)
@@ -634,7 +658,38 @@ namespace vri::core
         void VRI_CALL FreeImguiTexture(VriImgui* imgui, VriDescriptor* view)
         {
             if (imgui && view)
-                Self(imgui)->texSets.erase(view);
+            {
+                ImguiState* s = Self(imgui);
+                s->texSets.erase(view);
+                // Drop the filter override too: a later texture reusing this freed address must start
+                // from the Linear default rather than inherit this one's setting.
+                s->texFilters.erase(view);
+            }
+        }
+
+        void VRI_CALL SetImguiTextureFilter(VriImgui* imgui, VriDescriptor* view, VriFilter filter)
+        {
+            if (!imgui || !view)
+                return;
+
+            ImguiState* s = Self(imgui);
+
+            VriFilter previous = VriFilter_Linear;
+            if (auto f = s->texFilters.find(view); f != s->texFilters.end())
+                previous = f->second;
+            if (previous == filter)
+                return;
+
+            if (filter == VriFilter_Linear)
+                s->texFilters.erase(view); // absent == the default, keep the map empty
+            else
+                s->texFilters[view] = filter;
+
+            // The old sampler is baked into the cached descriptor set, so that set is now wrong.
+            // Drop it and let the next draw allocate one bound to the new sampler. As with
+            // FreeImguiTexture the pool slot isn't reclaimed -- filters are a set-once knob, not a
+            // per-frame one.
+            s->texSets.erase(view);
         }
 
         const VriImguiInterface g_imgui = {
@@ -650,6 +705,7 @@ namespace vri::core
             UploadImguiDataTo,
             CmdCopyImguiDataTo,
             CmdDrawImguiTo,
+            SetImguiTextureFilter,
         };
     } // namespace
 

@@ -32,6 +32,7 @@
 #include "../vri_base.h"
 #include "../vri_handles.h"
 #include "../vri_format.h"
+#include "../vri_enums.h" /* VriFilter, for SetImguiTextureFilter */
 
 VRI_EXTERN_C_BEGIN
 
@@ -117,6 +118,15 @@ typedef struct VriImguiInterface
     void (VRI_CALL *CmdCopyImguiDataTo)(VriCommandBuffer* cmd, VriImguiViewport* viewport);
     void (VRI_CALL *CmdDrawImguiTo)(VriCommandBuffer* cmd, VriImgui* imgui, VriImguiViewport* viewport,
                                     const VriImguiDrawData* data);
+
+    /* Sampling filter for one texture view. Every texture defaults to Linear, which is what the
+       renderer has always used; this is purely opt-in per view.
+       Set Nearest for content whose texels must stay crisp when magnified -- pixel art, texture
+       inspectors, image diff views -- where linear filtering turns a zoomed texel into a blur.
+       Call it after creating the view and before the first draw that samples it. Changing the filter
+       of a view that has already been drawn is allowed but drops its cached descriptor set (the pool
+       slot is not reclaimed, same as FreeImguiTexture), so treat it as a set-once knob. */
+    void (VRI_CALL *SetImguiTextureFilter)(VriImgui* imgui, VriDescriptor* view, VriFilter filter);
 } VriImguiInterface;
 
 VRI_EXTERN_C_END
