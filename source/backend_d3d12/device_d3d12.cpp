@@ -423,6 +423,21 @@ namespace vri::d3d12
         return m_dispatchMeshSig.Get();
     }
 
+    ID3D12CommandSignature* DeviceD3D12::DispatchSignature()
+    {
+        if (!m_dispatchSig)
+        {
+            D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+            arg.Type                         = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+            D3D12_COMMAND_SIGNATURE_DESC sd  = {};
+            sd.ByteStride                    = 3 * sizeof(uint32_t); // x, y, z
+            sd.NumArgumentDescs              = 1;
+            sd.pArgumentDescs                = &arg;
+            m_device->CreateCommandSignature(&sd, nullptr, IID_PPV_ARGS(&m_dispatchSig));
+        }
+        return m_dispatchSig.Get();
+    }
+
     ID3D12CommandSignature* DeviceD3D12::DrawSignature(bool indexed, uint32_t stride)
     {
         // ExecuteIndirect steps through the arg buffer by the signature's ByteStride, so it must
