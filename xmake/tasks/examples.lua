@@ -58,19 +58,34 @@ task("examples")
         -- but smoke-run only a cheap, reliable handful under software rasterization.
         local only_opt = option.get("only")
         if only_opt then
-            local wanted = {}
-            for _, name in ipairs(split_csv(only_opt)) do
-                wanted[name] = true
-                wanted["example-" .. name] = true
-            end
-            local filtered = {}
+            local available = {}
             for _, target in ipairs(examples) do
-                if wanted[target] then
-                    table.insert(filtered, target)
+                available[target] = true
+            end
+            local selected, order, unmatched = {}, {}, {}
+            for _, name in ipairs(split_csv(only_opt)) do
+                local target
+                if available[name] then
+                    target = name
+                elseif available["example-" .. name] then
+                    target = "example-" .. name
+                end
+                if target then
+                    if not selected[target] then
+                        selected[target] = true
+                        table.insert(order, target)
+                    end
+                else
+                    table.insert(unmatched, name)
                 end
             end
-            assert(#filtered > 0, "no examples matched --only=" .. tostring(only_opt) .. "; check names against examples/xmake.lua")
-            examples = filtered
+            -- Reject on ANY unmatched selector, not just an all-empty result: with the old
+            -- "#filtered > 0" check a typo like --only=triangle,computshader (or an example
+            -- since renamed out from under CI's list) passed silently while quietly shrinking
+            -- smoke coverage. Every requested name must resolve to a built example.
+            assert(#unmatched == 0, "--only: no example matches " .. table.concat(unmatched, ", ") ..
+                "; check names against examples/xmake.lua")
+            examples = order
         end
 
         local backend_opt = option.get("backend")
