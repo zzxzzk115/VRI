@@ -43,6 +43,8 @@ namespace vri::d3d12
         // Lazily-created command signature for ExecuteIndirect(DispatchMesh) - must
         // outlive GPU execution, so it lives on the device (12-byte: 3x uint32 x,y,z).
         ID3D12CommandSignature* DispatchMeshSignature();
+        // Lazily-created command signature for ExecuteIndirect(Dispatch) - 12-byte: 3x uint32 x,y,z.
+        ID3D12CommandSignature* DispatchSignature();
         // Lazily-created (and cached by stride) DRAW / DRAW_INDEXED signatures for indirect draws.
         ID3D12CommandSignature* DrawSignature(bool indexed, uint32_t stride);
         // The adapter, for live VRAM budget queries (QueryVideoMemoryInfo); null if unavailable.
@@ -68,6 +70,7 @@ namespace vri::d3d12
         ComPtr<ID3D12InfoQueue1>       m_infoQueue;       // debug-layer message sink (validation)
         DWORD                          m_msgCookie = 0;   // RegisterMessageCallback token
         ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
+        ComPtr<ID3D12CommandSignature> m_dispatchSig;     // lazy, for indirect Dispatch
         std::unordered_map<uint64_t, ComPtr<ID3D12CommandSignature>>
                                      m_drawSigs;               // indirect draw sigs, keyed by (indexed,stride)
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;                // CPU-only RTV heap

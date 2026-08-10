@@ -1827,7 +1827,15 @@ namespace vri::d3d12
         {
             CB(cmd)->list->Dispatch(d->x, d->y, d->z);
         }
-        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
+        // ExecuteIndirect with a single DISPATCH record: the {x,y,z} group count is read from
+        // `buffer` at `offset` (the app barriers it to IndirectBufferRead first). Uses the compute
+        // root signature / PSO already bound by CmdSetPipeline{,Layout} + CmdSetDescriptorSet.
+        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            c->list->ExecuteIndirect(
+                c->device->DispatchSignature(), 1, Buf(buffer)->resource.Get(), offset, nullptr, 0);
+        }
         // D3D12 has no direct buffer fill: ClearUnorderedAccessViewUint via a transient R32_UINT UAV
         // staged in both clear heaps (see DeviceD3D12::ClearUavViews). The buffer is bounced into
         // UNORDERED_ACCESS for the clear and the shader-visible heap is swapped in then restored.
@@ -1896,7 +1904,45 @@ namespace vri::d3d12
             if (d->heapType == D3D12_HEAP_TYPE_DEFAULT)
                 d->state = D3D12_RESOURCE_STATE_COPY_DEST;
         }
-        void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture*, VriTexture*, const VriTextureCopyDesc*) {}
+        // Texture->texture copy. The app barriers src to CopySource and dst to CopyDestination, so
+        // this just issues CopyTextureRegion between the selected subresources (subresource = mip +
+        // baseLayer * mipNum, matching CmdUploadBufferToTexture). A zero-width src region copies the
+        // whole subresource (pSrcBox = nullptr); a non-zero width copies that sub-box.
+        void VRI_CALL CmdCopyTexture(VriCommandBuffer*         cmd,
+                                     VriTexture*               dst,
+                                     VriTexture*               src,
+                                     const VriTextureCopyDesc* region)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            TextureD3D12*       d = Tex(dst);
+            TextureD3D12*       s = Tex(src);
+
+            D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+            dstLoc.pResource                   = d->resource.Get();
+            dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex            = region ? region->dst.mip + region->dst.baseLayer * d->mipNum : 0;
+            D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+            srcLoc.pResource                   = s->resource.Get();
+            srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            srcLoc.SubresourceIndex            = region ? region->src.mip + region->src.baseLayer * s->mipNum : 0;
+
+            const UINT dx = region ? static_cast<UINT>(region->dst.x) : 0;
+            const UINT dy = region ? static_cast<UINT>(region->dst.y) : 0;
+            const UINT dz = region ? static_cast<UINT>(region->dst.z) : 0;
+            if (region && region->src.width)
+            {
+                D3D12_BOX box = {};
+                box.left      = static_cast<UINT>(region->src.x);
+                box.top       = static_cast<UINT>(region->src.y);
+                box.front     = static_cast<UINT>(region->src.z);
+                box.right     = box.left + region->src.width;
+                box.bottom    = box.top + (region->src.height ? region->src.height : 1);
+                box.back      = box.front + (region->src.depth ? region->src.depth : 1);
+                c->list->CopyTextureRegion(&dstLoc, dx, dy, dz, &srcLoc, &box);
+            }
+            else
+                c->list->CopyTextureRegion(&dstLoc, dx, dy, dz, &srcLoc, nullptr);
+        }
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
                                                VriTexture*                     dst,
                                                VriBuffer*                      src,
