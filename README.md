@@ -92,7 +92,8 @@ How each feature is supported on each backend:
 | Built-in Dear ImGui renderer | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 Per-backend implementation notes — the fallbacks, caveats, and the native extension each feature
-uses — are in **[DETAIL.md](DETAIL.md)**.
+uses — are in **[DETAIL.md](DETAIL.md)**. The threading contract (which calls may run concurrently,
+and where the caller must synchronize) is in **[docs/threading.md](docs/threading.md)**.
 
 ## Building
 

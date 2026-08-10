@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <mutex>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -55,6 +56,10 @@ namespace vri::core
             VriCommandBuffer* real;
             bool              recording        = false;
             bool              insideRenderPass = false;
+            // Thread that called BeginCommandBuffer; a single command buffer must be
+            // recorded start-to-finish on one thread (see docs/threading.md). Used only
+            // to diagnose obvious cross-thread misuse; never changes recording behavior.
+            std::thread::id   recordThread;
         };
 
         struct DeviceVal
@@ -91,6 +96,22 @@ namespace vri::core
                 std::fprintf(stderr, "[VRI/Validation] %s\n", m);
         }
         void Err(DeviceVal* d, const char* m) { Msg(d, VriMessageSeverity_Error, m); }
+
+        // Warn (not Err) if a command buffer is being recorded from a different thread than
+        // the one that called BeginCommandBuffer. Recording a single command buffer is
+        // externally synchronized on every backend, and immediate on GL where the whole
+        // device is context-thread-bound (docs/threading.md). A warning, because the caller
+        // may legitimately hand a command buffer between threads with their own
+        // happens-before barrier; it flags the far more common accidental data race.
+        void CheckRecordThread(CmdBufVal* c)
+        {
+            if (c->recording && c->recordThread != std::thread::id {} &&
+                c->recordThread != std::this_thread::get_id())
+                Msg(c->dev,
+                    VriMessageSeverity_Warning,
+                    "command buffer recorded from a different thread than BeginCommandBuffer - a "
+                    "single command buffer must be recorded on one thread (see docs/threading.md)");
+        }
 
         inline DeviceVal*    DV(VriDevice* h) { return reinterpret_cast<DeviceVal*>(h); }
         inline DeviceVal*    DV(const VriDevice* h) { return reinterpret_cast<DeviceVal*>(const_cast<VriDevice*>(h)); }
@@ -168,6 +189,7 @@ namespace vri::core
                 Err(c->dev, "BeginCommandBuffer called on a command buffer already recording");
             c->recording        = true;
             c->insideRenderPass = false;
+            c->recordThread     = std::this_thread::get_id();
             return c->dev->core.BeginCommandBuffer(c->real);
         }
         VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer* cmd)
@@ -175,6 +197,7 @@ namespace vri::core
             CmdBufVal* c = CV(cmd);
             if (!c->recording)
                 Err(c->dev, "EndCommandBuffer called on a command buffer that is not recording");
+            CheckRecordThread(c);
             if (c->insideRenderPass)
                 Err(c->dev, "EndCommandBuffer called inside a render pass (missing CmdEndRendering)");
             c->recording = false;
@@ -189,6 +212,7 @@ namespace vri::core
                 Err(c->dev, fn);
                 return false;
             }
+            CheckRecordThread(c);
             if (!c->insideRenderPass)
             {
                 Err(c->dev, fn);
@@ -203,6 +227,7 @@ namespace vri::core
                 Err(c->dev, fn);
                 return false;
             }
+            CheckRecordThread(c);
             if (c->insideRenderPass)
             {
                 Err(c->dev, fn);
@@ -219,6 +244,7 @@ namespace vri::core
                 Err(c->dev, fn);
                 return false;
             }
+            CheckRecordThread(c);
             return true;
         }
 
