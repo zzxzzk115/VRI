@@ -1827,7 +1827,15 @@ namespace vri::d3d12
         {
             CB(cmd)->list->Dispatch(d->x, d->y, d->z);
         }
-        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer*, VriBuffer*, uint64_t) {}
+        void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
+        {
+            // ExecuteIndirect one Dispatch record ({x,y,z} group counts) from the arg buffer at
+            // offset. The app barriers the buffer to INDIRECT_ARGUMENT beforehand (BufferStateForAccess
+            // maps VriAccess_IndirectBufferRead), matching CmdDrawIndirect's contract.
+            CommandBufferD3D12* c = CB(cmd);
+            c->list->ExecuteIndirect(
+                c->device->DispatchSignature(), 1, Buf(buffer)->resource.Get(), offset, nullptr, 0);
+        }
         // D3D12 has no direct buffer fill: ClearUnorderedAccessViewUint via a transient R32_UINT UAV
         // staged in both clear heaps (see DeviceD3D12::ClearUavViews). The buffer is bounced into
         // UNORDERED_ACCESS for the clear and the shader-visible heap is swapped in then restored.
