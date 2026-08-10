@@ -2021,8 +2021,22 @@ namespace vri::d3d12
                 c->tempUploads.push_back(std::move(temp));
             }
         }
-        void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
-        void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
+        // PIX/RenderDoc debug-group markers. We emit them through the command list's
+        // BeginEvent/EndEvent using the legacy PIX string-marker encoding: metadata ==
+        // PIX_EVENT_ANSI_VERSION means pData is a null-terminated ANSI string and Size is its
+        // byte length including the terminator. PIX (backward-compat) and RenderDoc both decode
+        // this, so the groups are visible in captures without a WinPixEventRuntime dependency.
+        // (The modern PIX3-blob metadata value 2 requires a fully encoded blob; a raw string
+        // there is rejected and unbalances the runtime's begin/end accounting, so we use the
+        // legacy string path instead.)
+        constexpr UINT kPixEventAnsiVersion = 1; // PIX_EVENT_ANSI_VERSION (pix3.h)
+        void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer* cmd, const char* name)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            const char*         n = name ? name : "";
+            c->list->BeginEvent(kPixEventAnsiVersion, n, static_cast<UINT>(std::strlen(n) + 1));
+        }
+        void VRI_CALL CmdEndDebugGroup(VriCommandBuffer* cmd) { CB(cmd)->list->EndEvent(); }
         void VRI_CALL SetDebugName(void*, const char*) {}
     } // namespace
 
