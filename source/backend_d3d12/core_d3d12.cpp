@@ -1904,7 +1904,56 @@ namespace vri::d3d12
             if (d->heapType == D3D12_HEAP_TYPE_DEFAULT)
                 d->state = D3D12_RESOURCE_STATE_COPY_DEST;
         }
-        void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture*, VriTexture*, const VriTextureCopyDesc*) {}
+        void VRI_CALL CmdCopyTexture(VriCommandBuffer*         cmd,
+                                     VriTexture*               dst,
+                                     VriTexture*               src,
+                                     const VriTextureCopyDesc* region)
+        {
+            CommandBufferD3D12* c = CB(cmd);
+            TextureD3D12*       s = Tex(src);
+            TextureD3D12*       d = Tex(dst);
+            // Like the Vulkan reference (which assumes TRANSFER_SRC/DST_OPTIMAL), the app barriers src
+            // to CopySource and dst to CopyDestination before this call; keep our tracked state in sync.
+            Transition(c, s, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            Transition(c, d, D3D12_RESOURCE_STATE_COPY_DEST);
+
+            const VriTextureRegionDesc* rs = region ? &region->src : nullptr;
+            const VriTextureRegionDesc* rd = region ? &region->dst : nullptr;
+            // Subresource = mip + baseLayer * mipNum (array slice selects the layer), matching
+            // CmdUploadBufferToTexture's addressing.
+            const UINT srcSub = (rs ? rs->mip : 0) + (rs ? rs->baseLayer : 0) * s->mipNum;
+            const UINT dstSub = (rd ? rd->mip : 0) + (rd ? rd->baseLayer : 0) * d->mipNum;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+            srcLoc.pResource                   = s->resource.Get();
+            srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            srcLoc.SubresourceIndex            = srcSub;
+            D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+            dstLoc.pResource                   = d->resource.Get();
+            dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex            = dstSub;
+
+            const UINT dstX = rd ? static_cast<UINT>(rd->x) : 0;
+            const UINT dstY = rd ? static_cast<UINT>(rd->y) : 0;
+            const UINT dstZ = rd ? static_cast<UINT>(rd->z) : 0;
+            // width/height/depth all 0 => whole source subresource (VriTextureRegionDesc convention);
+            // a nullptr box copies the full subresource. Otherwise clip to the requested src box.
+            if (!rs || (rs->width == 0 && rs->height == 0 && rs->depth == 0))
+            {
+                c->list->CopyTextureRegion(&dstLoc, dstX, dstY, dstZ, &srcLoc, nullptr);
+            }
+            else
+            {
+                D3D12_BOX box = {};
+                box.left      = static_cast<UINT>(rs->x);
+                box.top       = static_cast<UINT>(rs->y);
+                box.front     = static_cast<UINT>(rs->z);
+                box.right     = box.left + rs->width;
+                box.bottom    = box.top + (rs->height ? rs->height : 1);
+                box.back      = box.front + (rs->depth ? rs->depth : 1);
+                c->list->CopyTextureRegion(&dstLoc, dstX, dstY, dstZ, &srcLoc, &box);
+            }
+        }
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
                                                VriTexture*                     dst,
                                                VriBuffer*                      src,
