@@ -2030,7 +2030,7 @@ namespace vri::d3d12
         // there is rejected and unbalances the runtime's begin/end accounting, so we use the
         // legacy string path instead.)
         constexpr UINT kPixEventAnsiVersion = 1; // PIX_EVENT_ANSI_VERSION (pix3.h)
-        void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer* cmd, const char* name)
+        void VRI_CALL  CmdBeginDebugGroup(VriCommandBuffer* cmd, const char* name)
         {
             CommandBufferD3D12* c = CB(cmd);
             const char*         n = name ? name : "";
