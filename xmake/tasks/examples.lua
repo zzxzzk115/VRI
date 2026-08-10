@@ -3,11 +3,12 @@
 
 task("examples")
     set_menu {
-        usage = "xmake examples [--backend=vulkan,d3d12,opengl] [--frames=N] [--no-strict]",
+        usage = "xmake examples [--backend=vulkan,d3d12,opengl] [--frames=N] [--only=triangle,cube] [--no-strict]",
         description = "Run all examples with VRI_MAX_FRAMES and fail on validation errors/warnings.",
         options = {
             {nil, "backend", "kv", nil, "Comma-separated backend list. Defaults to desktop backends for this host; Metal is skipped by default."},
             {nil, "frames", "kv", nil, "Frames to present per example. Omit to run until the example exits."},
+            {nil, "only", "kv", nil, "Comma-separated example names (e.g. triangle,cube) to run a representative subset. Omit to run every registered example."},
             {nil, "no-strict", "k", nil, "Do not fail on [VRI][ERROR] or non-performance [VRI][WARN] output."}
         }
     }
@@ -50,6 +51,41 @@ task("examples")
                 if #item > 0 then table.insert(out, item) end
             end
             return out
+        end
+
+        -- --only=triangle,cube: run just a representative subset (accepts either the bare
+        -- example name or the full example-<name> target). Lets CI compile every example
+        -- but smoke-run only a cheap, reliable handful under software rasterization.
+        local only_opt = option.get("only")
+        if only_opt then
+            local available = {}
+            for _, target in ipairs(examples) do
+                available[target] = true
+            end
+            local selected, order, unmatched = {}, {}, {}
+            for _, name in ipairs(split_csv(only_opt)) do
+                local target
+                if available[name] then
+                    target = name
+                elseif available["example-" .. name] then
+                    target = "example-" .. name
+                end
+                if target then
+                    if not selected[target] then
+                        selected[target] = true
+                        table.insert(order, target)
+                    end
+                else
+                    table.insert(unmatched, name)
+                end
+            end
+            -- Reject on ANY unmatched selector, not just an all-empty result: with the old
+            -- "#filtered > 0" check a typo like --only=triangle,computshader (or an example
+            -- since renamed out from under CI's list) passed silently while quietly shrinking
+            -- smoke coverage. Every requested name must resolve to a built example.
+            assert(#unmatched == 0, "--only: no example matches " .. table.concat(unmatched, ", ") ..
+                "; check names against examples/xmake.lua")
+            examples = order
         end
 
         local backend_opt = option.get("backend")
