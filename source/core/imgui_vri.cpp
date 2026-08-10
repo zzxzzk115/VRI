@@ -130,8 +130,7 @@ namespace vri::core
                 filter = f->second;
 
             const VriDescriptor*         td0[1] = {view};
-            const VriDescriptor*         sd0[1] = {filter == VriFilter_Nearest ? s->samplerNearest
-                                                                               : s->samplerLinear};
+            const VriDescriptor*         sd0[1] = {filter == VriFilter_Nearest ? s->samplerNearest : s->samplerLinear};
             VriDescriptorRangeUpdateDesc u[2] {};
             u[0].descriptors   = td0;
             u[0].descriptorNum = 1;
