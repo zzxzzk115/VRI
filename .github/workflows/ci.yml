@@ -67,10 +67,18 @@ jobs:
           xmake f -y -m release
           -p ${{ runner.os == 'Windows' && 'windows' || 'linux' }}
           --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y --vri_backend_d3d12=y
-          --vri_build_tests=y --vri_build_tools=n --vri_build_examples=n
+          --vri_build_tests=y --vri_build_tools=n --vri_build_examples=y
 
       - name: Build
         run: xmake build -y vri-tests
+
+      # Compile gate for the full example set. Every example is set_default(false), so this
+      # aggregate phony target is the one handle that compiles them all - a shader-header or
+      # public-API regression that only surfaces in an example now fails CI at build time
+      # instead of waiting for someone to run it by hand. The committed shader headers
+      # (shaders/common/*.h) are compiled here against the current API.
+      - name: Build examples (compile gate)
+        run: xmake build -y vri-examples
 
       - name: Test (Linux, headless via Xvfb + software rasterizers)
         if: runner.os == 'Linux'
@@ -78,6 +86,21 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: xvfb-run -a xmake run vri-tests
+
+      # Smoke-run a small, reliable subset of examples headless under lavapipe/llvmpipe
+      # (Vulkan + software GL). A few presented frames each with VRI_MAX_FRAMES, with the
+      # strict validation grep on, catches API/shader regressions that only manifest at
+      # runtime. Kept to a representative subset (--only) so CI stays bounded; the full set
+      # is still covered by the compile gate above.
+      - name: Smoke examples (Linux, headless via Xvfb + software rasterizers)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: >-
+          xvfb-run -a xmake examples
+          --backend=vulkan,opengl --frames=3
+          --only=triangle,cube,computeshader,offscreen
 
       - name: Test (Windows)
         if: runner.os == 'Windows'
