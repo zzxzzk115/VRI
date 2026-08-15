@@ -8,6 +8,8 @@
 
 #include <vri/vri.h>
 
+#include "core/conversion_map.h"
+
 namespace vri::mtl
 {
     // VriFormat -> MTLPixelFormat. Returns MTLPixelFormatInvalid for unmapped.
@@ -15,98 +17,96 @@ namespace vri::mtl
     // combined D32S8) both map to Depth32Float_Stencil8 - the portable choice.
     inline MTLPixelFormat ToMtlFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R8_UNORM:        return MTLPixelFormatR8Unorm;
-            case VriFormat_R8_SNORM:        return MTLPixelFormatR8Snorm;
-            case VriFormat_R8_UINT:         return MTLPixelFormatR8Uint;
-            case VriFormat_R8_SINT:         return MTLPixelFormatR8Sint;
-            case VriFormat_RG8_UNORM:       return MTLPixelFormatRG8Unorm;
-            case VriFormat_RG8_SNORM:       return MTLPixelFormatRG8Snorm;
-            case VriFormat_RG8_UINT:        return MTLPixelFormatRG8Uint;
-            case VriFormat_RG8_SINT:        return MTLPixelFormatRG8Sint;
-            case VriFormat_RGBA8_UNORM:     return MTLPixelFormatRGBA8Unorm;
-            case VriFormat_RGBA8_SRGB:      return MTLPixelFormatRGBA8Unorm_sRGB;
-            case VriFormat_RGBA8_UINT:      return MTLPixelFormatRGBA8Uint;
-            case VriFormat_RGBA8_SINT:      return MTLPixelFormatRGBA8Sint;
-            case VriFormat_BGRA8_UNORM:     return MTLPixelFormatBGRA8Unorm;
-            case VriFormat_BGRA8_SRGB:      return MTLPixelFormatBGRA8Unorm_sRGB;
+        static constexpr vri::ConvRow<VriFormat, MTLPixelFormat> kTable[] = {
+            {VriFormat_R8_UNORM,        MTLPixelFormatR8Unorm},
+            {VriFormat_R8_SNORM,        MTLPixelFormatR8Snorm},
+            {VriFormat_R8_UINT,         MTLPixelFormatR8Uint},
+            {VriFormat_R8_SINT,         MTLPixelFormatR8Sint},
+            {VriFormat_RG8_UNORM,       MTLPixelFormatRG8Unorm},
+            {VriFormat_RG8_SNORM,       MTLPixelFormatRG8Snorm},
+            {VriFormat_RG8_UINT,        MTLPixelFormatRG8Uint},
+            {VriFormat_RG8_SINT,        MTLPixelFormatRG8Sint},
+            {VriFormat_RGBA8_UNORM,     MTLPixelFormatRGBA8Unorm},
+            {VriFormat_RGBA8_SRGB,      MTLPixelFormatRGBA8Unorm_sRGB},
+            {VriFormat_RGBA8_UINT,      MTLPixelFormatRGBA8Uint},
+            {VriFormat_RGBA8_SINT,      MTLPixelFormatRGBA8Sint},
+            {VriFormat_BGRA8_UNORM,     MTLPixelFormatBGRA8Unorm},
+            {VriFormat_BGRA8_SRGB,      MTLPixelFormatBGRA8Unorm_sRGB},
 
-            case VriFormat_R16_UNORM:       return MTLPixelFormatR16Unorm;
-            case VriFormat_R16_SNORM:       return MTLPixelFormatR16Snorm;
-            case VriFormat_R16_UINT:        return MTLPixelFormatR16Uint;
-            case VriFormat_R16_SINT:        return MTLPixelFormatR16Sint;
-            case VriFormat_R16_SFLOAT:      return MTLPixelFormatR16Float;
-            case VriFormat_RG16_UNORM:      return MTLPixelFormatRG16Unorm;
-            case VriFormat_RG16_SNORM:      return MTLPixelFormatRG16Snorm;
-            case VriFormat_RG16_UINT:       return MTLPixelFormatRG16Uint;
-            case VriFormat_RG16_SINT:       return MTLPixelFormatRG16Sint;
-            case VriFormat_RG16_SFLOAT:     return MTLPixelFormatRG16Float;
-            case VriFormat_RGBA16_UNORM:    return MTLPixelFormatRGBA16Unorm;
-            case VriFormat_RGBA16_SNORM:    return MTLPixelFormatRGBA16Snorm;
-            case VriFormat_RGBA16_UINT:     return MTLPixelFormatRGBA16Uint;
-            case VriFormat_RGBA16_SINT:     return MTLPixelFormatRGBA16Sint;
-            case VriFormat_RGBA16_SFLOAT:   return MTLPixelFormatRGBA16Float;
+            {VriFormat_R16_UNORM,       MTLPixelFormatR16Unorm},
+            {VriFormat_R16_SNORM,       MTLPixelFormatR16Snorm},
+            {VriFormat_R16_UINT,        MTLPixelFormatR16Uint},
+            {VriFormat_R16_SINT,        MTLPixelFormatR16Sint},
+            {VriFormat_R16_SFLOAT,      MTLPixelFormatR16Float},
+            {VriFormat_RG16_UNORM,      MTLPixelFormatRG16Unorm},
+            {VriFormat_RG16_SNORM,      MTLPixelFormatRG16Snorm},
+            {VriFormat_RG16_UINT,       MTLPixelFormatRG16Uint},
+            {VriFormat_RG16_SINT,       MTLPixelFormatRG16Sint},
+            {VriFormat_RG16_SFLOAT,     MTLPixelFormatRG16Float},
+            {VriFormat_RGBA16_UNORM,    MTLPixelFormatRGBA16Unorm},
+            {VriFormat_RGBA16_SNORM,    MTLPixelFormatRGBA16Snorm},
+            {VriFormat_RGBA16_UINT,     MTLPixelFormatRGBA16Uint},
+            {VriFormat_RGBA16_SINT,     MTLPixelFormatRGBA16Sint},
+            {VriFormat_RGBA16_SFLOAT,   MTLPixelFormatRGBA16Float},
 
-            case VriFormat_R32_UINT:        return MTLPixelFormatR32Uint;
-            case VriFormat_R32_SINT:        return MTLPixelFormatR32Sint;
-            case VriFormat_R32_SFLOAT:      return MTLPixelFormatR32Float;
-            case VriFormat_RG32_UINT:       return MTLPixelFormatRG32Uint;
-            case VriFormat_RG32_SINT:       return MTLPixelFormatRG32Sint;
-            case VriFormat_RG32_SFLOAT:     return MTLPixelFormatRG32Float;
-            case VriFormat_RGBA32_UINT:     return MTLPixelFormatRGBA32Uint;
-            case VriFormat_RGBA32_SINT:     return MTLPixelFormatRGBA32Sint;
-            case VriFormat_RGBA32_SFLOAT:   return MTLPixelFormatRGBA32Float;
-            // Metal has no 3-component pixel formats; callers use these for vertex
+            {VriFormat_R32_UINT,        MTLPixelFormatR32Uint},
+            {VriFormat_R32_SINT,        MTLPixelFormatR32Sint},
+            {VriFormat_R32_SFLOAT,      MTLPixelFormatR32Float},
+            {VriFormat_RG32_UINT,       MTLPixelFormatRG32Uint},
+            {VriFormat_RG32_SINT,       MTLPixelFormatRG32Sint},
+            {VriFormat_RG32_SFLOAT,     MTLPixelFormatRG32Float},
+            {VriFormat_RGBA32_UINT,     MTLPixelFormatRGBA32Uint},
+            {VriFormat_RGBA32_SINT,     MTLPixelFormatRGBA32Sint},
+            {VriFormat_RGBA32_SFLOAT,   MTLPixelFormatRGBA32Float},
+            // Metal has no 3-component pixel formats; callers use those for vertex
             // attributes only (ToMtlVertexFormat handles RGB32).
 
-            case VriFormat_RGB10A2_UNORM:   return MTLPixelFormatRGB10A2Unorm;
-            case VriFormat_RG11B10_UFLOAT:  return MTLPixelFormatRG11B10Float;
+            {VriFormat_RGB10A2_UNORM,   MTLPixelFormatRGB10A2Unorm},
+            {VriFormat_RG11B10_UFLOAT,  MTLPixelFormatRG11B10Float},
 
-            case VriFormat_BC1_UNORM:       return MTLPixelFormatBC1_RGBA;
-            case VriFormat_BC2_UNORM:       return MTLPixelFormatBC2_RGBA;
-            case VriFormat_BC3_UNORM:       return MTLPixelFormatBC3_RGBA;
-            case VriFormat_BC4_UNORM:       return MTLPixelFormatBC4_RUnorm;
-            case VriFormat_BC5_UNORM:       return MTLPixelFormatBC5_RGUnorm;
-            case VriFormat_BC6H_UFLOAT:     return MTLPixelFormatBC6H_RGBUfloat;
-            case VriFormat_BC7_UNORM:       return MTLPixelFormatBC7_RGBAUnorm;
+            {VriFormat_BC1_UNORM,       MTLPixelFormatBC1_RGBA},
+            {VriFormat_BC2_UNORM,       MTLPixelFormatBC2_RGBA},
+            {VriFormat_BC3_UNORM,       MTLPixelFormatBC3_RGBA},
+            {VriFormat_BC4_UNORM,       MTLPixelFormatBC4_RUnorm},
+            {VriFormat_BC5_UNORM,       MTLPixelFormatBC5_RGUnorm},
+            {VriFormat_BC6H_UFLOAT,     MTLPixelFormatBC6H_RGBUfloat},
+            {VriFormat_BC7_UNORM,       MTLPixelFormatBC7_RGBAUnorm},
 
-            case VriFormat_D16_UNORM:       return MTLPixelFormatDepth16Unorm;
-            case VriFormat_D32_SFLOAT:      return MTLPixelFormatDepth32Float;
-            case VriFormat_S8_UINT:         return MTLPixelFormatStencil8;
-            case VriFormat_D24_UNORM_S8_UINT:  return MTLPixelFormatDepth32Float_Stencil8;
-            case VriFormat_D32_SFLOAT_S8_UINT: return MTLPixelFormatDepth32Float_Stencil8;
-            default:                        return MTLPixelFormatInvalid;
-        }
+            {VriFormat_D16_UNORM,       MTLPixelFormatDepth16Unorm},
+            {VriFormat_D32_SFLOAT,      MTLPixelFormatDepth32Float},
+            {VriFormat_S8_UINT,         MTLPixelFormatStencil8},
+            {VriFormat_D24_UNORM_S8_UINT,  MTLPixelFormatDepth32Float_Stencil8},
+            {VriFormat_D32_SFLOAT_S8_UINT, MTLPixelFormatDepth32Float_Stencil8},
+        };
+        return vri::MapOr(f, kTable, MTLPixelFormatInvalid);
     }
 
     // VriFormat -> MTLVertexFormat (vertex-attribute use; includes 3-component).
     inline MTLVertexFormat ToMtlVertexFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R8_UNORM:      return MTLVertexFormatUCharNormalized;
-            case VriFormat_RG8_UNORM:     return MTLVertexFormatUChar2Normalized;
-            case VriFormat_RGBA8_UNORM:   return MTLVertexFormatUChar4Normalized;
-            case VriFormat_R8_UINT:       return MTLVertexFormatUChar;
-            case VriFormat_RGBA8_UINT:    return MTLVertexFormatUChar4;
-            case VriFormat_R16_SFLOAT:    return MTLVertexFormatHalf;
-            case VriFormat_RG16_SFLOAT:   return MTLVertexFormatHalf2;
-            case VriFormat_RGBA16_SFLOAT: return MTLVertexFormatHalf4;
-            case VriFormat_R32_SFLOAT:    return MTLVertexFormatFloat;
-            case VriFormat_RG32_SFLOAT:   return MTLVertexFormatFloat2;
-            case VriFormat_RGB32_SFLOAT:  return MTLVertexFormatFloat3;
-            case VriFormat_RGBA32_SFLOAT: return MTLVertexFormatFloat4;
-            case VriFormat_R32_UINT:      return MTLVertexFormatUInt;
-            case VriFormat_RG32_UINT:     return MTLVertexFormatUInt2;
-            case VriFormat_RGB32_UINT:    return MTLVertexFormatUInt3;
-            case VriFormat_RGBA32_UINT:   return MTLVertexFormatUInt4;
-            case VriFormat_R32_SINT:      return MTLVertexFormatInt;
-            case VriFormat_RG32_SINT:     return MTLVertexFormatInt2;
-            case VriFormat_RGB32_SINT:    return MTLVertexFormatInt3;
-            case VriFormat_RGBA32_SINT:   return MTLVertexFormatInt4;
-            default:                      return MTLVertexFormatInvalid;
-        }
+        static constexpr vri::ConvRow<VriFormat, MTLVertexFormat> kTable[] = {
+            {VriFormat_R8_UNORM,      MTLVertexFormatUCharNormalized},
+            {VriFormat_RG8_UNORM,     MTLVertexFormatUChar2Normalized},
+            {VriFormat_RGBA8_UNORM,   MTLVertexFormatUChar4Normalized},
+            {VriFormat_R8_UINT,       MTLVertexFormatUChar},
+            {VriFormat_RGBA8_UINT,    MTLVertexFormatUChar4},
+            {VriFormat_R16_SFLOAT,    MTLVertexFormatHalf},
+            {VriFormat_RG16_SFLOAT,   MTLVertexFormatHalf2},
+            {VriFormat_RGBA16_SFLOAT, MTLVertexFormatHalf4},
+            {VriFormat_R32_SFLOAT,    MTLVertexFormatFloat},
+            {VriFormat_RG32_SFLOAT,   MTLVertexFormatFloat2},
+            {VriFormat_RGB32_SFLOAT,  MTLVertexFormatFloat3},
+            {VriFormat_RGBA32_SFLOAT, MTLVertexFormatFloat4},
+            {VriFormat_R32_UINT,      MTLVertexFormatUInt},
+            {VriFormat_RG32_UINT,     MTLVertexFormatUInt2},
+            {VriFormat_RGB32_UINT,    MTLVertexFormatUInt3},
+            {VriFormat_RGBA32_UINT,   MTLVertexFormatUInt4},
+            {VriFormat_R32_SINT,      MTLVertexFormatInt},
+            {VriFormat_RG32_SINT,     MTLVertexFormatInt2},
+            {VriFormat_RGB32_SINT,    MTLVertexFormatInt3},
+            {VriFormat_RGBA32_SINT,   MTLVertexFormatInt4},
+        };
+        return vri::MapOr(f, kTable, MTLVertexFormatInvalid);
     }
 
     // Bytes per (uncompressed) texel - drives copy bytesPerRow.

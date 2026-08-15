@@ -5,6 +5,8 @@
 
 #include <vri/vri.h>
 
+#include "core/conversion_map.h"
+
 namespace vri::gl
 {
     struct GLFormat
@@ -17,37 +19,22 @@ namespace vri::gl
 
     inline GLFormat ToGLFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R8_UNORM:
-                return {GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1};
-            case VriFormat_RG8_UNORM:
-                return {GL_RG8, GL_RG, GL_UNSIGNED_BYTE, 2};
-            case VriFormat_RGBA8_UNORM:
-                return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
-            case VriFormat_RGBA8_SRGB:
-                return {GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
-            case VriFormat_BGRA8_UNORM:
-                return {GL_RGBA8, GL_BGRA, GL_UNSIGNED_BYTE, 4};
-            case VriFormat_R16_SFLOAT:
-                return {GL_R16F, GL_RED, GL_HALF_FLOAT, 2};
-            case VriFormat_RG16_SFLOAT:
-                return {GL_RG16F, GL_RG, GL_HALF_FLOAT, 4};
-            case VriFormat_RGBA16_SFLOAT:
-                return {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, 8};
-            case VriFormat_R32_SFLOAT:
-                return {GL_R32F, GL_RED, GL_FLOAT, 4};
-            case VriFormat_RG32_SFLOAT:
-                return {GL_RG32F, GL_RG, GL_FLOAT, 8};
-            case VriFormat_RGBA32_SFLOAT:
-                return {GL_RGBA32F, GL_RGBA, GL_FLOAT, 16};
-            case VriFormat_D32_SFLOAT:
-                return {GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, 4};
-            case VriFormat_D24_UNORM_S8_UINT:
-                return {GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, 4};
-            default:
-                return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4};
-        }
+        static constexpr vri::ConvRow<VriFormat, GLFormat> kTable[] = {
+            {VriFormat_R8_UNORM, {GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1}},
+            {VriFormat_RG8_UNORM, {GL_RG8, GL_RG, GL_UNSIGNED_BYTE, 2}},
+            {VriFormat_RGBA8_UNORM, {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4}},
+            {VriFormat_RGBA8_SRGB, {GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, 4}},
+            {VriFormat_BGRA8_UNORM, {GL_RGBA8, GL_BGRA, GL_UNSIGNED_BYTE, 4}},
+            {VriFormat_R16_SFLOAT, {GL_R16F, GL_RED, GL_HALF_FLOAT, 2}},
+            {VriFormat_RG16_SFLOAT, {GL_RG16F, GL_RG, GL_HALF_FLOAT, 4}},
+            {VriFormat_RGBA16_SFLOAT, {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, 8}},
+            {VriFormat_R32_SFLOAT, {GL_R32F, GL_RED, GL_FLOAT, 4}},
+            {VriFormat_RG32_SFLOAT, {GL_RG32F, GL_RG, GL_FLOAT, 8}},
+            {VriFormat_RGBA32_SFLOAT, {GL_RGBA32F, GL_RGBA, GL_FLOAT, 16}},
+            {VriFormat_D32_SFLOAT, {GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, 4}},
+            {VriFormat_D24_UNORM_S8_UINT, {GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, 4}},
+        };
+        return vri::MapOr(f, kTable, GLFormat {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4});
     }
 
     // Vertex-attribute format: component count + GL component type + normalized.
@@ -61,37 +48,22 @@ namespace vri::gl
 
     inline GLVertexFormat ToGLVertexFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R32_SFLOAT:
-                return {1, GL_FLOAT, GL_FALSE, false};
-            case VriFormat_RG32_SFLOAT:
-                return {2, GL_FLOAT, GL_FALSE, false};
-            case VriFormat_RGB32_SFLOAT:
-                return {3, GL_FLOAT, GL_FALSE, false};
-            case VriFormat_RGBA32_SFLOAT:
-                return {4, GL_FLOAT, GL_FALSE, false};
-            case VriFormat_RGBA8_UNORM:
-                return {4, GL_UNSIGNED_BYTE, GL_TRUE, false};
-            case VriFormat_RG8_UNORM:
-                return {2, GL_UNSIGNED_BYTE, GL_TRUE, false};
-            case VriFormat_R8_UNORM:
-                return {1, GL_UNSIGNED_BYTE, GL_TRUE, false};
-            case VriFormat_R32_UINT:
-                return {1, GL_UNSIGNED_INT, GL_FALSE, true};
-            case VriFormat_R32_SINT:
-                return {1, GL_INT, GL_FALSE, true};
-            case VriFormat_RG32_UINT:
-                return {2, GL_UNSIGNED_INT, GL_FALSE, true};
-            case VriFormat_RG32_SINT:
-                return {2, GL_INT, GL_FALSE, true};
-            case VriFormat_RGBA32_UINT:
-                return {4, GL_UNSIGNED_INT, GL_FALSE, true};
-            case VriFormat_RGBA32_SINT:
-                return {4, GL_INT, GL_FALSE, true};
-            default:
-                return {4, GL_FLOAT, GL_FALSE, false};
-        }
+        static constexpr vri::ConvRow<VriFormat, GLVertexFormat> kTable[] = {
+            {VriFormat_R32_SFLOAT, {1, GL_FLOAT, GL_FALSE, false}},
+            {VriFormat_RG32_SFLOAT, {2, GL_FLOAT, GL_FALSE, false}},
+            {VriFormat_RGB32_SFLOAT, {3, GL_FLOAT, GL_FALSE, false}},
+            {VriFormat_RGBA32_SFLOAT, {4, GL_FLOAT, GL_FALSE, false}},
+            {VriFormat_RGBA8_UNORM, {4, GL_UNSIGNED_BYTE, GL_TRUE, false}},
+            {VriFormat_RG8_UNORM, {2, GL_UNSIGNED_BYTE, GL_TRUE, false}},
+            {VriFormat_R8_UNORM, {1, GL_UNSIGNED_BYTE, GL_TRUE, false}},
+            {VriFormat_R32_UINT, {1, GL_UNSIGNED_INT, GL_FALSE, true}},
+            {VriFormat_R32_SINT, {1, GL_INT, GL_FALSE, true}},
+            {VriFormat_RG32_UINT, {2, GL_UNSIGNED_INT, GL_FALSE, true}},
+            {VriFormat_RG32_SINT, {2, GL_INT, GL_FALSE, true}},
+            {VriFormat_RGBA32_UINT, {4, GL_UNSIGNED_INT, GL_FALSE, true}},
+            {VriFormat_RGBA32_SINT, {4, GL_INT, GL_FALSE, true}},
+        };
+        return vri::MapOr(f, kTable, GLVertexFormat {4, GL_FLOAT, GL_FALSE, false});
     }
 
     inline GLenum ToGLTopology(VriPrimitiveTopology t)

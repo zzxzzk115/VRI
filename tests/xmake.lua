@@ -12,8 +12,13 @@ target("vri-tests")
     -- shaders are included as "shaders/<owner>/X.h" (tests/ or common/) from the repo root.
     add_includedirs("$(projectdir)")
 
+    -- internal headers, so backend-neutral core utilities (e.g. core/conversion_map.h)
+    -- can be unit-tested directly without pulling in a backend.
+    add_includedirs("$(projectdir)/source")
+
     add_files("test_main.cpp")
     add_files("test_api_usage.cpp")
+    add_files("test_conversion_map.cpp")      -- shared enum/flag conversion skeleton (backend-neutral)
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse
     add_files("test_descriptor_xbackend.cpp") -- runs on whichever backends are enabled
     add_files("test_texture_xbackend.cpp")    -- sampled-texture (separate texture+sampler) parity

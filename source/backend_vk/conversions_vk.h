@@ -5,125 +5,70 @@
 
 #include <vri/vri.h>
 
+#include "core/conversion_map.h"
+
 namespace vri::vk
 {
     inline VkFormat ToVkFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R8_UNORM:
-                return VK_FORMAT_R8_UNORM;
-            case VriFormat_R8_SNORM:
-                return VK_FORMAT_R8_SNORM;
-            case VriFormat_R8_UINT:
-                return VK_FORMAT_R8_UINT;
-            case VriFormat_R8_SINT:
-                return VK_FORMAT_R8_SINT;
-            case VriFormat_RG8_UNORM:
-                return VK_FORMAT_R8G8_UNORM;
-            case VriFormat_RG8_SNORM:
-                return VK_FORMAT_R8G8_SNORM;
-            case VriFormat_RG8_UINT:
-                return VK_FORMAT_R8G8_UINT;
-            case VriFormat_RG8_SINT:
-                return VK_FORMAT_R8G8_SINT;
-            case VriFormat_RGBA8_UNORM:
-                return VK_FORMAT_R8G8B8A8_UNORM;
-            case VriFormat_RGBA8_SRGB:
-                return VK_FORMAT_R8G8B8A8_SRGB;
-            case VriFormat_RGBA8_UINT:
-                return VK_FORMAT_R8G8B8A8_UINT;
-            case VriFormat_RGBA8_SINT:
-                return VK_FORMAT_R8G8B8A8_SINT;
-            case VriFormat_BGRA8_UNORM:
-                return VK_FORMAT_B8G8R8A8_UNORM;
-            case VriFormat_BGRA8_SRGB:
-                return VK_FORMAT_B8G8R8A8_SRGB;
-            case VriFormat_R16_UNORM:
-                return VK_FORMAT_R16_UNORM;
-            case VriFormat_R16_SNORM:
-                return VK_FORMAT_R16_SNORM;
-            case VriFormat_R16_UINT:
-                return VK_FORMAT_R16_UINT;
-            case VriFormat_R16_SINT:
-                return VK_FORMAT_R16_SINT;
-            case VriFormat_R16_SFLOAT:
-                return VK_FORMAT_R16_SFLOAT;
-            case VriFormat_RG16_UNORM:
-                return VK_FORMAT_R16G16_UNORM;
-            case VriFormat_RG16_SNORM:
-                return VK_FORMAT_R16G16_SNORM;
-            case VriFormat_RG16_UINT:
-                return VK_FORMAT_R16G16_UINT;
-            case VriFormat_RG16_SINT:
-                return VK_FORMAT_R16G16_SINT;
-            case VriFormat_RG16_SFLOAT:
-                return VK_FORMAT_R16G16_SFLOAT;
-            case VriFormat_RGBA16_UNORM:
-                return VK_FORMAT_R16G16B16A16_UNORM;
-            case VriFormat_RGBA16_SNORM:
-                return VK_FORMAT_R16G16B16A16_SNORM;
-            case VriFormat_RGBA16_UINT:
-                return VK_FORMAT_R16G16B16A16_UINT;
-            case VriFormat_RGBA16_SINT:
-                return VK_FORMAT_R16G16B16A16_SINT;
-            case VriFormat_RGBA16_SFLOAT:
-                return VK_FORMAT_R16G16B16A16_SFLOAT;
-            case VriFormat_R32_UINT:
-                return VK_FORMAT_R32_UINT;
-            case VriFormat_R32_SINT:
-                return VK_FORMAT_R32_SINT;
-            case VriFormat_R32_SFLOAT:
-                return VK_FORMAT_R32_SFLOAT;
-            case VriFormat_RG32_UINT:
-                return VK_FORMAT_R32G32_UINT;
-            case VriFormat_RG32_SINT:
-                return VK_FORMAT_R32G32_SINT;
-            case VriFormat_RG32_SFLOAT:
-                return VK_FORMAT_R32G32_SFLOAT;
-            case VriFormat_RGB32_UINT:
-                return VK_FORMAT_R32G32B32_UINT;
-            case VriFormat_RGB32_SINT:
-                return VK_FORMAT_R32G32B32_SINT;
-            case VriFormat_RGB32_SFLOAT:
-                return VK_FORMAT_R32G32B32_SFLOAT;
-            case VriFormat_RGBA32_UINT:
-                return VK_FORMAT_R32G32B32A32_UINT;
-            case VriFormat_RGBA32_SINT:
-                return VK_FORMAT_R32G32B32A32_SINT;
-            case VriFormat_RGBA32_SFLOAT:
-                return VK_FORMAT_R32G32B32A32_SFLOAT;
-            case VriFormat_RGB10A2_UNORM:
-                return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-            case VriFormat_RG11B10_UFLOAT:
-                return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
-            case VriFormat_BC1_UNORM:
-                return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
-            case VriFormat_BC2_UNORM:
-                return VK_FORMAT_BC2_UNORM_BLOCK;
-            case VriFormat_BC3_UNORM:
-                return VK_FORMAT_BC3_UNORM_BLOCK;
-            case VriFormat_BC4_UNORM:
-                return VK_FORMAT_BC4_UNORM_BLOCK;
-            case VriFormat_BC5_UNORM:
-                return VK_FORMAT_BC5_UNORM_BLOCK;
-            case VriFormat_BC6H_UFLOAT:
-                return VK_FORMAT_BC6H_UFLOAT_BLOCK;
-            case VriFormat_BC7_UNORM:
-                return VK_FORMAT_BC7_UNORM_BLOCK;
-            case VriFormat_D16_UNORM:
-                return VK_FORMAT_D16_UNORM;
-            case VriFormat_D32_SFLOAT:
-                return VK_FORMAT_D32_SFLOAT;
-            case VriFormat_S8_UINT:
-                return VK_FORMAT_S8_UINT;
-            case VriFormat_D24_UNORM_S8_UINT:
-                return VK_FORMAT_D24_UNORM_S8_UINT;
-            case VriFormat_D32_SFLOAT_S8_UINT:
-                return VK_FORMAT_D32_SFLOAT_S8_UINT;
-            default:
-                return VK_FORMAT_UNDEFINED;
-        }
+        static constexpr vri::ConvRow<VriFormat, VkFormat> kTable[] = {
+            {VriFormat_R8_UNORM, VK_FORMAT_R8_UNORM},
+            {VriFormat_R8_SNORM, VK_FORMAT_R8_SNORM},
+            {VriFormat_R8_UINT, VK_FORMAT_R8_UINT},
+            {VriFormat_R8_SINT, VK_FORMAT_R8_SINT},
+            {VriFormat_RG8_UNORM, VK_FORMAT_R8G8_UNORM},
+            {VriFormat_RG8_SNORM, VK_FORMAT_R8G8_SNORM},
+            {VriFormat_RG8_UINT, VK_FORMAT_R8G8_UINT},
+            {VriFormat_RG8_SINT, VK_FORMAT_R8G8_SINT},
+            {VriFormat_RGBA8_UNORM, VK_FORMAT_R8G8B8A8_UNORM},
+            {VriFormat_RGBA8_SRGB, VK_FORMAT_R8G8B8A8_SRGB},
+            {VriFormat_RGBA8_UINT, VK_FORMAT_R8G8B8A8_UINT},
+            {VriFormat_RGBA8_SINT, VK_FORMAT_R8G8B8A8_SINT},
+            {VriFormat_BGRA8_UNORM, VK_FORMAT_B8G8R8A8_UNORM},
+            {VriFormat_BGRA8_SRGB, VK_FORMAT_B8G8R8A8_SRGB},
+            {VriFormat_R16_UNORM, VK_FORMAT_R16_UNORM},
+            {VriFormat_R16_SNORM, VK_FORMAT_R16_SNORM},
+            {VriFormat_R16_UINT, VK_FORMAT_R16_UINT},
+            {VriFormat_R16_SINT, VK_FORMAT_R16_SINT},
+            {VriFormat_R16_SFLOAT, VK_FORMAT_R16_SFLOAT},
+            {VriFormat_RG16_UNORM, VK_FORMAT_R16G16_UNORM},
+            {VriFormat_RG16_SNORM, VK_FORMAT_R16G16_SNORM},
+            {VriFormat_RG16_UINT, VK_FORMAT_R16G16_UINT},
+            {VriFormat_RG16_SINT, VK_FORMAT_R16G16_SINT},
+            {VriFormat_RG16_SFLOAT, VK_FORMAT_R16G16_SFLOAT},
+            {VriFormat_RGBA16_UNORM, VK_FORMAT_R16G16B16A16_UNORM},
+            {VriFormat_RGBA16_SNORM, VK_FORMAT_R16G16B16A16_SNORM},
+            {VriFormat_RGBA16_UINT, VK_FORMAT_R16G16B16A16_UINT},
+            {VriFormat_RGBA16_SINT, VK_FORMAT_R16G16B16A16_SINT},
+            {VriFormat_RGBA16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT},
+            {VriFormat_R32_UINT, VK_FORMAT_R32_UINT},
+            {VriFormat_R32_SINT, VK_FORMAT_R32_SINT},
+            {VriFormat_R32_SFLOAT, VK_FORMAT_R32_SFLOAT},
+            {VriFormat_RG32_UINT, VK_FORMAT_R32G32_UINT},
+            {VriFormat_RG32_SINT, VK_FORMAT_R32G32_SINT},
+            {VriFormat_RG32_SFLOAT, VK_FORMAT_R32G32_SFLOAT},
+            {VriFormat_RGB32_UINT, VK_FORMAT_R32G32B32_UINT},
+            {VriFormat_RGB32_SINT, VK_FORMAT_R32G32B32_SINT},
+            {VriFormat_RGB32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT},
+            {VriFormat_RGBA32_UINT, VK_FORMAT_R32G32B32A32_UINT},
+            {VriFormat_RGBA32_SINT, VK_FORMAT_R32G32B32A32_SINT},
+            {VriFormat_RGBA32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT},
+            {VriFormat_RGB10A2_UNORM, VK_FORMAT_A2B10G10R10_UNORM_PACK32},
+            {VriFormat_RG11B10_UFLOAT, VK_FORMAT_B10G11R11_UFLOAT_PACK32},
+            {VriFormat_BC1_UNORM, VK_FORMAT_BC1_RGBA_UNORM_BLOCK},
+            {VriFormat_BC2_UNORM, VK_FORMAT_BC2_UNORM_BLOCK},
+            {VriFormat_BC3_UNORM, VK_FORMAT_BC3_UNORM_BLOCK},
+            {VriFormat_BC4_UNORM, VK_FORMAT_BC4_UNORM_BLOCK},
+            {VriFormat_BC5_UNORM, VK_FORMAT_BC5_UNORM_BLOCK},
+            {VriFormat_BC6H_UFLOAT, VK_FORMAT_BC6H_UFLOAT_BLOCK},
+            {VriFormat_BC7_UNORM, VK_FORMAT_BC7_UNORM_BLOCK},
+            {VriFormat_D16_UNORM, VK_FORMAT_D16_UNORM},
+            {VriFormat_D32_SFLOAT, VK_FORMAT_D32_SFLOAT},
+            {VriFormat_S8_UINT, VK_FORMAT_S8_UINT},
+            {VriFormat_D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+            {VriFormat_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT},
+        };
+        return vri::MapOr(f, kTable, VK_FORMAT_UNDEFINED);
     }
 
     inline VkImageType ToVkImageType(VriTextureType t)
@@ -163,63 +108,49 @@ namespace vri::vk
 
     inline VkImageAspectFlags ToVkAspect(VriImageAspectFlags a)
     {
-        VkImageAspectFlags r = 0;
-        if (a & VriImageAspect_Color)
-            r |= VK_IMAGE_ASPECT_COLOR_BIT;
-        if (a & VriImageAspect_Depth)
-            r |= VK_IMAGE_ASPECT_DEPTH_BIT;
-        if (a & VriImageAspect_Stencil)
-            r |= VK_IMAGE_ASPECT_STENCIL_BIT;
-        return r;
+        static constexpr vri::ConvRow<VriImageAspectFlags, VkImageAspectFlags> kTable[] = {
+            {VriImageAspect_Color, VK_IMAGE_ASPECT_COLOR_BIT},
+            {VriImageAspect_Depth, VK_IMAGE_ASPECT_DEPTH_BIT},
+            {VriImageAspect_Stencil, VK_IMAGE_ASPECT_STENCIL_BIT},
+        };
+        return vri::MapFlags(a, kTable);
     }
 
     inline VkBufferUsageFlags ToVkBufferUsage(VriBufferUsageFlags u)
     {
-        VkBufferUsageFlags r = 0;
-        if (u & VriBufferUsage_TransferSrc)
-            r |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        if (u & VriBufferUsage_TransferDst)
-            r |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        if (u & VriBufferUsage_VertexBuffer)
-            r |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        if (u & VriBufferUsage_IndexBuffer)
-            r |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        if (u & VriBufferUsage_ConstantBuffer)
-            r |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        if (u & VriBufferUsage_StorageBuffer)
-            r |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        if (u & VriBufferUsage_IndirectBuffer)
-            r |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        if (u & VriBufferUsage_ShaderDeviceAddress)
-            r |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        if (u & VriBufferUsage_AccelerationBuildInput)
-            r |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        if (u & VriBufferUsage_AccelerationStorage)
-            r |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        if (u & VriBufferUsage_ShaderBindingTable)
-            r |= VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        if (u & VriBufferUsage_MicromapBuildInput)
-            r |= VK_BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        return r;
+        static constexpr vri::ConvRow<VriBufferUsageFlags, VkBufferUsageFlags> kTable[] = {
+            {VriBufferUsage_TransferSrc, VK_BUFFER_USAGE_TRANSFER_SRC_BIT},
+            {VriBufferUsage_TransferDst, VK_BUFFER_USAGE_TRANSFER_DST_BIT},
+            {VriBufferUsage_VertexBuffer, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT},
+            {VriBufferUsage_IndexBuffer, VK_BUFFER_USAGE_INDEX_BUFFER_BIT},
+            {VriBufferUsage_ConstantBuffer, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT},
+            {VriBufferUsage_StorageBuffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT},
+            {VriBufferUsage_IndirectBuffer, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT},
+            {VriBufferUsage_ShaderDeviceAddress, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT},
+            {VriBufferUsage_AccelerationBuildInput,
+             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT},
+            {VriBufferUsage_AccelerationStorage,
+             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT},
+            {VriBufferUsage_ShaderBindingTable,
+             VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT},
+            {VriBufferUsage_MicromapBuildInput,
+             VK_BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT},
+        };
+        return vri::MapFlags(u, kTable);
     }
 
     inline VkImageUsageFlags ToVkImageUsage(VriTextureUsageFlags u)
     {
-        VkImageUsageFlags r = 0;
-        if (u & VriTextureUsage_TransferSrc)
-            r |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        if (u & VriTextureUsage_TransferDst)
-            r |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (u & VriTextureUsage_ShaderResource)
-            r |= VK_IMAGE_USAGE_SAMPLED_BIT;
-        if (u & VriTextureUsage_ShaderResourceStorage)
-            r |= VK_IMAGE_USAGE_STORAGE_BIT;
-        if (u & VriTextureUsage_ColorAttachment)
-            r |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        if (u & VriTextureUsage_DepthStencilAttachment)
-            r |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        return r;
+        static constexpr vri::ConvRow<VriTextureUsageFlags, VkImageUsageFlags> kTable[] = {
+            {VriTextureUsage_TransferSrc, VK_IMAGE_USAGE_TRANSFER_SRC_BIT},
+            {VriTextureUsage_TransferDst, VK_IMAGE_USAGE_TRANSFER_DST_BIT},
+            {VriTextureUsage_ShaderResource, VK_IMAGE_USAGE_SAMPLED_BIT},
+            {VriTextureUsage_ShaderResourceStorage, VK_IMAGE_USAGE_STORAGE_BIT},
+            {VriTextureUsage_ColorAttachment, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT},
+            {VriTextureUsage_DepthStencilAttachment, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT},
+        };
+        return vri::MapFlags(u, kTable);
     }
 
     inline VkPrimitiveTopology ToVkTopology(VriPrimitiveTopology t)

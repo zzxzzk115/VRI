@@ -6,6 +6,8 @@
 
 #include <vri/vri.h>
 
+#include "core/conversion_map.h"
+
 namespace vri::d3d12
 {
     struct DxgiFormatInfo
@@ -16,47 +18,27 @@ namespace vri::d3d12
 
     inline DxgiFormatInfo ToDxgiFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_RGBA8_UNORM:
-                return {DXGI_FORMAT_R8G8B8A8_UNORM, 4};
-            case VriFormat_RGBA8_SRGB:
-                return {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4};
-            case VriFormat_BGRA8_UNORM:
-                return {DXGI_FORMAT_B8G8R8A8_UNORM, 4};
-            case VriFormat_RG8_UNORM:
-                return {DXGI_FORMAT_R8G8_UNORM, 2};
-            case VriFormat_R8_UNORM:
-                return {DXGI_FORMAT_R8_UNORM, 1};
-            case VriFormat_RGBA16_SFLOAT:
-                return {DXGI_FORMAT_R16G16B16A16_FLOAT, 8};
-            case VriFormat_RGBA32_SFLOAT:
-                return {DXGI_FORMAT_R32G32B32A32_FLOAT, 16};
-            case VriFormat_RG32_SFLOAT:
-                return {DXGI_FORMAT_R32G32_FLOAT, 8};
-            case VriFormat_RGB32_SFLOAT:
-                return {DXGI_FORMAT_R32G32B32_FLOAT, 12};
-            case VriFormat_R32_SFLOAT:
-                return {DXGI_FORMAT_R32_FLOAT, 4};
-            case VriFormat_R32_UINT:
-                return {DXGI_FORMAT_R32_UINT, 4};
-            case VriFormat_R32_SINT:
-                return {DXGI_FORMAT_R32_SINT, 4};
-            case VriFormat_RG32_UINT:
-                return {DXGI_FORMAT_R32G32_UINT, 8};
-            case VriFormat_RG32_SINT:
-                return {DXGI_FORMAT_R32G32_SINT, 8};
-            case VriFormat_RGBA32_UINT:
-                return {DXGI_FORMAT_R32G32B32A32_UINT, 16};
-            case VriFormat_RGBA32_SINT:
-                return {DXGI_FORMAT_R32G32B32A32_SINT, 16};
-            case VriFormat_D32_SFLOAT:
-                return {DXGI_FORMAT_D32_FLOAT, 4};
-            case VriFormat_D24_UNORM_S8_UINT:
-                return {DXGI_FORMAT_D24_UNORM_S8_UINT, 4};
-            default:
-                return {DXGI_FORMAT_R8G8B8A8_UNORM, 4};
-        }
+        static constexpr vri::ConvRow<VriFormat, DxgiFormatInfo> kTable[] = {
+            {VriFormat_RGBA8_UNORM, {DXGI_FORMAT_R8G8B8A8_UNORM, 4}},
+            {VriFormat_RGBA8_SRGB, {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4}},
+            {VriFormat_BGRA8_UNORM, {DXGI_FORMAT_B8G8R8A8_UNORM, 4}},
+            {VriFormat_RG8_UNORM, {DXGI_FORMAT_R8G8_UNORM, 2}},
+            {VriFormat_R8_UNORM, {DXGI_FORMAT_R8_UNORM, 1}},
+            {VriFormat_RGBA16_SFLOAT, {DXGI_FORMAT_R16G16B16A16_FLOAT, 8}},
+            {VriFormat_RGBA32_SFLOAT, {DXGI_FORMAT_R32G32B32A32_FLOAT, 16}},
+            {VriFormat_RG32_SFLOAT, {DXGI_FORMAT_R32G32_FLOAT, 8}},
+            {VriFormat_RGB32_SFLOAT, {DXGI_FORMAT_R32G32B32_FLOAT, 12}},
+            {VriFormat_R32_SFLOAT, {DXGI_FORMAT_R32_FLOAT, 4}},
+            {VriFormat_R32_UINT, {DXGI_FORMAT_R32_UINT, 4}},
+            {VriFormat_R32_SINT, {DXGI_FORMAT_R32_SINT, 4}},
+            {VriFormat_RG32_UINT, {DXGI_FORMAT_R32G32_UINT, 8}},
+            {VriFormat_RG32_SINT, {DXGI_FORMAT_R32G32_SINT, 8}},
+            {VriFormat_RGBA32_UINT, {DXGI_FORMAT_R32G32B32A32_UINT, 16}},
+            {VriFormat_RGBA32_SINT, {DXGI_FORMAT_R32G32B32A32_SINT, 16}},
+            {VriFormat_D32_SFLOAT, {DXGI_FORMAT_D32_FLOAT, 4}},
+            {VriFormat_D24_UNORM_S8_UINT, {DXGI_FORMAT_D24_UNORM_S8_UINT, 4}},
+        };
+        return vri::MapOr(f, kTable, DxgiFormatInfo {DXGI_FORMAT_R8G8B8A8_UNORM, 4});
     }
 
     inline DXGI_FORMAT ToDxgiVertexFormat(VriFormat f) { return ToDxgiFormat(f).format; }
