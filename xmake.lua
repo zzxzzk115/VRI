@@ -93,12 +93,6 @@ option("vri_backend_gl_es")
     set_description("Build the OpenGL backend as native OpenGL ES (EGL; embedded / Raspberry Pi)")
 option_end()
 
-option("vri_backend_d3d11")
-    set_default(false)
-    set_showmenu(true)
-    set_description("Enable the Direct3D 11 backend (Windows only)")
-option_end()
-
 option("vri_backend_d3d12")
     set_default(false)
     set_showmenu(true)
