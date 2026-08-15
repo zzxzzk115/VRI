@@ -2,7 +2,9 @@
 
 Detailed notes on how VRI implements each feature across backends — the fallbacks, caveats, and
 the native extension each path uses. For the at-a-glance support matrix, see the
-[feature support table](README.md#feature-support) in the README.
+[feature support table](README.md#feature-support) in the README. For the thread-safety contract
+(which calls may run concurrently and where the caller must synchronize), see
+[docs/threading.md](docs/threading.md).
 
 **✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **⬜ Planned** (the API supports it; not yet in VRI) &nbsp;·&nbsp; **❌ Unsupported by the API**
 
