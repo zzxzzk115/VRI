@@ -13,9 +13,9 @@ namespace
 {
     enum MockEnum
     {
-        Mock_A = 0,
-        Mock_B = 1,
-        Mock_C = 2,
+        Mock_A        = 0,
+        Mock_B        = 1,
+        Mock_C        = 2,
         Mock_Unmapped = 99,
     };
 
@@ -34,19 +34,26 @@ namespace
     {
         switch (e)
         {
-            case Mock_A: return 10;
-            case Mock_B: return 20;
-            case Mock_C: return 30;
-            default:     return -1;
+            case Mock_A:
+                return 10;
+            case Mock_B:
+                return 20;
+            case Mock_C:
+                return 30;
+            default:
+                return -1;
         }
     }
 
     unsigned IfChainOracle(unsigned f)
     {
         unsigned r = 0;
-        if (f & Flag_X) r |= 0x100;
-        if (f & Flag_Y) r |= 0x200;
-        if (f & Flag_Z) r |= 0x400 | 0x800; // one VRI bit -> several native bits
+        if (f & Flag_X)
+            r |= 0x100;
+        if (f & Flag_Y)
+            r |= 0x200;
+        if (f & Flag_Z)
+            r |= 0x400 | 0x800; // one VRI bit -> several native bits
         return r;
     }
 } // namespace
