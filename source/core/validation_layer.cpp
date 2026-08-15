@@ -59,7 +59,7 @@ namespace vri::core
             // Thread that called BeginCommandBuffer; a single command buffer must be
             // recorded start-to-finish on one thread (see docs/threading.md). Used only
             // to diagnose obvious cross-thread misuse; never changes recording behavior.
-            std::thread::id   recordThread;
+            std::thread::id recordThread;
         };
 
         struct DeviceVal
@@ -105,8 +105,7 @@ namespace vri::core
         // happens-before barrier; it flags the far more common accidental data race.
         void CheckRecordThread(CmdBufVal* c)
         {
-            if (c->recording && c->recordThread != std::thread::id {} &&
-                c->recordThread != std::this_thread::get_id())
+            if (c->recording && c->recordThread != std::thread::id {} && c->recordThread != std::this_thread::get_id())
                 Msg(c->dev,
                     VriMessageSeverity_Warning,
                     "command buffer recorded from a different thread than BeginCommandBuffer - a "
