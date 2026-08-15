@@ -30,6 +30,15 @@ namespace vri::d3d12
         uint64_t                   idleValue = 0;
     };
 
+    // GPU memory allocation (an ID3D12Heap) for the explicit AllocateMemory / BindMemory path.
+    // Placed resources are created into this heap at bind time (CreatePlacedResource).
+    struct MemoryD3D12
+    {
+        DeviceD3D12*       device = nullptr;
+        ComPtr<ID3D12Heap> heap;
+        D3D12_HEAP_TYPE    heapType = D3D12_HEAP_TYPE_DEFAULT;
+    };
+
     struct BufferD3D12
     {
         DeviceD3D12*           device = nullptr;
@@ -38,6 +47,11 @@ namespace vri::d3d12
         D3D12_HEAP_TYPE        heapType = D3D12_HEAP_TYPE_DEFAULT;
         D3D12_RESOURCE_STATES  state    = D3D12_RESOURCE_STATE_COMMON;
         void*                  mapped   = nullptr; // persistent CPU pointer for upload/readback heaps
+        // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
+        // at BindBufferMemory via CreatePlacedResource from the saved desc.
+        D3D12_RESOURCE_DESC placedDesc = {};
+        bool                deferred   = false;
+        bool                wantsUav   = false; // storage buffer -> track as UNORDERED_ACCESS after bind
     };
 
     struct TextureD3D12
@@ -54,6 +68,12 @@ namespace vri::d3d12
         bool        isRenderTarget  = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
         bool        isDepthStencil  = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
         D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+        // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
+        // at BindTextureMemory via CreatePlacedResource from the saved desc + optional clear value.
+        D3D12_RESOURCE_DESC placedDesc  = {};
+        D3D12_CLEAR_VALUE   placedClear = {};
+        bool                hasClear    = false;
+        bool                deferred    = false;
     };
 
     // A view/sampler. RTV/DSV live in CPU-only heaps; SRV/CBV/UAV in a shader-visible
@@ -310,4 +330,5 @@ namespace vri::d3d12
     inline VriCommandAllocator* ToHandle(CommandAllocatorD3D12* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
     inline VriCommandBuffer*    ToHandle(CommandBufferD3D12* c) { return reinterpret_cast<VriCommandBuffer*>(c); }
     inline VriFence*            ToHandle(FenceD3D12* f) { return reinterpret_cast<VriFence*>(f); }
+    inline VriMemory*           ToHandle(MemoryD3D12* m) { return reinterpret_cast<VriMemory*>(m); }
 } // namespace vri::d3d12

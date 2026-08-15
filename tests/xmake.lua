@@ -51,6 +51,7 @@ target("vri-tests")
     add_files("test_pipelinecache_xbackend.cpp") -- serializable pipeline cache (VK + D3D12 + Metal + GL)
     add_files("test_indirectcount_xbackend.cpp") -- draw-indirect-count (GPU draw count from a buffer)
     add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
+    add_files("test_explicitmemory_xbackend.cpp") -- explicit placed-resource memory (AllocateMemory + BindMemory)
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)
     add_files("test_multiview_xbackend.cpp") -- multiview single-pass layered rendering (viewMask)
