@@ -4,7 +4,7 @@
 
 -- Tests
 if has_config("vri_build_tests") then
-    add_requires("doctest")
+    add_requires("doctest 2.4.12")
 end
 
 -- Vulkan backend (MVP / reference backend). Not available on wasm (VMA is unsupported
@@ -15,7 +15,7 @@ if has_config("vri_backend_vulkan") and not is_plat("wasm") then
     -- The backend uses the C VMA (vk_mem_alloc.h), not the C++ wrapper. The -hpp
     -- package (v3.2.1) fails to compile against vulkan-headers 1.4.335
     -- (vk::ValidationFailedEXTError was removed in newer vulkan-hpp).
-    add_requires("vulkan-memory-allocator")
+    add_requires("vulkan-memory-allocator v3.3.0")
 end
 
 -- WebGPU backend (prebuilt wgpu-native C API)
@@ -40,10 +40,10 @@ if has_config("vri_backend_gl") or has_config("vri_backend_metal") then
     -- GL-only: the Metal backend shares spirv-cross above but needs neither loader.
     if has_config("vri_backend_gl") and not is_plat("wasm") then
         if not has_config("vri_backend_gl_es") then
-            add_requires("glad", {configs = {profile = "core", api = "gl=4.6"}})
+            add_requires("glad v0.1.36", {configs = {profile = "core", api = "gl=4.6"}})
         end
         if not is_plat("linux") then
-            add_requires("glfw")
+            add_requires("glfw 3.4")
         end
     end
 end
@@ -53,12 +53,12 @@ end
 -- needed when the D3D12 backend is built (Windows). dxgi/d3d12/d3dcompiler libs
 -- themselves come from the system (add_syslinks in source/xmake.lua).
 if has_config("vri_backend_d3d12") and is_plat("windows") then
-    add_requires("directx12-agility")
+    add_requires("directx12-agility 1.618.1")
 end
 
 -- Examples windowing (matches libvultra)
 if has_config("vri_build_examples") then
-    add_requires("libsdl3")
+    add_requires("libsdl3 3.4.0")
     -- Dear ImGui for the examples' UI. The examples draw ImDrawData through VRI
     -- (examples/common/imgui_vri.h), so we don't need an imgui render backend - only the
     -- core, plus the SDL3 *input/platform* backend on desktop. On wasm input is fed via Emscripten.
@@ -71,7 +71,7 @@ if has_config("vri_build_examples") then
     -- glTF model loading for example-raytracing/pathtracer (examples/common/gltf_model.h).
     -- Header-only, the same tinygltf library Sascha Willems' Vulkan-Examples use. Needed on every
     -- platform now that those examples render on WebGPU too via the compute-BVH software fallback.
-    add_requires("tinygltf")
+    add_requires("tinygltf v2.9.7")
 end
 
 -- Host tools: vri-shaderc links the Slang compiler bundled with the Vulkan SDK
