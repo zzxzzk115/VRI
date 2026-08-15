@@ -93,11 +93,10 @@ option("vri_backend_gl_es")
     set_description("Build the OpenGL backend as native OpenGL ES (EGL; embedded / Raspberry Pi)")
 option_end()
 
-option("vri_backend_d3d11")
-    set_default(false)
-    set_showmenu(true)
-    set_description("Enable the Direct3D 11 backend (Windows only)")
-option_end()
+-- No vri_backend_d3d11 option: there is no D3D11 backend implementation (no source/backend_d3d11,
+-- no dispatch case). The VriGraphicsAPI_D3D11 enum is kept as the deliberate "never-compiled"
+-- probe (vriCreateDevice -> VriResult_Unsupported; see tests/test_main.cpp), but a build option
+-- that only defined VRI_BACKEND_D3D11 without adding any sources was a dead, misleading switch.
 
 option("vri_backend_d3d12")
     set_default(false)

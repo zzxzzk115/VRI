@@ -45,7 +45,7 @@ target("vri")
     -- Each backend is gated on its option AND on platform support, so a sticky option
     -- value from a previous config (xmake remembers explicit --flags across `xmake f`)
     -- can never try to build/require a backend the target platform can't use:
-    --   Vulkan -> not wasm   |   D3D11/D3D12 -> windows   |   GL/WebGPU -> all (incl. wasm)
+    --   Vulkan -> not wasm   |   D3D12 -> windows   |   GL/WebGPU -> all (incl. wasm)
     if has_config("vri_backend_vulkan") and not is_plat("wasm") then
         add_defines("VRI_BACKEND_VULKAN")
         add_rules("vulkansdk")
@@ -120,9 +120,6 @@ target("vri")
         add_includedirs("backend_metal", {public = false})
         -- Metal + CAMetalLayer (QuartzCore) + the SDL3 metal view's NSWindow/AppKit chain.
         add_frameworks("Metal", "QuartzCore", "Foundation", "Cocoa", {public = true})
-    end
-    if has_config("vri_backend_d3d11") and is_plat("windows") then
-        add_defines("VRI_BACKEND_D3D11")
     end
     if has_config("vri_backend_d3d12") and is_plat("windows") then
         add_defines("VRI_BACKEND_D3D12")
