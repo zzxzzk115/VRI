@@ -5,91 +5,63 @@
 
 #include <vri/vri.h>
 
+#include "core/conversion_map.h"
+
 namespace vri::wgpu
 {
     inline WGPUTextureFormat ToWgpuFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R8_UNORM:
-                return WGPUTextureFormat_R8Unorm;
-            case VriFormat_R8_UINT:
-                return WGPUTextureFormat_R8Uint;
-            case VriFormat_RG8_UNORM:
-                return WGPUTextureFormat_RG8Unorm;
-            case VriFormat_RGBA8_UNORM:
-                return WGPUTextureFormat_RGBA8Unorm;
-            case VriFormat_RGBA8_SRGB:
-                return WGPUTextureFormat_RGBA8UnormSrgb;
-            case VriFormat_BGRA8_UNORM:
-                return WGPUTextureFormat_BGRA8Unorm;
-            case VriFormat_BGRA8_SRGB:
-                return WGPUTextureFormat_BGRA8UnormSrgb;
-            case VriFormat_R16_SFLOAT:
-                return WGPUTextureFormat_R16Float;
-            case VriFormat_RG16_SFLOAT:
-                return WGPUTextureFormat_RG16Float;
-            case VriFormat_RGBA16_SFLOAT:
-                return WGPUTextureFormat_RGBA16Float;
-            case VriFormat_R32_UINT:
-                return WGPUTextureFormat_R32Uint;
-            case VriFormat_R32_SFLOAT:
-                return WGPUTextureFormat_R32Float;
-            case VriFormat_RG32_SFLOAT:
-                return WGPUTextureFormat_RG32Float;
-            case VriFormat_RGBA32_SFLOAT:
-                return WGPUTextureFormat_RGBA32Float;
-            case VriFormat_RGB10A2_UNORM:
-                return WGPUTextureFormat_RGB10A2Unorm;
-            case VriFormat_D16_UNORM:
-                return WGPUTextureFormat_Depth16Unorm;
-            case VriFormat_D32_SFLOAT:
-                return WGPUTextureFormat_Depth32Float;
-            case VriFormat_D24_UNORM_S8_UINT:
-                return WGPUTextureFormat_Depth24PlusStencil8;
-            case VriFormat_D32_SFLOAT_S8_UINT:
-                return WGPUTextureFormat_Depth32FloatStencil8;
-            default:
-                return WGPUTextureFormat_Undefined;
-        }
+        static constexpr vri::ConvRow<VriFormat, WGPUTextureFormat> kTable[] = {
+            {VriFormat_R8_UNORM, WGPUTextureFormat_R8Unorm},
+            {VriFormat_R8_UINT, WGPUTextureFormat_R8Uint},
+            {VriFormat_RG8_UNORM, WGPUTextureFormat_RG8Unorm},
+            {VriFormat_RGBA8_UNORM, WGPUTextureFormat_RGBA8Unorm},
+            {VriFormat_RGBA8_SRGB, WGPUTextureFormat_RGBA8UnormSrgb},
+            {VriFormat_BGRA8_UNORM, WGPUTextureFormat_BGRA8Unorm},
+            {VriFormat_BGRA8_SRGB, WGPUTextureFormat_BGRA8UnormSrgb},
+            {VriFormat_R16_SFLOAT, WGPUTextureFormat_R16Float},
+            {VriFormat_RG16_SFLOAT, WGPUTextureFormat_RG16Float},
+            {VriFormat_RGBA16_SFLOAT, WGPUTextureFormat_RGBA16Float},
+            {VriFormat_R32_UINT, WGPUTextureFormat_R32Uint},
+            {VriFormat_R32_SFLOAT, WGPUTextureFormat_R32Float},
+            {VriFormat_RG32_SFLOAT, WGPUTextureFormat_RG32Float},
+            {VriFormat_RGBA32_SFLOAT, WGPUTextureFormat_RGBA32Float},
+            {VriFormat_RGB10A2_UNORM, WGPUTextureFormat_RGB10A2Unorm},
+            {VriFormat_D16_UNORM, WGPUTextureFormat_Depth16Unorm},
+            {VriFormat_D32_SFLOAT, WGPUTextureFormat_Depth32Float},
+            {VriFormat_D24_UNORM_S8_UINT, WGPUTextureFormat_Depth24PlusStencil8},
+            {VriFormat_D32_SFLOAT_S8_UINT, WGPUTextureFormat_Depth32FloatStencil8},
+        };
+        return vri::MapOr(f, kTable, WGPUTextureFormat_Undefined);
     }
 
     inline WGPUTextureUsage ToWgpuTextureUsage(VriTextureUsageFlags u)
     {
-        WGPUTextureUsage r = WGPUTextureUsage_None;
-        if (u & VriTextureUsage_TransferSrc)
-            r |= WGPUTextureUsage_CopySrc;
-        if (u & VriTextureUsage_TransferDst)
-            r |= WGPUTextureUsage_CopyDst;
-        if (u & VriTextureUsage_ShaderResource)
-            r |= WGPUTextureUsage_TextureBinding;
-        if (u & VriTextureUsage_ShaderResourceStorage)
-            r |= WGPUTextureUsage_StorageBinding;
-        if (u & VriTextureUsage_ColorAttachment)
-            r |= WGPUTextureUsage_RenderAttachment;
-        if (u & VriTextureUsage_DepthStencilAttachment)
-            r |= WGPUTextureUsage_RenderAttachment;
-        return r;
+        static constexpr vri::ConvRow<VriTextureUsageFlags, WGPUTextureUsage> kTable[] = {
+            {VriTextureUsage_TransferSrc, WGPUTextureUsage_CopySrc},
+            {VriTextureUsage_TransferDst, WGPUTextureUsage_CopyDst},
+            {VriTextureUsage_ShaderResource, WGPUTextureUsage_TextureBinding},
+            {VriTextureUsage_ShaderResourceStorage, WGPUTextureUsage_StorageBinding},
+            {VriTextureUsage_ColorAttachment, WGPUTextureUsage_RenderAttachment},
+            {VriTextureUsage_DepthStencilAttachment, WGPUTextureUsage_RenderAttachment},
+        };
+        // No explicit seed: To{} is 0 == WGPUTextureUsage_None, matching the old r init.
+        return vri::MapFlags(u, kTable);
     }
 
     inline WGPUBufferUsage ToWgpuBufferUsage(VriBufferUsageFlags u)
     {
-        WGPUBufferUsage r = WGPUBufferUsage_None;
-        if (u & VriBufferUsage_TransferSrc)
-            r |= WGPUBufferUsage_CopySrc;
-        if (u & VriBufferUsage_TransferDst)
-            r |= WGPUBufferUsage_CopyDst;
-        if (u & VriBufferUsage_VertexBuffer)
-            r |= WGPUBufferUsage_Vertex;
-        if (u & VriBufferUsage_IndexBuffer)
-            r |= WGPUBufferUsage_Index;
-        if (u & VriBufferUsage_ConstantBuffer)
-            r |= WGPUBufferUsage_Uniform;
-        if (u & VriBufferUsage_StorageBuffer)
-            r |= WGPUBufferUsage_Storage;
-        if (u & VriBufferUsage_IndirectBuffer)
-            r |= WGPUBufferUsage_Indirect;
-        return r;
+        static constexpr vri::ConvRow<VriBufferUsageFlags, WGPUBufferUsage> kTable[] = {
+            {VriBufferUsage_TransferSrc, WGPUBufferUsage_CopySrc},
+            {VriBufferUsage_TransferDst, WGPUBufferUsage_CopyDst},
+            {VriBufferUsage_VertexBuffer, WGPUBufferUsage_Vertex},
+            {VriBufferUsage_IndexBuffer, WGPUBufferUsage_Index},
+            {VriBufferUsage_ConstantBuffer, WGPUBufferUsage_Uniform},
+            {VriBufferUsage_StorageBuffer, WGPUBufferUsage_Storage},
+            {VriBufferUsage_IndirectBuffer, WGPUBufferUsage_Indirect},
+        };
+        // No explicit seed: To{} is 0 == WGPUBufferUsage_None, matching the old r init.
+        return vri::MapFlags(u, kTable);
     }
 
     inline WGPUPrimitiveTopology ToWgpuTopology(VriPrimitiveTopology t)
@@ -179,33 +151,20 @@ namespace vri::wgpu
 
     inline WGPUVertexFormat ToWgpuVertexFormat(VriFormat f)
     {
-        switch (f)
-        {
-            case VriFormat_R32_SFLOAT:
-                return WGPUVertexFormat_Float32;
-            case VriFormat_RG32_SFLOAT:
-                return WGPUVertexFormat_Float32x2;
-            case VriFormat_RGB32_SFLOAT:
-                return WGPUVertexFormat_Float32x3;
-            case VriFormat_RGBA32_SFLOAT:
-                return WGPUVertexFormat_Float32x4;
-            case VriFormat_RGBA8_UNORM:
-                return WGPUVertexFormat_Unorm8x4;
-            case VriFormat_R32_UINT:
-                return WGPUVertexFormat_Uint32;
-            case VriFormat_R32_SINT:
-                return WGPUVertexFormat_Sint32;
-            case VriFormat_RG32_UINT:
-                return WGPUVertexFormat_Uint32x2;
-            case VriFormat_RG32_SINT:
-                return WGPUVertexFormat_Sint32x2;
-            case VriFormat_RGBA32_UINT:
-                return WGPUVertexFormat_Uint32x4;
-            case VriFormat_RGBA32_SINT:
-                return WGPUVertexFormat_Sint32x4;
-            default:
-                return WGPUVertexFormat_Float32x4;
-        }
+        static constexpr vri::ConvRow<VriFormat, WGPUVertexFormat> kTable[] = {
+            {VriFormat_R32_SFLOAT, WGPUVertexFormat_Float32},
+            {VriFormat_RG32_SFLOAT, WGPUVertexFormat_Float32x2},
+            {VriFormat_RGB32_SFLOAT, WGPUVertexFormat_Float32x3},
+            {VriFormat_RGBA32_SFLOAT, WGPUVertexFormat_Float32x4},
+            {VriFormat_RGBA8_UNORM, WGPUVertexFormat_Unorm8x4},
+            {VriFormat_R32_UINT, WGPUVertexFormat_Uint32},
+            {VriFormat_R32_SINT, WGPUVertexFormat_Sint32},
+            {VriFormat_RG32_UINT, WGPUVertexFormat_Uint32x2},
+            {VriFormat_RG32_SINT, WGPUVertexFormat_Sint32x2},
+            {VriFormat_RGBA32_UINT, WGPUVertexFormat_Uint32x4},
+            {VriFormat_RGBA32_SINT, WGPUVertexFormat_Sint32x4},
+        };
+        return vri::MapOr(f, kTable, WGPUVertexFormat_Float32x4);
     }
 
     inline WGPUBlendFactor ToWgpuBlendFactor(VriBlendFactor f)
