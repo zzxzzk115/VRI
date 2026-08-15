@@ -115,6 +115,11 @@ The Vulkan backend needs only the loader, not the LunarG SDK: on Linux a distro
 GLFW uses) is enough, and the build links `-lvulkan` when no `VULKAN_SDK` tree is present.
 The SDK is only required for the optional host tool `vri-shaderc`.
 
+On Windows, VRI and its packages default to the static CRT (`MT`, `MTd` in debug). Pass
+`xmake f --runtimes=MD` (or `MDd`) to build against the DLL runtime instead — the choice
+propagates to all packages, so language bindings that expect the dynamic CRT (e.g. Rust)
+can link without forcing `crt-static` on their side.
+
 ### As a subproject
 
 `includes()` this repository from a parent xmake project and depend on the `vri` target;

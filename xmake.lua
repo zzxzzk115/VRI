@@ -119,9 +119,17 @@ option("vri_validation")
     set_description("Enable graphics API validation layers by default")
 option_end()
 
--- align package runtimes with the consuming targets (matches libvultra/vshadersystem ecosystem)
+-- MSVC runtime: static (MT/MTd) by default to match the libvultra/vshadersystem ecosystem, but an
+-- explicit `xmake f --runtimes=MD` wins, so consumers that need the DLL CRT (e.g. Rust bindings,
+-- which default to the dynamic runtime) don't have to patch this file. Whatever is chosen is
+-- propagated to every package so their runtimes match the consuming targets.
 if is_plat("windows") then
-    add_requireconfs("**", {configs = {runtimes = is_mode("debug") and "MTd" or "MT"}})
+    local runtimes = get_config("runtimes")
+    if not runtimes or runtimes == "" then
+        runtimes = is_mode("debug") and "MTd" or "MT"
+    end
+    set_runtimes(runtimes)
+    add_requireconfs("**", {configs = {runtimes = runtimes}})
 end
 
 -- if build on windows
@@ -130,11 +138,6 @@ if is_plat("windows") then
     add_cxxflags("/bigobj") -- avoid big obj
     add_cxxflags("-D_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING")
     add_cxxflags("/EHsc")
-    if is_mode("debug") then
-        set_runtimes("MTd")
-    else
-        set_runtimes("MT")
-    end
 else
     add_cxxflags("-fexceptions")
 end
