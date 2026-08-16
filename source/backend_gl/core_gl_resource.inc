@@ -11,9 +11,10 @@
         // completeness. It also withheld DepthStencil from the two depth formats GL does
         // implement, so the usual "probe D24S8, else fall back" pattern picked the wrong
         // one here. Report per format instead.
-        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat format)
+        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
-            VriFormatSupportFlags r = VriFormatSupport_None;
+            VriFormatSupportFlags r    = VriFormatSupport_None;
+            const GlFeatures&     caps = Dev(device)->Features();
 
             const GLFormat g = ToGLFormatOrNone(format);
             if (g.internalFormat != 0)
@@ -23,17 +24,31 @@
                 {
                     r |= VriFormatSupport_DepthStencil;
                 }
-                else
+                // A float texture is always sampleable, but rendering to one is core
+                // only on desktop GL; on ES/WebGL2 it needs EXT_color_buffer_float, and
+                // without it the framebuffer comes out incomplete.
+                else if (!IsGLFloatFormat(g) || caps.colorBufferFloat)
                 {
                     r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
-                    // No StorageTexture: whether one can be bound at all is a
-                    // property of the context, not the format. The
-                    // VriDescriptorType_StorageTexture branch in
-                    // core_gl_command.inc is compiled out under VRI_GL_ES_HEADERS
-                    // (WebGL2 has no compute), and image load/store needs desktop
-                    // GL 4.2+ - which the macOS 4.1 context does not reach.
-                    // Advertising the bit needs that capability plumbed through to
-                    // here first.
+                    // Storage textures ride on image load/store, which is a property of
+                    // the context rather than the format: desktop GL 4.2+ only, and the
+                    // binding path does not exist in the ES build at all. On top of that
+                    // the unit accepts only the formats the spec requires (GL 4.2 table
+                    // 8.27), so gate on both.
+                    if (caps.imageLoadStore)
+                    {
+                        switch (format)
+                        {
+                            case VriFormat_RGBA32_SFLOAT:
+                            case VriFormat_RGBA16_SFLOAT:
+                            case VriFormat_R32_SFLOAT:
+                            case VriFormat_RGBA8_UNORM:
+                                r |= VriFormatSupport_StorageTexture;
+                                break;
+                            default:
+                                break;
+                        }
+                    }
                 }
             }
 

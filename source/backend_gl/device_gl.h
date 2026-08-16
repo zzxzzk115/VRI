@@ -76,6 +76,13 @@ namespace vri::gl
         // Immutable texture storage (glTexStorage*) is GL 4.2+ AND core in GLES3/WebGL2;
         // the lone gap is desktop GL 4.1 (macOS), which falls back to glTexImage*.
         bool textureStorage = true; // default true: ES/WebGL2 baseline always has it
+        // Float color targets. Core on desktop GL 3.0+; on ES/WebGL2 a float texture is
+        // sampleable out of the box but only becomes color-renderable with
+        // EXT_color_buffer_float, so GetFormatSupport has to ask before promising one.
+        bool colorBufferFloat = false;
+        // Image load/store (glBindImageTexture), i.e. storage textures: desktop GL 4.2+.
+        // The binding path is compiled out entirely under VRI_GL_ES_HEADERS.
+        bool imageLoadStore = false;
     };
 
     class DeviceGL final : public core::DeviceBase

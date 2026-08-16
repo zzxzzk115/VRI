@@ -156,7 +156,24 @@ namespace vri::wgpu
                 }
                 else
                 {
-                    r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
+                    // Every color format this backend maps is renderable in core
+                    // WebGPU, but blending is narrower: integer targets are never
+                    // blendable, and the 32-bit float ones only become blendable
+                    // with the optional float32-blendable feature, which
+                    // DeviceWGPU::Init does not request.
+                    r |= VriFormatSupport_ColorAttachment;
+                    switch (format)
+                    {
+                        case VriFormat_R8_UINT:
+                        case VriFormat_R32_UINT:
+                        case VriFormat_R32_SFLOAT:
+                        case VriFormat_RG32_SFLOAT:
+                        case VriFormat_RGBA32_SFLOAT:
+                            break;
+                        default:
+                            r |= VriFormatSupport_Blend;
+                            break;
+                    }
                     // No StorageTexture: CreatePipelineLayout pins every
                     // storage-texture binding to RGBA8Unorm, so a view of any other
                     // format fails bind-group validation. Advertising the bit needs

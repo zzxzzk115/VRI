@@ -53,6 +53,10 @@ namespace vri::gl
         return g.format == GL_DEPTH_COMPONENT || g.format == GL_DEPTH_STENCIL;
     }
 
+    // Whether the color format holds floats. Renderability of these is not
+    // universal: ES/WebGL2 gate it behind EXT_color_buffer_float.
+    inline bool IsGLFloatFormat(const GLFormat& g) { return g.type == GL_HALF_FLOAT || g.type == GL_FLOAT; }
+
     // Vertex-attribute format: component count + GL component type + normalized.
     struct GLVertexFormat
     {

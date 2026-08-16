@@ -545,6 +545,22 @@ namespace vri::gl
         m_desc.maxViewCount    = multiviewOk ? static_cast<uint32_t>(maxViews) : 0u;
     }
 
+    namespace
+    {
+        bool HasGLExtension(const char* name)
+        {
+            GLint count = 0;
+            glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+            for (GLint i = 0; i < count; ++i)
+            {
+                const char* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
+                if (e && std::strcmp(e, name) == 0)
+                    return true;
+            }
+            return false;
+        }
+    } // namespace
+
     void DeviceGL::DetectFeatures()
     {
         GlFeatures f {};
@@ -572,7 +588,18 @@ namespace vri::gl
             glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binFormats);
             f.programBinary = atLeast(4, 1) && binFormats > 0;
 #endif
+            f.colorBufferFloat = atLeast(3, 0); // core since GL 3.0
+            f.imageLoadStore   = atLeast(4, 2); // glBindImageTexture (macOS GL 4.1 misses it)
         }
+        else
+        {
+            // ES/WebGL2: a float texture is sampleable but only renderable with the
+            // extension, and the storage-texture binding path is compiled out here.
+            f.colorBufferFloat = HasGLExtension("GL_EXT_color_buffer_float");
+        }
+#if defined(VRI_GL_ES_HEADERS)
+        f.imageLoadStore = false; // the binding path does not exist in this build
+#endif
         m_features = f;
     }
 
