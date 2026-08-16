@@ -581,6 +581,7 @@ namespace vri::gl
 #endif
             f.colorBufferFloat     = atLeast(3, 0); // core since GL 3.0
             f.colorBufferHalfFloat = atLeast(3, 0);
+            f.floatBlend           = atLeast(3, 0);
             f.imageLoadStore       = atLeast(4, 2); // glBindImageTexture (macOS GL 4.1 misses it)
         }
         else
@@ -591,6 +592,9 @@ namespace vri::gl
             // the narrower one an ES 3.0 context may have on its own.
             f.colorBufferFloat     = HasGLExtension("GL_EXT_color_buffer_float");
             f.colorBufferHalfFloat = f.colorBufferFloat || HasGLExtension("GL_EXT_color_buffer_half_float");
+            // Renderable does not imply blendable here: EXT_float_blend is the one that
+            // permits blending into a 32-bit float target.
+            f.floatBlend = HasGLExtension("GL_EXT_float_blend");
         }
 #if defined(VRI_GL_ES_HEADERS)
         f.imageLoadStore = false; // the binding path does not exist in this build

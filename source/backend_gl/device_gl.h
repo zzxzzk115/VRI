@@ -83,6 +83,11 @@ namespace vri::gl
         // RGBA32F, so they get a flag each rather than one "float" answer.
         bool colorBufferFloat     = false; // 32-bit: EXT_color_buffer_float
         bool colorBufferHalfFloat = false; // 16-bit: EXT_color_buffer_half_float, or the above
+        // Blending INTO a 32-bit float target is a further step on ES: renderable and
+        // blendable are separate extensions there, and blending without this one is
+        // GL_INVALID_OPERATION at draw time. Half-float blending comes with the
+        // renderability extension, so it needs no flag of its own.
+        bool floatBlend = false; // 32-bit blend: EXT_float_blend
         // Image load/store (glBindImageTexture), i.e. storage textures: desktop GL 4.2+.
         // The binding path is compiled out entirely under VRI_GL_ES_HEADERS.
         bool imageLoadStore = false;

@@ -32,7 +32,14 @@
                 else if (!IsGLFloatFormat(g) ||
                          (g.type == GL_HALF_FLOAT ? caps.colorBufferHalfFloat : caps.colorBufferFloat))
                 {
-                    r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
+                    r |= VriFormatSupport_ColorAttachment;
+                    // Renderable is not blendable. On ES, EXT_color_buffer_float makes a
+                    // 32-bit float target renderable but blending into one additionally
+                    // needs EXT_float_blend, and without it the draw is
+                    // GL_INVALID_OPERATION. (Half-float blending rides along with the
+                    // renderability extension; desktop GL has all of it from 3.0.)
+                    if (g.type != GL_FLOAT || caps.floatBlend)
+                        r |= VriFormatSupport_Blend;
                     // Storage textures ride on image load/store, which is a property of
                     // the context rather than the format: desktop GL 4.2+ only, and the
                     // binding path does not exist in the ES build at all. On top of that
