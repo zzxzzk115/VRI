@@ -92,6 +92,24 @@ namespace vri::gl
         }
     }
 
+    namespace
+    {
+        // Whether the current context advertises `name`. GL 3.0+/ES 3.0+ only expose
+        // the indexed form, which is the baseline this backend requests everywhere.
+        bool HasGLExtension(const char* name)
+        {
+            GLint count = 0;
+            glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+            for (GLint i = 0; i < count; ++i)
+            {
+                const char* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
+                if (e && std::strcmp(e, name) == 0)
+                    return true;
+            }
+            return false;
+        }
+    } // namespace
+
     void DeviceGL::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
     void DeviceGL::ReportWarning(const char* message) const { Diagnostic(VriMessageSeverity_Warning, message); }
 
@@ -525,41 +543,14 @@ namespace vri::gl
         // AND GLES (the key path for standalone VR). Needs the loaded entry point + the multiview2
         // extension (gl_ViewID_OVR with view-dependent control flow, which spirv-cross emits) + >=2
         // views. (WebGL2/Emscripten has no proc loader here, so the pointer stays null = unsupported.)
-        bool  hasMv2   = false;
-        GLint extCount = 0;
-        glGetIntegerv(GL_NUM_EXTENSIONS, &extCount);
-        for (GLint i = 0; i < extCount; ++i)
-        {
-            const char* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
-            if (e && std::strcmp(e, "GL_OVR_multiview2") == 0)
-            {
-                hasMv2 = true;
-                break;
-            }
-        }
-        GLint maxViews = 0;
+        const bool hasMv2   = HasGLExtension("GL_OVR_multiview2");
+        GLint      maxViews = 0;
         if (g_FramebufferTextureMultiviewOVR && hasMv2)
             glGetIntegerv(GL_MAX_VIEWS_OVR, &maxViews);
         const bool multiviewOk = g_FramebufferTextureMultiviewOVR != nullptr && hasMv2 && maxViews >= 2;
         m_desc.hasMultiview    = multiviewOk ? VRI_TRUE : VRI_FALSE;
         m_desc.maxViewCount    = multiviewOk ? static_cast<uint32_t>(maxViews) : 0u;
     }
-
-    namespace
-    {
-        bool HasGLExtension(const char* name)
-        {
-            GLint count = 0;
-            glGetIntegerv(GL_NUM_EXTENSIONS, &count);
-            for (GLint i = 0; i < count; ++i)
-            {
-                const char* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
-                if (e && std::strcmp(e, name) == 0)
-                    return true;
-            }
-            return false;
-        }
-    } // namespace
 
     void DeviceGL::DetectFeatures()
     {
