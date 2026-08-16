@@ -167,7 +167,7 @@ namespace vri::wgpu
                 }
             }
 
-            if (ToWgpuVertexFormatOrNone(format) != WGPUVertexFormat_Undefined)
+            if (HasWgpuVertexFormat(format))
                 r |= VriFormatSupport_VertexBuffer;
 
             return r;

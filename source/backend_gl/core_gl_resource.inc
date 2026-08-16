@@ -44,7 +44,7 @@
                 }
             }
 
-            if (ToGLVertexFormatOrNone(format).size != 0)
+            if (HasGLVertexFormat(format))
                 r |= VriFormatSupport_VertexBuffer;
 
             return r;

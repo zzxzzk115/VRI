@@ -50,6 +50,21 @@ namespace vri
         return fallback;
     }
 
+    // Whether `value` has a row at all. This is the "is it mapped?" question on
+    // its own, for callers that need it without a native value in hand -
+    // GetFormatSupport asking whether a format is one the backend really has,
+    // rather than one MapOr would answer for with its fallback. Spelled as a
+    // scan rather than "MapOr against a sentinel" because not every native enum
+    // has a sentinel to compare with (WebGPU's vertex formats have none).
+    template<class From, class To, std::size_t N>
+    constexpr bool Contains(From value, const ConvRow<From, To> (&table)[N])
+    {
+        for (const auto& row : table)
+            if (row.from == value)
+                return true;
+        return false;
+    }
+
     // Flag-set dispatch. ORs together the native bits whose VRI bit is set in
     // `value`. Equivalent to a chain of `if (value & row.from) r |= row.to;`.
     // Order-independent (OR is commutative) and duplicate-safe (OR is idempotent),

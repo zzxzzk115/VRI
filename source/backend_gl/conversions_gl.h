@@ -38,10 +38,7 @@ namespace vri::gl
     // - "GL honors this format" is not the same as "ToGLFormat returned
     // something" - because the fallback would otherwise let a caller be told a
     // depth format is fine and then be handed an RGBA8 texture for it.
-    inline GLFormat ToGLFormatOrNone(VriFormat f)
-    {
-        return vri::MapOr(f, kGLFormatTable, GLFormat {0, 0, 0, 0});
-    }
+    inline GLFormat ToGLFormatOrNone(VriFormat f) { return vri::MapOr(f, kGLFormatTable, GLFormat {0, 0, 0, 0}); }
 
     inline GLFormat ToGLFormat(VriFormat f)
     {
@@ -81,17 +78,15 @@ namespace vri::gl
         {VriFormat_RGBA32_SINT, {4, GL_INT, GL_FALSE, true}},
     };
 
-    // As ToGLFormatOrNone, for vertex attributes: size == 0 means unmapped.
-    inline GLVertexFormat ToGLVertexFormatOrNone(VriFormat f)
-    {
-        return vri::MapOr(f, kGLVertexFormatTable, GLVertexFormat {0, 0, GL_FALSE, false});
-    }
-
     inline GLVertexFormat ToGLVertexFormat(VriFormat f)
     {
-        const GLVertexFormat mapped = ToGLVertexFormatOrNone(f);
-        return mapped.size != 0 ? mapped : GLVertexFormat {4, GL_FLOAT, GL_FALSE, false};
+        return vri::MapOr(f, kGLVertexFormatTable, GLVertexFormat {4, GL_FLOAT, GL_FALSE, false});
     }
+
+    // Whether the table really has `f`, as opposed to ToGLVertexFormat
+    // answering with its float4 fallback - the same distinction ToGLFormatOrNone
+    // draws for textures.
+    inline bool HasGLVertexFormat(VriFormat f) { return vri::Contains(f, kGLVertexFormatTable); }
 
     inline GLenum ToGLTopology(VriPrimitiveTopology t)
     {
