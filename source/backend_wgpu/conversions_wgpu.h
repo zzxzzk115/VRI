@@ -6,6 +6,7 @@
 #include <vri/vri.h>
 
 #include "core/conversion_map.h"
+#include "core/format_traits.h"
 
 namespace vri::wgpu
 {
@@ -149,22 +150,33 @@ namespace vri::wgpu
         }
     }
 
+    inline constexpr vri::ConvRow<VriFormat, WGPUVertexFormat> kWgpuVertexFormatTable[] = {
+        {VriFormat_R32_SFLOAT, WGPUVertexFormat_Float32},
+        {VriFormat_RG32_SFLOAT, WGPUVertexFormat_Float32x2},
+        {VriFormat_RGB32_SFLOAT, WGPUVertexFormat_Float32x3},
+        {VriFormat_RGBA32_SFLOAT, WGPUVertexFormat_Float32x4},
+        {VriFormat_RGBA8_UNORM, WGPUVertexFormat_Unorm8x4},
+        {VriFormat_R32_UINT, WGPUVertexFormat_Uint32},
+        {VriFormat_R32_SINT, WGPUVertexFormat_Sint32},
+        {VriFormat_RG32_UINT, WGPUVertexFormat_Uint32x2},
+        {VriFormat_RG32_SINT, WGPUVertexFormat_Sint32x2},
+        {VriFormat_RGBA32_UINT, WGPUVertexFormat_Uint32x4},
+        {VriFormat_RGBA32_SINT, WGPUVertexFormat_Sint32x4},
+    };
+
+    // Look `f` up WITHOUT ToWgpuVertexFormat's Float32x4 fallback: Undefined
+    // means the backend has no vertex format for it. GetFormatSupport needs the
+    // difference so it does not advertise a vertex format that would silently
+    // reach the shader as a float4.
+    inline WGPUVertexFormat ToWgpuVertexFormatOrNone(VriFormat f)
+    {
+        return vri::MapOr(f, kWgpuVertexFormatTable, WGPUVertexFormat_Undefined);
+    }
+
     inline WGPUVertexFormat ToWgpuVertexFormat(VriFormat f)
     {
-        static constexpr vri::ConvRow<VriFormat, WGPUVertexFormat> kTable[] = {
-            {VriFormat_R32_SFLOAT, WGPUVertexFormat_Float32},
-            {VriFormat_RG32_SFLOAT, WGPUVertexFormat_Float32x2},
-            {VriFormat_RGB32_SFLOAT, WGPUVertexFormat_Float32x3},
-            {VriFormat_RGBA32_SFLOAT, WGPUVertexFormat_Float32x4},
-            {VriFormat_RGBA8_UNORM, WGPUVertexFormat_Unorm8x4},
-            {VriFormat_R32_UINT, WGPUVertexFormat_Uint32},
-            {VriFormat_R32_SINT, WGPUVertexFormat_Sint32},
-            {VriFormat_RG32_UINT, WGPUVertexFormat_Uint32x2},
-            {VriFormat_RG32_SINT, WGPUVertexFormat_Sint32x2},
-            {VriFormat_RGBA32_UINT, WGPUVertexFormat_Uint32x4},
-            {VriFormat_RGBA32_SINT, WGPUVertexFormat_Sint32x4},
-        };
-        return vri::MapOr(f, kTable, WGPUVertexFormat_Float32x4);
+        const WGPUVertexFormat mapped = ToWgpuVertexFormatOrNone(f);
+        return mapped != WGPUVertexFormat_Undefined ? mapped : WGPUVertexFormat_Float32x4;
     }
 
     inline WGPUBlendFactor ToWgpuBlendFactor(VriBlendFactor f)

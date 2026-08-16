@@ -16,10 +16,8 @@ namespace vri::d3d12
         uint32_t    texelSize; // bytes per texel (for readback row math)
     };
 
-    inline DxgiFormatInfo ToDxgiFormat(VriFormat f)
-    {
-        static constexpr vri::ConvRow<VriFormat, DxgiFormatInfo> kTable[] = {
-            {VriFormat_RGBA8_UNORM, {DXGI_FORMAT_R8G8B8A8_UNORM, 4}},
+    inline constexpr vri::ConvRow<VriFormat, DxgiFormatInfo> kDxgiFormatTable[] = {
+        {VriFormat_RGBA8_UNORM, {DXGI_FORMAT_R8G8B8A8_UNORM, 4}},
             {VriFormat_RGBA8_SRGB, {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4}},
             {VriFormat_BGRA8_UNORM, {DXGI_FORMAT_B8G8R8A8_UNORM, 4}},
             {VriFormat_RG8_UNORM, {DXGI_FORMAT_R8G8_UNORM, 2}},
@@ -36,9 +34,22 @@ namespace vri::d3d12
             {VriFormat_RGBA32_UINT, {DXGI_FORMAT_R32G32B32A32_UINT, 16}},
             {VriFormat_RGBA32_SINT, {DXGI_FORMAT_R32G32B32A32_SINT, 16}},
             {VriFormat_D32_SFLOAT, {DXGI_FORMAT_D32_FLOAT, 4}},
-            {VriFormat_D24_UNORM_S8_UINT, {DXGI_FORMAT_D24_UNORM_S8_UINT, 4}},
-        };
-        return vri::MapOr(f, kTable, DxgiFormatInfo {DXGI_FORMAT_R8G8B8A8_UNORM, 4});
+        {VriFormat_D24_UNORM_S8_UINT, {DXGI_FORMAT_D24_UNORM_S8_UINT, 4}},
+    };
+
+    // Look `f` up WITHOUT ToDxgiFormat's RGBA8 fallback: DXGI_FORMAT_UNKNOWN
+    // means the backend has no DXGI format for it. GetFormatSupport needs the
+    // difference - asking D3D12 about the substitute would report RGBA8's
+    // capabilities under the unmapped format's name.
+    inline DxgiFormatInfo ToDxgiFormatOrNone(VriFormat f)
+    {
+        return vri::MapOr(f, kDxgiFormatTable, DxgiFormatInfo {DXGI_FORMAT_UNKNOWN, 0});
+    }
+
+    inline DxgiFormatInfo ToDxgiFormat(VriFormat f)
+    {
+        const DxgiFormatInfo mapped = ToDxgiFormatOrNone(f);
+        return mapped.format != DXGI_FORMAT_UNKNOWN ? mapped : DxgiFormatInfo {DXGI_FORMAT_R8G8B8A8_UNORM, 4};
     }
 
     inline DXGI_FORMAT ToDxgiVertexFormat(VriFormat f) { return ToDxgiFormat(f).format; }

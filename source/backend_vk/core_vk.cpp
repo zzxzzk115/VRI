@@ -92,8 +92,15 @@ namespace vri::vk
 
         VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
+            // An unmapped VriFormat is not supported, whatever the driver says about
+            // VK_FORMAT_UNDEFINED - and some do report features for it. D3D12 already
+            // guards its DXGI_FORMAT_UNKNOWN the same way.
+            const VkFormat vk = ToVkFormat(format);
+            if (vk == VK_FORMAT_UNDEFINED)
+                return VriFormatSupport_None;
+
             VkFormatProperties props = {};
-            vkGetPhysicalDeviceFormatProperties(Dev(device)->PhysicalDevice(), ToVkFormat(format), &props);
+            vkGetPhysicalDeviceFormatProperties(Dev(device)->PhysicalDevice(), vk, &props);
             const VkFormatFeatureFlags f = props.optimalTilingFeatures;
 
             VriFormatSupportFlags r = VriFormatSupport_None;

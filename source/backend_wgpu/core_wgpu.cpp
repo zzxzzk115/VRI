@@ -131,12 +131,45 @@ namespace vri::wgpu
         // ---- queries -------------------------------------------------------
         const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
 
+        // Answered from the same tables that decide what this backend actually does.
+        // The previous reply claimed Texture|VertexBuffer for every format including
+        // ones ToWgpuFormat maps to Undefined, gave depth formats ColorAttachment|Blend,
+        // and never set DepthStencil at all - so the usual "probe a depth format, else
+        // fall back" pattern got no usable answer here. Report per format instead.
         VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat format)
         {
-            // Coarse: WebGPU guarantees these for common formats. Refined later.
-            VriFormatSupportFlags r = VriFormatSupport_Texture | VriFormatSupport_VertexBuffer;
+            VriFormatSupportFlags r = VriFormatSupport_None;
+
             if (ToWgpuFormat(format) != WGPUTextureFormat_Undefined)
-                r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
+            {
+                r |= VriFormatSupport_Texture; // sampleable, depth included (shadow maps)
+                if (vri::FormatIsDepthStencil(format))
+                {
+                    r |= VriFormatSupport_DepthStencil;
+                }
+                else
+                {
+                    r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
+                    // WebGPU's guaranteed STORAGE_BINDING formats, restricted to
+                    // the ones this backend maps at all.
+                    switch (format)
+                    {
+                        case VriFormat_RGBA32_SFLOAT:
+                        case VriFormat_RGBA16_SFLOAT:
+                        case VriFormat_R32_SFLOAT:
+                        case VriFormat_R32_UINT:
+                        case VriFormat_RGBA8_UNORM:
+                            r |= VriFormatSupport_StorageTexture;
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+
+            if (ToWgpuVertexFormatOrNone(format) != WGPUVertexFormat_Undefined)
+                r |= VriFormatSupport_VertexBuffer;
+
             return r;
         }
 
