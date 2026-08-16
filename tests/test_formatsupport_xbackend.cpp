@@ -52,6 +52,33 @@ namespace
         CHECK((d24s8 || d32s8));
         MESSAGE("[" << std::string(name) << "] depth+stencil: D24S8 " << d24s8 << ", D32S8 " << d32s8);
 
+        // 2b. And the answer is actionable: a format reported as DepthStencil has to
+        //     survive CreateTexture as a depth/stencil attachment. This is the part a
+        //     probe actually depends on -- a backend that reports a format its device
+        //     cannot create (an optional feature it never requested, say) sends the
+        //     caller past its fallback and into a failure it had asked to avoid.
+        const VriFormat combined[] = {VriFormat_D24_UNORM_S8_UINT, VriFormat_D32_SFLOAT_S8_UINT};
+        for (VriFormat f : combined)
+        {
+            if (!Has(c.GetFormatSupport(dev, f), VriFormatSupport_DepthStencil))
+                continue;
+            VriTextureDesc td {};
+            td.type           = VriTextureType_2D;
+            td.format         = f;
+            td.width          = 64;
+            td.height         = 64;
+            td.depth          = 1;
+            td.mipNum         = 1;
+            td.layerNum       = 1;
+            td.sampleNum      = 1;
+            td.usage          = VriTextureUsage_DepthStencilAttachment;
+            td.memoryLocation = VriMemoryLocation_Device;
+            VriTexture* t     = nullptr;
+            CHECK(c.CreateTexture(dev, &td, &t) == VriResult_Success);
+            if (t)
+                c.DestroyTexture(t);
+        }
+
         // 3. Color formats are color formats. RGBA8_UNORM is the one every backend maps.
         const VriFormatSupportFlags rgba8 = c.GetFormatSupport(dev, VriFormat_RGBA8_UNORM);
         CHECK(Has(rgba8, VriFormatSupport_Texture));

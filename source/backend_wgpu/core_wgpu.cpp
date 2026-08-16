@@ -145,25 +145,22 @@ namespace vri::wgpu
                 r |= VriFormatSupport_Texture; // sampleable, depth included (shadow maps)
                 if (vri::FormatIsDepthStencil(format))
                 {
-                    r |= VriFormatSupport_DepthStencil;
+                    // Depth32FloatStencil8 is behind the optional
+                    // depth32float-stencil8 feature, and DeviceWGPU::Init requests
+                    // only the timestamp ones - so the created device cannot use it
+                    // however capable the adapter is. Reporting it would send a
+                    // caller past its D24S8 fallback (core, no feature needed) into
+                    // a validation failure at CreateTexture.
+                    if (format != VriFormat_D32_SFLOAT_S8_UINT)
+                        r |= VriFormatSupport_DepthStencil;
                 }
                 else
                 {
                     r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
-                    // WebGPU's guaranteed STORAGE_BINDING formats, restricted to
-                    // the ones this backend maps at all.
-                    switch (format)
-                    {
-                        case VriFormat_RGBA32_SFLOAT:
-                        case VriFormat_RGBA16_SFLOAT:
-                        case VriFormat_R32_SFLOAT:
-                        case VriFormat_R32_UINT:
-                        case VriFormat_RGBA8_UNORM:
-                            r |= VriFormatSupport_StorageTexture;
-                            break;
-                        default:
-                            break;
-                    }
+                    // No StorageTexture: CreatePipelineLayout pins every
+                    // storage-texture binding to RGBA8Unorm, so a view of any other
+                    // format fails bind-group validation. Advertising the bit needs
+                    // that layout to carry the range's real format first.
                 }
             }
 

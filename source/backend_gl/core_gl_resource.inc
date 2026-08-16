@@ -26,21 +26,14 @@
                 else
                 {
                     r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
-                    // Image load/store units accept only the formats the spec
-                    // requires (GL 4.2 / ES 3.1 table 8.27). Restrict to the ones
-                    // guaranteed everywhere this backend runs, desktop and ES
-                    // alike, rather than the wider desktop-only list.
-                    switch (format)
-                    {
-                        case VriFormat_RGBA32_SFLOAT:
-                        case VriFormat_RGBA16_SFLOAT:
-                        case VriFormat_R32_SFLOAT:
-                        case VriFormat_RGBA8_UNORM:
-                            r |= VriFormatSupport_StorageTexture;
-                            break;
-                        default:
-                            break;
-                    }
+                    // No StorageTexture: whether one can be bound at all is a
+                    // property of the context, not the format. The
+                    // VriDescriptorType_StorageTexture branch in
+                    // core_gl_command.inc is compiled out under VRI_GL_ES_HEADERS
+                    // (WebGL2 has no compute), and image load/store needs desktop
+                    // GL 4.2+ - which the macOS 4.1 context does not reach.
+                    // Advertising the bit needs that capability plumbed through to
+                    // here first.
                 }
             }
 
