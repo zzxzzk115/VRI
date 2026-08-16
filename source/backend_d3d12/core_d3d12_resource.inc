@@ -6,7 +6,10 @@
         {
             VriFormatSupportFlags             r  = VriFormatSupport_None;
             D3D12_FEATURE_DATA_FORMAT_SUPPORT fs = {};
-            fs.Format                            = ToDxgiFormat(format).format;
+            // OrNone, not ToDxgiFormat: the latter's RGBA8 fallback made every unmapped
+            // format report RGBA8's capabilities instead of "unsupported", which also
+            // kept the DXGI_FORMAT_UNKNOWN guard below from ever firing.
+            fs.Format                            = ToDxgiFormatOrNone(format).format;
             if (fs.Format == DXGI_FORMAT_UNKNOWN ||
                 FAILED(Dev(device)->Device()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &fs, sizeof(fs))))
                 return r;

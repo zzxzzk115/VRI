@@ -6,6 +6,7 @@
 #include <vri/vri.h>
 
 #include "core/conversion_map.h"
+#include "core/format_traits.h"
 
 namespace vri::wgpu
 {
@@ -149,23 +150,31 @@ namespace vri::wgpu
         }
     }
 
+    inline constexpr vri::ConvRow<VriFormat, WGPUVertexFormat> kWgpuVertexFormatTable[] = {
+        {VriFormat_R32_SFLOAT, WGPUVertexFormat_Float32},
+        {VriFormat_RG32_SFLOAT, WGPUVertexFormat_Float32x2},
+        {VriFormat_RGB32_SFLOAT, WGPUVertexFormat_Float32x3},
+        {VriFormat_RGBA32_SFLOAT, WGPUVertexFormat_Float32x4},
+        {VriFormat_RGBA8_UNORM, WGPUVertexFormat_Unorm8x4},
+        {VriFormat_R32_UINT, WGPUVertexFormat_Uint32},
+        {VriFormat_R32_SINT, WGPUVertexFormat_Sint32},
+        {VriFormat_RG32_UINT, WGPUVertexFormat_Uint32x2},
+        {VriFormat_RG32_SINT, WGPUVertexFormat_Sint32x2},
+        {VriFormat_RGBA32_UINT, WGPUVertexFormat_Uint32x4},
+        {VriFormat_RGBA32_SINT, WGPUVertexFormat_Sint32x4},
+    };
+
     inline WGPUVertexFormat ToWgpuVertexFormat(VriFormat f)
     {
-        static constexpr vri::ConvRow<VriFormat, WGPUVertexFormat> kTable[] = {
-            {VriFormat_R32_SFLOAT, WGPUVertexFormat_Float32},
-            {VriFormat_RG32_SFLOAT, WGPUVertexFormat_Float32x2},
-            {VriFormat_RGB32_SFLOAT, WGPUVertexFormat_Float32x3},
-            {VriFormat_RGBA32_SFLOAT, WGPUVertexFormat_Float32x4},
-            {VriFormat_RGBA8_UNORM, WGPUVertexFormat_Unorm8x4},
-            {VriFormat_R32_UINT, WGPUVertexFormat_Uint32},
-            {VriFormat_R32_SINT, WGPUVertexFormat_Sint32},
-            {VriFormat_RG32_UINT, WGPUVertexFormat_Uint32x2},
-            {VriFormat_RG32_SINT, WGPUVertexFormat_Sint32x2},
-            {VriFormat_RGBA32_UINT, WGPUVertexFormat_Uint32x4},
-            {VriFormat_RGBA32_SINT, WGPUVertexFormat_Sint32x4},
-        };
-        return vri::MapOr(f, kTable, WGPUVertexFormat_Float32x4);
+        return vri::MapOr(f, kWgpuVertexFormatTable, WGPUVertexFormat_Float32x4);
     }
+
+    // Whether the table really has `f`, as opposed to ToWgpuVertexFormat
+    // answering with its Float32x4 fallback. GetFormatSupport needs the
+    // difference so it does not advertise a vertex format that would silently
+    // reach the shader as a float4. (WebGPU's vertex formats have no Undefined
+    // enumerator to test against, so this asks the table directly.)
+    inline bool HasWgpuVertexFormat(VriFormat f) { return vri::Contains(f, kWgpuVertexFormatTable); }
 
     inline WGPUBlendFactor ToWgpuBlendFactor(VriBlendFactor f)
     {

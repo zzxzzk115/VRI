@@ -9,6 +9,7 @@
 #include <vri/vri.h>
 
 #include "core/conversion_map.h"
+#include "core/format_traits.h"
 
 namespace vri::mtl
 {
@@ -140,15 +141,9 @@ namespace vri::mtl
         }
     }
 
-    inline bool FormatHasStencil(VriFormat f)
-    {
-        return f == VriFormat_S8_UINT || f == VriFormat_D24_UNORM_S8_UINT || f == VriFormat_D32_SFLOAT_S8_UINT;
-    }
-    inline bool FormatHasDepth(VriFormat f)
-    {
-        return f == VriFormat_D16_UNORM || f == VriFormat_D32_SFLOAT ||
-               f == VriFormat_D24_UNORM_S8_UINT || f == VriFormat_D32_SFLOAT_S8_UINT;
-    }
+    // The depth/stencil predicates are backend-neutral; see core/format_traits.h.
+    using vri::FormatHasDepth;
+    using vri::FormatHasStencil;
 
     inline MTLCompareFunction ToMtlCompare(VriCompareOp op)
     {

@@ -2,10 +2,70 @@
         // #included into core_gl.cpp (one TU); see core_gl.cpp for the split rationale.
         // ---- queries -------------------------------------------------------
         const VriDeviceDesc* VRI_CALL  GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
-        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat)
+        // Answered from the same tables that decide what this backend actually does:
+        // ToGLFormat is what CreateTexture uses, ToGLVertexFormat what the vertex input
+        // uses. Both fall back to a substitute for an unmapped format (RGBA8 / float4),
+        // so a blanket "everything is supported" reply was actively misleading: it told
+        // callers that, say, D32_SFLOAT_S8_UINT was fine when CreateTexture would hand
+        // them an RGBA8 texture, and attaching that as depth fails framebuffer
+        // completeness. It also withheld DepthStencil from the two depth formats GL does
+        // implement, so the usual "probe D24S8, else fall back" pattern picked the wrong
+        // one here. Report per format instead.
+        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
-            return VriFormatSupport_Texture | VriFormatSupport_ColorAttachment | VriFormatSupport_Blend |
-                   VriFormatSupport_VertexBuffer;
+            VriFormatSupportFlags r    = VriFormatSupport_None;
+            const GlFeatures&     caps = Dev(device)->Features();
+
+            const GLFormat g = ToGLFormatOrNone(format);
+            if (g.internalFormat != 0)
+            {
+                r |= VriFormatSupport_Texture; // sampleable, depth included (shadow maps)
+                if (IsGLDepthFormat(g))
+                {
+                    r |= VriFormatSupport_DepthStencil;
+                }
+                // A float texture is always sampleable, but rendering to one is core
+                // only on desktop GL; on ES/WebGL2 it needs an extension, and without
+                // it the framebuffer comes out incomplete. The two widths are gated
+                // separately: an ES 3.0 context can carry
+                // EXT_color_buffer_half_float alone and render RGBA16F but not RGBA32F.
+                else if (!IsGLFloatFormat(g) ||
+                         (g.type == GL_HALF_FLOAT ? caps.colorBufferHalfFloat : caps.colorBufferFloat))
+                {
+                    r |= VriFormatSupport_ColorAttachment;
+                    // Renderable is not blendable. On ES, EXT_color_buffer_float makes a
+                    // 32-bit float target renderable but blending into one additionally
+                    // needs EXT_float_blend, and without it the draw is
+                    // GL_INVALID_OPERATION. (Half-float blending rides along with the
+                    // renderability extension; desktop GL has all of it from 3.0.)
+                    if (g.type != GL_FLOAT || caps.floatBlend)
+                        r |= VriFormatSupport_Blend;
+                    // Storage textures ride on image load/store, which is a property of
+                    // the context rather than the format: desktop GL 4.2+ only, and the
+                    // binding path does not exist in the ES build at all. On top of that
+                    // the unit accepts only the formats the spec requires (GL 4.2 table
+                    // 8.27), so gate on both.
+                    if (caps.imageLoadStore)
+                    {
+                        switch (format)
+                        {
+                            case VriFormat_RGBA32_SFLOAT:
+                            case VriFormat_RGBA16_SFLOAT:
+                            case VriFormat_R32_SFLOAT:
+                            case VriFormat_RGBA8_UNORM:
+                                r |= VriFormatSupport_StorageTexture;
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                }
+            }
+
+            if (HasGLVertexFormat(format))
+                r |= VriFormatSupport_VertexBuffer;
+
+            return r;
         }
         VriResult VRI_CALL GetQueue(VriDevice* device, VriQueueType type, uint32_t, VriQueue** outQueue)
         {

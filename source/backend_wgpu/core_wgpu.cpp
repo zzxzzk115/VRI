@@ -131,12 +131,62 @@ namespace vri::wgpu
         // ---- queries -------------------------------------------------------
         const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return &Dev(device)->Desc(); }
 
+        // Answered from the same tables that decide what this backend actually does.
+        // The previous reply claimed Texture|VertexBuffer for every format including
+        // ones ToWgpuFormat maps to Undefined, gave depth formats ColorAttachment|Blend,
+        // and never set DepthStencil at all - so the usual "probe a depth format, else
+        // fall back" pattern got no usable answer here. Report per format instead.
         VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat format)
         {
-            // Coarse: WebGPU guarantees these for common formats. Refined later.
-            VriFormatSupportFlags r = VriFormatSupport_Texture | VriFormatSupport_VertexBuffer;
-            if (ToWgpuFormat(format) != WGPUTextureFormat_Undefined)
-                r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
+            VriFormatSupportFlags r = VriFormatSupport_None;
+
+            // Depth32FloatStencil8 is behind the optional depth32float-stencil8
+            // feature, and DeviceWGPU::Init requests only the timestamp ones - so
+            // this device cannot create the format for ANY usage, however capable
+            // the adapter is. It has to drop out here rather than lower down: a
+            // caller probing for a sampled texture would act on a lone Texture bit
+            // just as readily as on DepthStencil, and hit the same validation
+            // failure at CreateTexture. Unusable is unusable; report nothing.
+            const bool usable =
+                ToWgpuFormat(format) != WGPUTextureFormat_Undefined && format != VriFormat_D32_SFLOAT_S8_UINT;
+
+            if (usable)
+            {
+                r |= VriFormatSupport_Texture; // sampleable, depth included (shadow maps)
+                if (vri::FormatIsDepthStencil(format))
+                {
+                    r |= VriFormatSupport_DepthStencil;
+                }
+                else
+                {
+                    // Every color format this backend maps is renderable in core
+                    // WebGPU, but blending is narrower: integer targets are never
+                    // blendable, and the 32-bit float ones only become blendable
+                    // with the optional float32-blendable feature, which
+                    // DeviceWGPU::Init does not request.
+                    r |= VriFormatSupport_ColorAttachment;
+                    switch (format)
+                    {
+                        case VriFormat_R8_UINT:
+                        case VriFormat_R32_UINT:
+                        case VriFormat_R32_SFLOAT:
+                        case VriFormat_RG32_SFLOAT:
+                        case VriFormat_RGBA32_SFLOAT:
+                            break;
+                        default:
+                            r |= VriFormatSupport_Blend;
+                            break;
+                    }
+                    // No StorageTexture: CreatePipelineLayout pins every
+                    // storage-texture binding to RGBA8Unorm, so a view of any other
+                    // format fails bind-group validation. Advertising the bit needs
+                    // that layout to carry the range's real format first.
+                }
+            }
+
+            if (HasWgpuVertexFormat(format))
+                r |= VriFormatSupport_VertexBuffer;
+
             return r;
         }
 
