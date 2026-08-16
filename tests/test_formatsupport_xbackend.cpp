@@ -52,16 +52,33 @@ namespace
         CHECK((d24s8 || d32s8));
         MESSAGE("[" << std::string(name) << "] depth+stencil: D24S8 " << d24s8 << ", D32S8 " << d32s8);
 
-        // 2b. And the answer is actionable: a format reported as DepthStencil has to
-        //     survive CreateTexture as a depth/stencil attachment. This is the part a
-        //     probe actually depends on -- a backend that reports a format its device
-        //     cannot create (an optional feature it never requested, say) sends the
-        //     caller past its fallback and into a failure it had asked to avoid.
-        const VriFormat combined[] = {VriFormat_D24_UNORM_S8_UINT, VriFormat_D32_SFLOAT_S8_UINT};
-        for (VriFormat f : combined)
+        // 2b. And every bit the reply sets is actionable: whatever it says a format is
+        //     good for, CreateTexture has to agree. This is the part a probe actually
+        //     depends on -- a backend that advertises a format its device cannot create
+        //     (an optional feature it never requested, say) sends the caller past its
+        //     fallback and into the failure it had asked to avoid. A partial claim is no
+        //     safer than a wrong one: a lone Texture bit on such a format gets acted on
+        //     just as readily as DepthStencil would.
+        const VriFormat probed[] = {
+            VriFormat_RGBA8_UNORM,
+            VriFormat_R32_SFLOAT,
+            VriFormat_D32_SFLOAT,
+            VriFormat_D24_UNORM_S8_UINT,
+            VriFormat_D32_SFLOAT_S8_UINT,
+        };
+        for (VriFormat f : probed)
         {
-            if (!Has(c.GetFormatSupport(dev, f), VriFormatSupport_DepthStencil))
-                continue;
+            const VriFormatSupportFlags s     = c.GetFormatSupport(dev, f);
+            VriTextureUsageFlags        usage = 0;
+            if (Has(s, VriFormatSupport_Texture))
+                usage |= VriTextureUsage_ShaderResource;
+            if (Has(s, VriFormatSupport_DepthStencil))
+                usage |= VriTextureUsage_DepthStencilAttachment;
+            else if (Has(s, VriFormatSupport_ColorAttachment))
+                usage |= VriTextureUsage_ColorAttachment;
+            if (usage == 0)
+                continue; // reported unusable; nothing is promised, nothing to check
+
             VriTextureDesc td {};
             td.type           = VriTextureType_2D;
             td.format         = f;
@@ -71,7 +88,7 @@ namespace
             td.mipNum         = 1;
             td.layerNum       = 1;
             td.sampleNum      = 1;
-            td.usage          = VriTextureUsage_DepthStencilAttachment;
+            td.usage          = usage;
             td.memoryLocation = VriMemoryLocation_Device;
             VriTexture* t     = nullptr;
             CHECK(c.CreateTexture(dev, &td, &t) == VriResult_Success);

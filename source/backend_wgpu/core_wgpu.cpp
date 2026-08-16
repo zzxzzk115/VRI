@@ -140,19 +140,22 @@ namespace vri::wgpu
         {
             VriFormatSupportFlags r = VriFormatSupport_None;
 
-            if (ToWgpuFormat(format) != WGPUTextureFormat_Undefined)
+            // Depth32FloatStencil8 is behind the optional depth32float-stencil8
+            // feature, and DeviceWGPU::Init requests only the timestamp ones - so
+            // this device cannot create the format for ANY usage, however capable
+            // the adapter is. It has to drop out here rather than lower down: a
+            // caller probing for a sampled texture would act on a lone Texture bit
+            // just as readily as on DepthStencil, and hit the same validation
+            // failure at CreateTexture. Unusable is unusable; report nothing.
+            const bool usable =
+                ToWgpuFormat(format) != WGPUTextureFormat_Undefined && format != VriFormat_D32_SFLOAT_S8_UINT;
+
+            if (usable)
             {
                 r |= VriFormatSupport_Texture; // sampleable, depth included (shadow maps)
                 if (vri::FormatIsDepthStencil(format))
                 {
-                    // Depth32FloatStencil8 is behind the optional
-                    // depth32float-stencil8 feature, and DeviceWGPU::Init requests
-                    // only the timestamp ones - so the created device cannot use it
-                    // however capable the adapter is. Reporting it would send a
-                    // caller past its D24S8 fallback (core, no feature needed) into
-                    // a validation failure at CreateTexture.
-                    if (format != VriFormat_D32_SFLOAT_S8_UINT)
-                        r |= VriFormatSupport_DepthStencil;
+                    r |= VriFormatSupport_DepthStencil;
                 }
                 else
                 {
