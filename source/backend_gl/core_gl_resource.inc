@@ -25,9 +25,12 @@
                     r |= VriFormatSupport_DepthStencil;
                 }
                 // A float texture is always sampleable, but rendering to one is core
-                // only on desktop GL; on ES/WebGL2 it needs EXT_color_buffer_float, and
-                // without it the framebuffer comes out incomplete.
-                else if (!IsGLFloatFormat(g) || caps.colorBufferFloat)
+                // only on desktop GL; on ES/WebGL2 it needs an extension, and without
+                // it the framebuffer comes out incomplete. The two widths are gated
+                // separately: an ES 3.0 context can carry
+                // EXT_color_buffer_half_float alone and render RGBA16F but not RGBA32F.
+                else if (!IsGLFloatFormat(g) ||
+                         (g.type == GL_HALF_FLOAT ? caps.colorBufferHalfFloat : caps.colorBufferFloat))
                 {
                     r |= VriFormatSupport_ColorAttachment | VriFormatSupport_Blend;
                     // Storage textures ride on image load/store, which is a property of

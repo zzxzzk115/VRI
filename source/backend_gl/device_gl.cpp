@@ -588,14 +588,18 @@ namespace vri::gl
             glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binFormats);
             f.programBinary = atLeast(4, 1) && binFormats > 0;
 #endif
-            f.colorBufferFloat = atLeast(3, 0); // core since GL 3.0
-            f.imageLoadStore   = atLeast(4, 2); // glBindImageTexture (macOS GL 4.1 misses it)
+            f.colorBufferFloat     = atLeast(3, 0); // core since GL 3.0
+            f.colorBufferHalfFloat = atLeast(3, 0);
+            f.imageLoadStore       = atLeast(4, 2); // glBindImageTexture (macOS GL 4.1 misses it)
         }
         else
         {
-            // ES/WebGL2: a float texture is sampleable but only renderable with the
+            // ES/WebGL2: a float texture is sampleable but only renderable with an
             // extension, and the storage-texture binding path is compiled out here.
-            f.colorBufferFloat = HasGLExtension("GL_EXT_color_buffer_float");
+            // EXT_color_buffer_float covers both widths; the half-float extension is
+            // the narrower one an ES 3.0 context may have on its own.
+            f.colorBufferFloat     = HasGLExtension("GL_EXT_color_buffer_float");
+            f.colorBufferHalfFloat = f.colorBufferFloat || HasGLExtension("GL_EXT_color_buffer_half_float");
         }
 #if defined(VRI_GL_ES_HEADERS)
         f.imageLoadStore = false; // the binding path does not exist in this build
