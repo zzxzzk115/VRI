@@ -39,6 +39,18 @@ namespace vri::vk
             VkBufferCreateInfo bci      = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
             bci.size                    = size ? size : 1;
             bci.usage                   = usage;
+            // Concurrent across the device's distinct families whenever there is more than one:
+            // acceleration structures are commonly consumed by ray queries on the compute queue,
+            // buffers have no compression to lose, and the barrier API deliberately has no
+            // queue-family ownership transfer. Covers scratch too - harmless.
+            uint32_t       families[VriQueueType_Count];
+            const uint32_t familyCount = d->DistinctQueueFamilies(families);
+            if (familyCount > 1)
+            {
+                bci.sharingMode           = VK_SHARING_MODE_CONCURRENT;
+                bci.queueFamilyIndexCount = familyCount;
+                bci.pQueueFamilyIndices   = families;
+            }
             VmaAllocationCreateInfo aci = {};
             aci.usage                   = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
             return vmaCreateBuffer(d->Allocator(), &bci, &aci, &buf, &alloc, nullptr) == VK_SUCCESS;
