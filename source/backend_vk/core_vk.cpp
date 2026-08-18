@@ -222,6 +222,18 @@ namespace vri::vk
             bci.size               = desc->size;
             bci.usage              = ToVkBufferUsage(desc->usage);
             bci.sharingMode        = VK_SHARING_MODE_EXCLUSIVE;
+            uint32_t families[VriQueueType_Count];
+            if (desc->usage & VriBufferUsage_ConcurrentQueues)
+            {
+                // Cross-queue use without ownership-transfer barriers. Degrades to EXCLUSIVE
+                // on single-family devices, where the flag is meaningless.
+                if (const uint32_t n = d->DistinctQueueFamilies(families); n > 1)
+                {
+                    bci.sharingMode           = VK_SHARING_MODE_CONCURRENT;
+                    bci.queueFamilyIndexCount = n;
+                    bci.pQueueFamilyIndices   = families;
+                }
+            }
 
             VkBuffer      buffer = VK_NULL_HANDLE;
             VmaAllocation alloc  = VK_NULL_HANDLE;
@@ -308,6 +320,18 @@ namespace vri::vk
             ici.usage             = ToVkImageUsage(desc->usage);
             ici.sharingMode       = VK_SHARING_MODE_EXCLUSIVE;
             ici.initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+            uint32_t families[VriQueueType_Count];
+            if (desc->usage & VriTextureUsage_ConcurrentQueues)
+            {
+                // See CreateBuffer: concurrent across the distinct families, or EXCLUSIVE when
+                // the device only has one.
+                if (const uint32_t n = d->DistinctQueueFamilies(families); n > 1)
+                {
+                    ici.sharingMode           = VK_SHARING_MODE_CONCURRENT;
+                    ici.queueFamilyIndexCount = n;
+                    ici.pQueueFamilyIndices   = families;
+                }
+            }
             if (desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray)
                 ici.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
@@ -371,6 +395,17 @@ namespace vri::vk
             bci.size               = desc->size;
             bci.usage              = ToVkBufferUsage(desc->usage);
             bci.sharingMode        = VK_SHARING_MODE_EXCLUSIVE;
+            // Mirror CreateBuffer's sharing mode: requirements may legally depend on it.
+            uint32_t families[VriQueueType_Count];
+            if (desc->usage & VriBufferUsage_ConcurrentQueues)
+            {
+                if (const uint32_t n = Dev(device)->DistinctQueueFamilies(families); n > 1)
+                {
+                    bci.sharingMode           = VK_SHARING_MODE_CONCURRENT;
+                    bci.queueFamilyIndexCount = n;
+                    bci.pQueueFamilyIndices   = families;
+                }
+            }
 
             // Query via a throwaway VkBuffer + core-1.0 vkGetBufferMemoryRequirements rather than
             // the 1.3 vkGetDeviceBufferMemoryRequirements: MoltenVK reports apiVersion 1.2, where
@@ -407,6 +442,17 @@ namespace vri::vk
             ici.usage             = ToVkImageUsage(desc->usage);
             ici.sharingMode       = VK_SHARING_MODE_EXCLUSIVE;
             ici.initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+            // Mirror CreateTexture's sharing mode: requirements may legally depend on it.
+            uint32_t families[VriQueueType_Count];
+            if (desc->usage & VriTextureUsage_ConcurrentQueues)
+            {
+                if (const uint32_t n = Dev(device)->DistinctQueueFamilies(families); n > 1)
+                {
+                    ici.sharingMode           = VK_SHARING_MODE_CONCURRENT;
+                    ici.queueFamilyIndexCount = n;
+                    ici.pQueueFamilyIndices   = families;
+                }
+            }
 
             // Query via a throwaway VkImage + core-1.0 vkGetImageMemoryRequirements rather than
             // the 1.3 vkGetDeviceImageMemoryRequirements: MoltenVK reports apiVersion 1.2, where
