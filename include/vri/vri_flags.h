@@ -30,6 +30,11 @@ typedef enum VriBufferUsageBits
     VriBufferUsage_AccelerationStorage    = 1u << 9,
     VriBufferUsage_ShaderBindingTable     = 1u << 10,
     VriBufferUsage_MicromapBuildInput     = 1u << 11,
+    /* Create with concurrent queue-family sharing (Vulkan: VK_SHARING_MODE_CONCURRENT across
+       the device's distinct graphics/compute/transfer families), so the resource is usable
+       from more than one queue without ownership-transfer barriers. No-op on backends without
+       family ownership and on single-family devices. */
+    VriBufferUsage_ConcurrentQueues       = 1u << 12,
     VriBufferUsage_MaxEnum           = 0x7fffffff
 } VriBufferUsageBits;
 
@@ -44,6 +49,8 @@ typedef enum VriTextureUsageBits
     VriTextureUsage_ShaderResourceStorage = 1u << 3,  /* storage image / UAV */
     VriTextureUsage_ColorAttachment       = 1u << 4,
     VriTextureUsage_DepthStencilAttachment = 1u << 5,
+    /* See VriBufferUsage_ConcurrentQueues. */
+    VriTextureUsage_ConcurrentQueues      = 1u << 6,
     VriTextureUsage_MaxEnum               = 0x7fffffff
 } VriTextureUsageBits;
 

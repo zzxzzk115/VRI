@@ -76,6 +76,23 @@ namespace vri::vk
         void ReportError(const char* message) const;
         void ReportWarning(const char* message) const;
 
+        // Distinct queue-family indices among graphics/compute/transfer, for
+        // VK_SHARING_MODE_CONCURRENT resource creation (Vri*Usage_ConcurrentQueues).
+        // Returns the count written to out (<= VriQueueType_Count).
+        uint32_t DistinctQueueFamilies(uint32_t out[VriQueueType_Count]) const
+        {
+            uint32_t count = 0;
+            for (uint32_t t = 0; t < VriQueueType_Count; ++t)
+            {
+                bool seen = false;
+                for (uint32_t i = 0; i < count; ++i)
+                    seen = seen || out[i] == m_queueFamilies[t];
+                if (!seen)
+                    out[count++] = m_queueFamilies[t];
+            }
+            return count;
+        }
+
     private:
         VriResult CreateInstance(const VriDeviceCreationDesc& desc);
         VriResult PickPhysicalDevice(uint32_t adapterIndex);
