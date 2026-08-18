@@ -36,9 +36,9 @@ namespace vri::vk
 
         bool MakeBuffer(DeviceVK* d, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buf, VmaAllocation& alloc)
         {
-            VkBufferCreateInfo bci      = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-            bci.size                    = size ? size : 1;
-            bci.usage                   = usage;
+            VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            bci.size               = size ? size : 1;
+            bci.usage              = usage;
             // Concurrent across the device's distinct families whenever there is more than one:
             // acceleration structures are commonly consumed by ray queries on the compute queue,
             // buffers have no compression to lose, and the barrier API deliberately has no

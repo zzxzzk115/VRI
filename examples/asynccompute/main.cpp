@@ -38,20 +38,20 @@ namespace
 
     // Everything a batch needs, file-scope: an example is a singleton and the recording path
     // is shared by the pre-loop priming batch and the per-frame one.
-    VriBuffer*           g_ubo = nullptr, *g_ustg = nullptr;
-    VriTexture*          g_img[2]        = {};
-    VriDescriptorSet*    g_computeSet[2] = {};
-    VriDescriptorSet*    g_displaySet[2] = {};
+    VriBuffer *          g_ubo = nullptr, *g_ustg = nullptr;
+    VriTexture*          g_img[2]          = {};
+    VriDescriptorSet*    g_computeSet[2]   = {};
+    VriDescriptorSet*    g_displaySet[2]   = {};
     VriPipelineLayout*   g_computeLayout   = nullptr;
     VriPipeline*         g_computePipeline = nullptr;
-    VriQueue*            g_computeQueue = nullptr;
-    VriCommandAllocator* g_computeAlloc = nullptr;
-    VriCommandBuffer*    g_computeCmd   = nullptr;
-    VriFence*            g_computeFence = nullptr;
-    uint64_t             g_computeValue = 0;
-    uint64_t             g_frameValue   = 0; // mirrored from onUpdate for onRecord
-    bool                 g_imgInit[2]   = {false, false};
-    float                g_time         = 0.0f;
+    VriQueue*            g_computeQueue    = nullptr;
+    VriCommandAllocator* g_computeAlloc    = nullptr;
+    VriCommandBuffer*    g_computeCmd      = nullptr;
+    VriFence*            g_computeFence    = nullptr;
+    uint64_t             g_computeValue    = 0;
+    uint64_t             g_frameValue      = 0; // mirrored from onUpdate for onRecord
+    bool                 g_imgInit[2]      = {false, false};
+    float                g_time            = 0.0f;
 
     // Record one plasma batch into g_img[slot] and submit it on the compute queue.
     // waitGraphicsValue > 0 adds the GPU-side cross-queue wait on the app's frame fence -
@@ -157,9 +157,8 @@ int main(int, char**)
 
     c.GetQueue(app.dev, VriQueueType_Compute, 0, &g_computeQueue);
     std::printf("[asynccompute] compute queue %s\n",
-                g_computeQueue == app.queue
-                    ? "aliases graphics (no dedicated queue) - correct, just serialized"
-                    : "is dedicated - the plasma overlaps the graphics frame");
+                g_computeQueue == app.queue ? "aliases graphics (no dedicated queue) - correct, just serialized" :
+                                              "is dedicated - the plasma overlaps the graphics frame");
     std::fflush(stdout);
 
     // ---- shared params (host writes, compute queue copies + reads) ---------------------
@@ -189,16 +188,16 @@ int main(int, char**)
     for (int i = 0; i < 2; ++i)
     {
         VriTextureDesc td {};
-        td.type           = VriTextureType_2D;
-        td.format         = VriFormat_RGBA8_UNORM;
-        td.width          = kWidth;
-        td.height         = kHeight;
-        td.depth          = 1;
-        td.mipNum         = 1;
-        td.layerNum       = 1;
-        td.sampleNum      = 1;
-        td.usage          = VriTextureUsage_ShaderResourceStorage | VriTextureUsage_ShaderResource |
-                   VriTextureUsage_ConcurrentQueues;
+        td.type      = VriTextureType_2D;
+        td.format    = VriFormat_RGBA8_UNORM;
+        td.width     = kWidth;
+        td.height    = kHeight;
+        td.depth     = 1;
+        td.mipNum    = 1;
+        td.layerNum  = 1;
+        td.sampleNum = 1;
+        td.usage =
+            VriTextureUsage_ShaderResourceStorage | VriTextureUsage_ShaderResource | VriTextureUsage_ConcurrentQueues;
         td.memoryLocation = VriMemoryLocation_Device;
         if (c.CreateTexture(app.dev, &td, &g_img[i]) != VriResult_Success)
             app.Fail("CreateTexture (storage) failed");
@@ -250,8 +249,8 @@ int main(int, char**)
     }
     else
     {
-        cpd.shader.bytecode     = app.useWgsl ? static_cast<const void*>(g_computePlasmaWgsl) :
-                                                static_cast<const void*>(g_computePlasmaSpv);
+        cpd.shader.bytecode =
+            app.useWgsl ? static_cast<const void*>(g_computePlasmaWgsl) : static_cast<const void*>(g_computePlasmaSpv);
         cpd.shader.bytecodeSize = app.useWgsl ? sizeof(g_computePlasmaWgsl) : sizeof(g_computePlasmaSpv);
     }
     if (c.CreateComputePipeline(app.dev, &cpd, &g_computePipeline) != VriResult_Success)
@@ -298,15 +297,15 @@ int main(int, char**)
     ca.format         = app.swapFormat;
     ca.colorWriteMask = VriColorWrite_RGBA;
     VriGraphicsPipelineDesc pd {};
-    pd.pipelineLayout          = displayLayout;
-    pd.shaders                 = sh;
-    pd.shaderNum               = 2;
-    pd.inputAssembly.topology  = VriPrimitiveTopology_TriangleList;
-    pd.rasterization.cullMode  = VriCullMode_None;
-    pd.rasterization.lineWidth = 1.0f;
-    pd.multisample.sampleNum   = 1;
-    pd.outputMerger.colors     = &ca;
-    pd.outputMerger.colorNum   = 1;
+    pd.pipelineLayout            = displayLayout;
+    pd.shaders                   = sh;
+    pd.shaderNum                 = 2;
+    pd.inputAssembly.topology    = VriPrimitiveTopology_TriangleList;
+    pd.rasterization.cullMode    = VriCullMode_None;
+    pd.rasterization.lineWidth   = 1.0f;
+    pd.multisample.sampleNum     = 1;
+    pd.outputMerger.colors       = &ca;
+    pd.outputMerger.colorNum     = 1;
     VriPipeline* displayPipeline = nullptr;
     if (c.CreateGraphicsPipeline(app.dev, &pd, &displayPipeline) != VriResult_Success)
         app.Fail("CreateGraphicsPipeline failed");
@@ -360,8 +359,7 @@ int main(int, char**)
         // This batch writes img[frameValue&1]; today's graphics frame samples the OTHER slot.
         // The GPU-side wait on the previous graphics frame keeps the pattern correct even in
         // a pipelined host (it is already satisfied in this synchronous one).
-        SubmitPlasmaBatch(static_cast<uint32_t>(frameValue & 1),
-                          frameValue > 1 ? frameValue - 1 : 0);
+        SubmitPlasmaBatch(static_cast<uint32_t>(frameValue & 1), frameValue > 1 ? frameValue - 1 : 0);
     };
 
     app.onRecord = [displayPipeline, displayLayout](VriCommandBuffer* cmd) {
