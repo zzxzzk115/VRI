@@ -9,6 +9,9 @@ local _vri_examples = {
     {name = "pushconstants"},
     {name = "normalmapping"},
     {name = "computeshader"},
+    -- Plasma on the dedicated compute queue, overlapping the graphics frame: concurrent
+    -- queue-family sharing (Vri*Usage_ConcurrentQueues) + cross-queue timeline fences.
+    {name = "asynccompute"},
     {name = "offscreen"},
     {name = "descriptorindexing"},
     {name = "shadowmapping"},
