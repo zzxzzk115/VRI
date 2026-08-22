@@ -262,6 +262,7 @@ namespace vri::vk
             if (!as)
                 return;
             AccelerationStructureVK* a = AS(as);
+            a->device->Objects().Untrack(as);
             if (a->compactedSizePool)
                 vkDestroyQueryPool(a->device->Device(), a->compactedSizePool, nullptr);
             a->device->Ext().DestroyAccelerationStructure(a->device->Device(), a->as, nullptr);
@@ -507,7 +508,16 @@ namespace vri::vk
                 VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
             ai.accelerationStructure = a->as;
             a->deviceAddress         = d->Ext().GetAccelerationStructureDeviceAddress(d->Device(), &ai);
-            *out                     = ToHandle(a);
+            {
+                // Tracked like any other structure. It is a fresh object with a fresh handle, so
+                // the caller's SetDebugName after a compaction lands here and not on the source
+                // it replaced - and the source is untracked when it is destroyed.
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_AccelerationStructure);
+                info.memoryBytes   = size;
+                info.width         = static_cast<uint32_t>(size / 1024u);
+                d->Objects().Track(ToHandle(a), info); // height stays 0: compacted, no scratch
+            }
+            *out = ToHandle(a);
             return VriResult_Success;
         }
 

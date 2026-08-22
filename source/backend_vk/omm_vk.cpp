@@ -107,6 +107,13 @@ namespace vri::vk
             const VkDeviceAddress sbase = BufAddr(d, m->scratch);
             m->scratchAddress = (sbase + scratchAlign - 1) & ~(static_cast<VkDeviceAddress>(scratchAlign) - 1);
 
+            {
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Micromap);
+                info.memoryBytes   = sizes.micromapSize + sizes.buildScratchSize + scratchAlign;
+                info.width         = static_cast<uint32_t>(sizes.micromapSize / 1024u);
+                info.height        = static_cast<uint32_t>((sizes.buildScratchSize + scratchAlign) / 1024u);
+                d->Objects().Track(ToHandle(m), info);
+            }
             *out = ToHandle(m);
             return VriResult_Success;
         }
@@ -116,6 +123,7 @@ namespace vri::vk
             if (!micromap)
                 return;
             MicromapVK* m = MM(micromap);
+            m->device->Objects().Untrack(micromap);
             m->device->Ext().DestroyMicromap(m->device->Device(), m->micromap, nullptr);
             vmaDestroyBuffer(m->device->Allocator(), m->buffer, m->bufferAlloc);
             vmaDestroyBuffer(m->device->Allocator(), m->scratch, m->scratchAlloc);
