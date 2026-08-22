@@ -24,6 +24,8 @@ namespace vri::vk
         VkInstance           Instance() const { return m_instance; }
         VkPhysicalDevice     PhysicalDevice() const { return m_physicalDevice; }
         bool                 HasMemoryBudget() const { return m_hasMemoryBudget; }
+        bool                 HasMemoryPriority() const { return m_hasMemoryPriority; }
+        bool                 HasPageableDeviceLocalMemory() const { return m_hasPageableDeviceLocalMemory; }
         VkDevice             Device() const { return m_device; }
         VmaAllocator         Allocator() const { return m_allocator; }
         const VriDeviceDesc& Desc() const { return m_desc; }
@@ -119,19 +121,21 @@ namespace vri::vk
         // hooks (which forward to xrCreateVulkan*KHR). Borrowed from the caller's nativeCreateInfo.
         const VriVulkanCreateHooks* m_vkHooks = nullptr;
         // Always-on-if-available pipeline-state extensions (capabilities, not opt-in features).
-        bool            m_hasConservativeRaster   = false;
-        bool            m_hasBarycentric          = false;
-        bool            m_hasCustomBorderColor    = false;
-        bool            m_hasPipelineStats        = false;
-        bool            m_hasSamplerAnisotropy    = false;
-        float           m_maxSamplerAnisotropy    = 1.0f;
-        bool            m_hasCalibratedTimestamps = false;
-        bool            m_hasDrawIndirectCount    = false;
-        bool            m_hasMemoryBudget         = false;
-        bool            m_hasMultiview            = false;
-        uint32_t        m_maxViewCount            = 0;
-        VkTimeDomainKHR m_hostTimeDomain          = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
-        ExtFunctions    m_ext                     = {};
+        bool            m_hasConservativeRaster        = false;
+        bool            m_hasBarycentric               = false;
+        bool            m_hasCustomBorderColor         = false;
+        bool            m_hasPipelineStats             = false;
+        bool            m_hasSamplerAnisotropy         = false;
+        float           m_maxSamplerAnisotropy         = 1.0f;
+        bool            m_hasCalibratedTimestamps      = false;
+        bool            m_hasDrawIndirectCount         = false;
+        bool            m_hasMemoryBudget              = false;
+        bool            m_hasMemoryPriority            = false;
+        bool            m_hasPageableDeviceLocalMemory = false;
+        bool            m_hasMultiview                 = false;
+        uint32_t        m_maxViewCount                 = 0;
+        VkTimeDomainKHR m_hostTimeDomain = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
+        ExtFunctions    m_ext            = {};
 
         VriDeviceDesc        m_desc     = {};
         VriCallbackInterface m_callback = {};
