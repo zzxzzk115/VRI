@@ -235,6 +235,21 @@ typedef struct VriRayTracingInterface
                                                  VriAccelerationStructure* dst,
                                                  VriAccelerationStructure* src,
                                                  VriBool                   compact);
+
+    /* Free the AS's BUILD SCRATCH, keeping the structure itself usable for tracing.
+       vkGetAccelerationStructureBuildSizesKHR' scratch requirement is comparable to the structure
+       it builds - a 462-geometry BLAS over 8.5 M vertices measured 999.7 MB of store against
+       735.1 MB of scratch - and CreateAccelerationStructure allocates it up front and holds it for
+       the object's whole life. A static scene builds once and never again, so on a card where the
+       working set is near the VRAM budget that is a large allocation bought for one submit and
+       then paid for forever.
+
+       ONLY call this once the submission that built the AS has completed (its fence signalled);
+       the scratch is still referenced until then. After it, the AS traces exactly as before but
+       CANNOT be rebuilt - a further CmdBuildAccelerationStructure on it reports an error and does
+       nothing. Calling it twice, or on an AS created by CreateAccelerationStructureCompacted
+       (which never allocates scratch), is a no-op. */
+    void(VRI_CALL* ReleaseAccelerationStructureScratch)(VriAccelerationStructure* as);
 } VriRayTracingInterface;
 
 VRI_EXTERN_C_END

@@ -1093,7 +1093,10 @@ namespace vri::core
             w.CmdWriteAccelerationStructureCompactedSize = RtCmdWriteAccelerationStructureCompactedSize;
             w.CreateAccelerationStructureCompacted       = RtCreateAccelerationStructureCompacted;
             w.CmdCopyAccelerationStructure               = RtCmdCopyAccelerationStructure;
-            *static_cast<VriRayTracingInterface*>(out)   = w;
+            // No state to validate: freeing scratch is legal at any time the caller has already
+            // synchronised, which is a fence the layer cannot see.
+            w.ReleaseAccelerationStructureScratch      = d->rt.ReleaseAccelerationStructureScratch;
+            *static_cast<VriRayTracingInterface*>(out) = w;
             return VriResult_Success;
         }
         if (nameIs(VRI_INTERFACE_OMM))

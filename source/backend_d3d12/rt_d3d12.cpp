@@ -522,6 +522,8 @@ namespace vri::d3d12
             CmdWriteAccelerationStructureCompactedSize,
             CreateAccelerationStructureCompacted,
             CmdCopyAccelerationStructure,
+            // D3D12 scratch is caller-owned, so there is nothing for the backend to release.
+            nullptr,
         };
     } // namespace
 

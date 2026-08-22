@@ -6,6 +6,7 @@
 // result without the app inserting one. RT pipelines reuse PipelineVK (bind point
 // RAY_TRACING). The SBT itself is built by the app from GetShaderGroupHandles.
 #include "rt_vk.h"
+#include <cstdio>
 
 #include "conversions_vk.h"
 #include "device_vk.h"
@@ -231,6 +232,8 @@ namespace vri::vk
                 delete a;
                 return VriResult_OutOfMemory;
             }
+            // Temporary probe: how much of a scene's VRAM is acceleration structure, and how much
+            // of THAT is scratch a static scene never builds into again.
             const VkDeviceAddress sbase = BufAddr(d, a->scratch);
             a->scratchAddress = (sbase + scratchAlign - 1) & ~(static_cast<VkDeviceAddress>(scratchAlign) - 1);
 
@@ -252,7 +255,8 @@ namespace vri::vk
                 vkDestroyQueryPool(a->device->Device(), a->compactedSizePool, nullptr);
             a->device->Ext().DestroyAccelerationStructure(a->device->Device(), a->as, nullptr);
             vmaDestroyBuffer(a->device->Allocator(), a->buffer, a->bufferAlloc);
-            vmaDestroyBuffer(a->device->Allocator(), a->scratch, a->scratchAlloc);
+            if (a->scratch != VK_NULL_HANDLE)
+                vmaDestroyBuffer(a->device->Allocator(), a->scratch, a->scratchAlloc);
             delete a;
         }
 
@@ -365,6 +369,15 @@ namespace vri::vk
             CommandBufferVK*         c = CB(cmd);
             DeviceVK*                d = c->device;
             AccelerationStructureVK* a = AS(desc->dst);
+
+            // ReleaseAccelerationStructureScratch dropped the scratch this build would write
+            // through. Diagnose rather than hand the driver a null device address.
+            if (a->scratch == VK_NULL_HANDLE)
+            {
+                d->ReportError("CmdBuildAccelerationStructure: scratch was released; the AS can no "
+                               "longer be rebuilt");
+                return;
+            }
 
             GeomBuild gb;
             BuildGeoms(d, desc->geometry, true, gb);
@@ -501,6 +514,17 @@ namespace vri::vk
             s->device->Ext().CmdCopyAccelerationStructure(CB(cmd)->cmd, &info);
         }
 
+        void VRI_CALL ReleaseAccelerationStructureScratch(VriAccelerationStructure* as)
+        {
+            AccelerationStructureVK* a = AS(as);
+            if (a == nullptr || a->scratch == VK_NULL_HANDLE)
+                return; // never allocated (compacted destination) or already released
+            vmaDestroyBuffer(a->device->Allocator(), a->scratch, a->scratchAlloc);
+            a->scratch        = VK_NULL_HANDLE;
+            a->scratchAlloc   = VK_NULL_HANDLE;
+            a->scratchAddress = 0;
+        }
+
         const VriRayTracingInterface g_rtVK = {
             CreateAccelerationStructure,
             DestroyAccelerationStructure,
@@ -513,6 +537,7 @@ namespace vri::vk
             CmdWriteAccelerationStructureCompactedSize,
             CreateAccelerationStructureCompacted,
             CmdCopyAccelerationStructure,
+            ReleaseAccelerationStructureScratch,
         };
     } // namespace
 
