@@ -10,6 +10,7 @@
 #include <vri/vri_structs.h>
 
 #include "interface_registry.h"
+#include "object_registry.h"
 
 namespace vri::core
 {
@@ -23,7 +24,15 @@ namespace vri::core
             return m_registry.Get(name, size, out);
         }
 
+        // Lives here rather than in each backend so EnumerateObjects means the same thing on all
+        // of them and a new backend cannot ship a silently partial listing. The backend supplies
+        // only the size, which is the one part that cannot be shared - VMA's allocation info,
+        // D3D12's GetResourceAllocationInfo, Metal's allocatedSize.
+        ObjectRegistry&       Objects() { return m_objects; }
+        const ObjectRegistry& Objects() const { return m_objects; }
+
     protected:
         InterfaceRegistry m_registry;
+        ObjectRegistry    m_objects;
     };
 } // namespace vri::core

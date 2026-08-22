@@ -59,6 +59,7 @@ namespace vri::vk
         VmaAllocation                  scratchAlloc;
         VkDeviceAddress                deviceAddress;
         VkDeviceAddress                scratchAddress;
+        uint64_t                       scratchSizeBytes = 0; // for the object registry's accounting
         VkAccelerationStructureTypeKHR type;
         // Transient query pool for the compacted-size query (lazily created; freed with the AS).
         VkQueryPool compactedSizePool = VK_NULL_HANDLE;

@@ -234,6 +234,17 @@ namespace vri::vk
             }
             // Temporary probe: how much of a scene's VRAM is acceleration structure, and how much
             // of THAT is scratch a static scene never builds into again.
+            a->scratchSizeBytes = sizes.buildScratchSize + scratchAlign;
+            {
+                // The case that motivated object tracking: a 462-geometry BLAS is 999.7 MB of
+                // store plus 735.1 MB of scratch, and nothing in the API could report either.
+                // width/height carry the split so a listing can show what a release would return.
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_AccelerationStructure);
+                info.memoryBytes   = sizes.accelerationStructureSize + sizes.buildScratchSize + scratchAlign;
+                info.width         = static_cast<uint32_t>(sizes.accelerationStructureSize / 1024u);
+                info.height        = static_cast<uint32_t>((sizes.buildScratchSize + scratchAlign) / 1024u);
+                d->Objects().Track(ToHandle(a), info);
+            }
             const VkDeviceAddress sbase = BufAddr(d, a->scratch);
             a->scratchAddress = (sbase + scratchAlign - 1) & ~(static_cast<VkDeviceAddress>(scratchAlign) - 1);
 
@@ -519,6 +530,9 @@ namespace vri::vk
             AccelerationStructureVK* a = AS(as);
             if (a == nullptr || a->scratch == VK_NULL_HANDLE)
                 return; // never allocated (compacted destination) or already released
+            // Keep the tracked footprint honest: a listing that still showed the scratch after it
+            // was freed would be worse than not tracking at all.
+            a->device->Objects().Shrink(ToHandle(a), a->scratchSizeBytes, 0);
             vmaDestroyBuffer(a->device->Allocator(), a->scratch, a->scratchAlloc);
             a->scratch        = VK_NULL_HANDLE;
             a->scratchAlloc   = VK_NULL_HANDLE;

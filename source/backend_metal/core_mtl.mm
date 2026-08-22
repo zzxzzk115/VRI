@@ -333,6 +333,15 @@ namespace vri::mtl
                 if (!b->buffer) { delete b; return VriResult_OutOfMemory; }
                 b->owned = true;
             }
+            {
+                // allocatedSize is Metal's own figure for what the resource cost, so it includes
+                // whatever padding the implementation applied - the counterpart of VMA's
+                // allocation info and D3D12's GetResourceAllocationInfo.
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Buffer);
+                info.memoryBytes   = b->buffer ? (uint64_t)[b->buffer allocatedSize] : 0;
+                info.width         = (uint32_t)desc->size;
+                d->Objects().Track(ToHandle(b), info);
+            }
             *out = ToHandle(b);
             return VriResult_Success;
         }
@@ -341,6 +350,7 @@ namespace vri::mtl
         {
             if (!buffer) return;
             BufferMTL* b = Buf(buffer);
+            b->device->Objects().Untrack(buffer);
             if (b->owned && b->buffer) [b->buffer release];
             delete b;
         }
@@ -429,6 +439,17 @@ namespace vri::mtl
                 if (!t->texture) { delete t; return VriResult_OutOfMemory; }
                 t->owned = true;
             }
+            {
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Texture);
+                info.memoryBytes   = t->texture ? (uint64_t)[t->texture allocatedSize] : 0;
+                info.width         = t->width;
+                info.height        = t->height;
+                info.depth         = t->depth;
+                info.mipNum        = t->mipNum;
+                info.layerNum      = t->layerNum;
+                info.format        = desc->format;
+                d->Objects().Track(ToHandle(t), info);
+            }
             *out = ToHandle(t);
             return VriResult_Success;
         }
@@ -437,6 +458,7 @@ namespace vri::mtl
         {
             if (!texture) return;
             TextureMTL* t = Tex(texture);
+            t->device->Objects().Untrack(texture);
             if (t->owned && t->texture) [t->texture release];
             if (t->descriptor) [t->descriptor release];
             delete t;
@@ -1524,7 +1546,26 @@ namespace vri::mtl
             [c commit];
             [c waitUntilCompleted];
         }
-        void VRI_CALL SetDebugName(void*, const char*) {} // type-erased handle; no-op for MVP
+        // Was a no-op. It records the label against the tracked object, which is what makes an
+        // EnumerateObjects listing readable - without it every row is a pointer and a size. Every
+        // backend object struct begins with its owning device, which is what lets one entry point
+        // name any of them without a per-type dispatch table.
+        void VRI_CALL SetDebugName(void* object, const char* name)
+        {
+            if (object == nullptr)
+                return;
+            DeviceMTL* d = *reinterpret_cast<DeviceMTL**>(object);
+            if (d != nullptr)
+                d->Objects().SetName(object, name);
+        }
+
+        VriResult VRI_CALL EnumerateObjects(const VriDevice* device, uint32_t* count, VriObjectInfo* out)
+        {
+            if (device == nullptr)
+                return VriResult_InvalidArgument;
+            return Dev(const_cast<VriDevice*>(device))->Objects().Snapshot(count, out);
+        }
+
 
         VriCoreInterface MakeTable()
         {
@@ -1598,6 +1639,7 @@ namespace vri::mtl
             t.QueueWaitIdle = QueueWaitIdle;
             t.DeviceWaitIdle = DeviceWaitIdle;
             t.SetDebugName          = SetDebugName;
+            t.EnumerateObjects = EnumerateObjects;
             t.GetVideoMemoryInfo    = GetVideoMemoryInfo;
             t.CmdClearStorageBuffer  = CmdClearStorageBuffer;
             t.CmdClearStorageTexture = CmdClearStorageTexture;

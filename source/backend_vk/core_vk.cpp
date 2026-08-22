@@ -260,6 +260,19 @@ namespace vri::vk
             return vkEndCommandBuffer(CB(cmd)->cmd) == VK_SUCCESS ? VriResult_Success : VriResult_Failure;
         }
 
+        // Bytes VMA actually reserved, which is the only figure worth reporting: recomputing a
+        // size from the desc misses alignment, tiling and the mip tail, and those are exactly
+        // where a deferred renderer's transients hide. 0 for a wrapped or dedicated-memory object
+        // that VMA does not own.
+        [[nodiscard]] uint64_t AllocatedBytes(DeviceVK* d, VmaAllocation alloc)
+        {
+            if (alloc == VK_NULL_HANDLE)
+                return 0;
+            VmaAllocationInfo info = {};
+            vmaGetAllocationInfo(d->Allocator(), alloc, &info);
+            return info.size;
+        }
+
         // ---- resources -----------------------------------------------------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
@@ -308,7 +321,14 @@ namespace vri::vk
                     return VriResult_OutOfMemory;
             }
 
-            *out = ToHandle(new BufferVK {d, buffer, alloc, desc->size});
+            BufferVK* b = new BufferVK {d, buffer, alloc, desc->size};
+            {
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Buffer);
+                info.memoryBytes   = AllocatedBytes(d, alloc);
+                info.width         = static_cast<uint32_t>(desc->size);
+                d->Objects().Track(ToHandle(b), info);
+            }
+            *out = ToHandle(b);
             return VriResult_Success;
         }
 
@@ -317,6 +337,7 @@ namespace vri::vk
             if (!buffer)
                 return;
             BufferVK* b = Buf(buffer);
+            b->device->Objects().Untrack(buffer);
             if (b->allocation)
                 vmaDestroyBuffer(b->device->Allocator(), b->buffer, b->allocation);
             else if (b->dedicatedMemory)
@@ -409,7 +430,18 @@ namespace vri::vk
             t->layerNum   = ici.arrayLayers;
             t->type       = ici.imageType;
             t->owned      = true;
-            *out          = ToHandle(t);
+            {
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Texture);
+                info.memoryBytes   = AllocatedBytes(d, alloc);
+                info.width         = ici.extent.width;
+                info.height        = ici.extent.height;
+                info.depth         = ici.extent.depth;
+                info.mipNum        = ici.mipLevels;
+                info.layerNum      = ici.arrayLayers;
+                info.format        = desc->format;
+                d->Objects().Track(ToHandle(t), info);
+            }
+            *out = ToHandle(t);
             return VriResult_Success;
         }
 
@@ -418,6 +450,7 @@ namespace vri::vk
             if (!texture)
                 return;
             TextureVK* t = Tex(texture);
+            t->device->Objects().Untrack(texture);
             if (t->owned && t->allocation)
                 vmaDestroyImage(t->device->Allocator(), t->image, t->allocation);
             else if (t->owned && t->dedicatedMemory)
@@ -1711,7 +1744,30 @@ namespace vri::vk
 
         void VRI_CALL QueueWaitIdle(VriQueue* queue) { vkQueueWaitIdle(Q(queue)->queue); }
         void VRI_CALL DeviceWaitIdle(VriDevice* device) { vkDeviceWaitIdle(Dev(device)->Device()); }
-        void VRI_CALL SetDebugName(void*, const char*) {}
+        // Was a no-op. It now records the label against the tracked object, which is what makes an
+        // EnumerateObjects listing readable - without it every row is a pointer and a size.
+        //
+        // The Vulkan-side name (VK_EXT_debug_utils) is deliberately NOT set from here: the handle
+        // is an opaque VRI pointer and mapping it back to the right VkObjectType per object kind
+        // would be a second dispatch table with its own drift. RenderDoc reads the group markers
+        // this backend already emits.
+        void VRI_CALL SetDebugName(void* object, const char* name)
+        {
+            if (object == nullptr)
+                return;
+            // Every tracked object stores its device as its first member, which is what lets one
+            // entry point name any of them without a type tag.
+            DeviceVK* d = *reinterpret_cast<DeviceVK**>(object);
+            if (d != nullptr)
+                d->Objects().SetName(object, name);
+        }
+
+        VriResult VRI_CALL EnumerateObjects(const VriDevice* device, uint32_t* count, VriObjectInfo* out)
+        {
+            if (device == nullptr)
+                return VriResult_InvalidArgument;
+            return Dev(const_cast<VriDevice*>(device))->Objects().Snapshot(count, out);
+        }
 
         const VriCoreInterface g_coreVK = {
             GetDeviceDesc,
@@ -1786,6 +1842,7 @@ namespace vri::vk
             GetVideoMemoryInfo,
             CmdClearStorageBuffer,
             CmdClearStorageTexture,
+            EnumerateObjects,
         };
     } // namespace
 

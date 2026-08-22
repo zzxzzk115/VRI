@@ -110,6 +110,7 @@ namespace vri::d3d12
             GetVideoMemoryInfo,
             CmdClearStorageBuffer,
             CmdClearStorageTexture,
+            EnumerateObjects,
         };
         return &t;
     }

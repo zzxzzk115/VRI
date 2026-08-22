@@ -960,14 +960,16 @@ namespace vri::core
             t.CmdCopyBuffer               = CmdCopyBuffer;
             t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             t.CmdClearStorageTexture      = CmdClearStorageTexture;
-            t.CmdCopyTexture              = CmdCopyTexture;
-            t.CmdUploadBufferToTexture    = CmdUploadBufferToTexture;
-            t.CmdReadbackTextureToBuffer  = CmdReadbackTextureToBuffer;
-            t.CmdBeginDebugGroup          = CmdBeginDebugGroup;
-            t.CmdEndDebugGroup            = CmdEndDebugGroup;
-            t.QueueSubmit                 = QueueSubmit;
-            t.QueueWaitIdle               = QueueWaitIdle;
-            t.DeviceWaitIdle              = DeviceWaitIdle;
+            // Pure query: nothing to validate, and a snapshot must not be filtered by the layer.
+            t.EnumerateObjects           = d->core.EnumerateObjects;
+            t.CmdCopyTexture             = CmdCopyTexture;
+            t.CmdUploadBufferToTexture   = CmdUploadBufferToTexture;
+            t.CmdReadbackTextureToBuffer = CmdReadbackTextureToBuffer;
+            t.CmdBeginDebugGroup         = CmdBeginDebugGroup;
+            t.CmdEndDebugGroup           = CmdEndDebugGroup;
+            t.QueueSubmit                = QueueSubmit;
+            t.QueueWaitIdle              = QueueWaitIdle;
+            t.DeviceWaitIdle             = DeviceWaitIdle;
             // DestroyBuffer/MapBuffer/UnmapBuffer/GetBufferDeviceAddress/DestroyTexture/FreeMemory/
             // DestroyDescriptor/DestroyPipelineLayout/DestroyPipeline/ResetDescriptorPool/
             // DestroyDescriptorPool/AllocateDescriptorSets/UpdateDescriptorRanges/SetDebugName:

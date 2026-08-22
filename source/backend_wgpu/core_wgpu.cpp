@@ -277,6 +277,14 @@ namespace vri::wgpu
             BufferWGPU* b = new BufferWGPU {d, buffer, desc->size, mapMode};
             if (shadowWrite)
                 b->shadow = new uint8_t[bd.size]();
+            {
+                // WebGPU exposes no allocation query, so this is the padded request - the size the
+                // implementation was asked for, which is the honest figure available here.
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Buffer);
+                info.memoryBytes   = bd.size;
+                info.width         = static_cast<uint32_t>(desc->size);
+                d->Objects().Track(ToHandle(b), info);
+            }
             *out = ToHandle(b);
             return VriResult_Success;
         }
@@ -286,6 +294,7 @@ namespace vri::wgpu
             if (!buffer)
                 return;
             BufferWGPU* b = Buf(buffer);
+            b->device->Objects().Untrack(buffer);
             delete[] b->shadow;
             wgpuBufferRelease(b->buffer);
             delete b;
@@ -380,7 +389,21 @@ namespace vri::wgpu
             t->layerNum    = desc->type == VriTextureType_3D ? 1u : td.size.depthOrArrayLayers;
             t->texelSize   = TexelSize(desc->format);
             t->owned       = true;
-            *out           = ToHandle(t);
+            {
+                VriObjectInfo info = MakeObjectInfo(VriObjectType_Texture);
+                uint64_t      size = static_cast<uint64_t>(t->width) * t->height * t->depth * t->texelSize;
+                if (t->mipNum > 1)
+                    size += size / 3;
+                info.memoryBytes = size;
+                info.width       = t->width;
+                info.height      = t->height;
+                info.depth       = t->depth;
+                info.mipNum      = t->mipNum;
+                info.layerNum    = t->layerNum;
+                info.format      = desc->format;
+                t->device->Objects().Track(ToHandle(t), info);
+            }
+            *out = ToHandle(t);
             return VriResult_Success;
         }
 
@@ -389,6 +412,7 @@ namespace vri::wgpu
             if (!texture)
                 return;
             TextureWGPU* t = Tex(texture);
+            t->device->Objects().Untrack(texture);
             if (t->owned && t->texture)
                 wgpuTextureRelease(t->texture);
             delete t;
@@ -1377,7 +1401,25 @@ namespace vri::wgpu
 
         void VRI_CALL QueueWaitIdle(VriQueue* queue) { PollDevice(Q(queue)->device->Device()); }
         void VRI_CALL DeviceWaitIdle(VriDevice* device) { PollDevice(Dev(device)->Device()); }
-        void VRI_CALL SetDebugName(void*, const char*) {}
+        // Was a no-op. It records the label against the tracked object, which is what makes an
+        // EnumerateObjects listing readable - without it every row is a pointer and a size. Every
+        // backend object struct begins with its owning device, which is what lets one entry point
+        // name any of them without a per-type dispatch table.
+        void VRI_CALL SetDebugName(void* object, const char* name)
+        {
+            if (object == nullptr)
+                return;
+            DeviceWGPU* d = *reinterpret_cast<DeviceWGPU**>(object);
+            if (d != nullptr)
+                d->Objects().SetName(object, name);
+        }
+
+        VriResult VRI_CALL EnumerateObjects(const VriDevice* device, uint32_t* count, VriObjectInfo* out)
+        {
+            if (device == nullptr)
+                return VriResult_InvalidArgument;
+            return Dev(const_cast<VriDevice*>(device))->Objects().Snapshot(count, out);
+        }
 
         VriCoreInterface MakeTable()
         {
@@ -1451,6 +1493,7 @@ namespace vri::wgpu
             t.QueueWaitIdle               = QueueWaitIdle;
             t.DeviceWaitIdle              = DeviceWaitIdle;
             t.SetDebugName                = SetDebugName;
+            t.EnumerateObjects            = EnumerateObjects;
             t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             t.CmdClearStorageTexture      = CmdClearStorageTexture;

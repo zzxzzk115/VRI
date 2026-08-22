@@ -118,6 +118,7 @@ namespace vri::gl
             t.QueueWaitIdle               = QueueWaitIdle;
             t.DeviceWaitIdle              = DeviceWaitIdle;
             t.SetDebugName                = SetDebugName;
+            t.EnumerateObjects            = EnumerateObjects;
             t.GetVideoMemoryInfo          = GetVideoMemoryInfo;
             t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             t.CmdClearStorageTexture      = CmdClearStorageTexture;
