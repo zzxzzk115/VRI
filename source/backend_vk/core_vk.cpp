@@ -63,6 +63,45 @@ namespace vri::vk
             }
         }
 
+        // Residency priority for VK_EXT_memory_priority, 0 = first to be demoted, 1 = last.
+        //
+        // Ignored unless the device enabled the extension (VMA drops the field otherwise), so this
+        // is inert on drivers that cannot act on it.
+        //
+        // The split is by ACCESS PATTERN, not by importance. A render target is written linearly,
+        // once per texel per frame, and a demoted one costs a stream of PCIe writes. Scene geometry
+        // and material textures are read RANDOMLY by every draw - a demoted vertex buffer costs a
+        // PCIe round trip per cache miss across hundreds of draws, which is the far worse trade.
+        // Measured on an over-budget frame: it is the two passes that read the scene, and only
+        // those, that collapse - so the scene is what must stay resident and a transient target is
+        // the right thing to give up.
+        constexpr float kPriorityStatic    = 1.0f;  // read randomly, all frame, by many draws
+        constexpr float kPriorityTransient = 0.35f; // rewritten wholesale every frame
+
+        [[nodiscard]] float BufferResidencyPriority(const uint32_t usage)
+        {
+            // Acceleration structures and their build inputs are traversed randomly by every ray;
+            // vertex/index buffers by every draw. Nothing here is regenerated per frame.
+            constexpr uint32_t kStatic = VriBufferUsage_AccelerationStorage | VriBufferUsage_AccelerationBuildInput |
+                                         VriBufferUsage_ShaderBindingTable | VriBufferUsage_MicromapBuildInput |
+                                         VriBufferUsage_VertexBuffer | VriBufferUsage_IndexBuffer;
+            if (usage & kStatic)
+                return kPriorityStatic;
+            // A storage or indirect buffer the GPU rewrites each frame behaves like a render
+            // target; a uniform buffer is re-mapped every frame and is tiny either way.
+            if (usage & (VriBufferUsage_StorageBuffer | VriBufferUsage_IndirectBuffer))
+                return kPriorityTransient;
+            return kPriorityStatic;
+        }
+
+        [[nodiscard]] float TextureResidencyPriority(const uint32_t usage)
+        {
+            // Anything the frame draws into or writes from a shader is regenerated wholesale.
+            constexpr uint32_t kTransient = VriTextureUsage_ColorAttachment | VriTextureUsage_DepthStencilAttachment |
+                                            VriTextureUsage_ShaderResourceStorage;
+            return (usage & kTransient) ? kPriorityTransient : kPriorityStatic;
+        }
+
         // Raw vmaAllocateMemory cannot use VMA_MEMORY_USAGE_AUTO* (it has no
         // resource to infer from), so the explicit path selects by property flags.
         void FillVmaRequiredFlags(VriMemoryLocation loc, VmaAllocationCreateInfo& aci)
@@ -255,6 +294,7 @@ namespace vri::vk
             {
                 VmaAllocationCreateInfo aci = {};
                 FillVmaCreateInfo(desc->memoryLocation, aci);
+                aci.priority = BufferResidencyPriority(desc->usage);
                 // AS/micromap build inputs and the SBT have a 256-byte device-address
                 // alignment requirement; force the allocation so the address satisfies it.
                 const bool needsAlign =
@@ -354,6 +394,7 @@ namespace vri::vk
             {
                 VmaAllocationCreateInfo aci = {};
                 FillVmaCreateInfo(desc->memoryLocation, aci);
+                aci.priority = TextureResidencyPriority(desc->usage);
                 if (vmaCreateImage(d->Allocator(), &ici, &aci, &image, &alloc, nullptr) != VK_SUCCESS)
                     return VriResult_OutOfMemory;
             }

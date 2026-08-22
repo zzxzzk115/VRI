@@ -378,6 +378,10 @@ namespace vri::vk
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR};
         VkPhysicalDeviceCustomBorderColorFeaturesEXT cbcSup = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
+        VkPhysicalDeviceMemoryPriorityFeaturesEXT memPrioSup = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT};
+        VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT pageableSup = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT};
         VkPhysicalDeviceVulkan12Features v12Sup  = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures         baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
@@ -422,6 +426,16 @@ namespace vri::vk
             {
                 *q = &cbcSup;
                 q  = &cbcSup.pNext;
+            }
+            if (hasExt(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME))
+            {
+                *q = &memPrioSup;
+                q  = &memPrioSup.pNext;
+            }
+            if (hasExt(VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME))
+            {
+                *q = &pageableSup;
+                q  = &pageableSup.pNext;
             }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
@@ -574,6 +588,39 @@ namespace vri::vk
         {
             extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
             m_hasMemoryBudget = true;
+        }
+
+        // Residency control. Without these the driver decides alone what to demote when a process
+        // goes over its VRAM budget, and on Windows nothing brings the demoted allocation back when
+        // the pressure lifts - measured as a renderer that drops to half its frame rate after one
+        // excursion to a higher render resolution and stays there until the process restarts.
+        //
+        // VK_EXT_memory_priority lets each allocation say how much it wants to stay resident, so
+        // the victim is a render target the frame is about to overwrite rather than the geometry
+        // every draw reads. VK_EXT_pageable_device_local_memory (which requires it) hands the whole
+        // residency decision to the driver's pager, which is also what MIGRATES MEMORY BACK - the
+        // half of the problem priorities alone cannot fix.
+        VkPhysicalDeviceMemoryPriorityFeaturesEXT memPrioEn = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT};
+        VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT pageableEn = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT};
+        if (hasExt(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME) && memPrioSup.memoryPriority)
+        {
+            extensions.push_back(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
+            memPrioEn.memoryPriority = VK_TRUE;
+            memPrioEn.pNext          = features2.pNext;
+            features2.pNext          = &memPrioEn;
+            m_hasMemoryPriority      = true;
+
+            // Pageable REQUIRES memory priority, so it is nested rather than a sibling.
+            if (hasExt(VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME) && pageableSup.pageableDeviceLocalMemory)
+            {
+                extensions.push_back(VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME);
+                pageableEn.pageableDeviceLocalMemory = VK_TRUE;
+                pageableEn.pNext                     = features2.pNext;
+                features2.pNext                      = &pageableEn;
+                m_hasPageableDeviceLocalMemory       = true;
+            }
         }
 
         // ---- optional features: query -> enable -> report (bestEffort aware) ----
@@ -808,6 +855,14 @@ namespace vri::vk
         ci.device                 = m_device;
         ci.vulkanApiVersion       = VK_API_VERSION_1_3;
         ci.flags                  = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+        // Makes VMA chain VkMemoryPriorityAllocateInfoEXT from VmaAllocationCreateInfo::priority;
+        // without it every allocation's priority field is silently ignored.
+        if (m_hasMemoryPriority)
+            ci.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;
+        // Lets VMA report the real budget rather than heap sizes, which is what its own
+        // heuristics and our GetVideoMemoryInfo both want.
+        if (m_hasMemoryBudget)
+            ci.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
 
         if (vmaCreateAllocator(&ci, &m_allocator) != VK_SUCCESS)
         {
