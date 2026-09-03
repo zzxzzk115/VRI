@@ -114,7 +114,24 @@ namespace vri::mtl
                 // MSL 3.0 (Metal 3): needed for ray query (>= 2.3) and mesh/object shaders (>= 3.0);
                 // backward-compatible for the plain graphics/compute shaders.
                 o.set_msl_version(3, 0);
-                o.argument_buffers = false; // MVP binds resources directly to the argument tables
+                // Resources bind directly to the argument tables unless the layout has a set that
+                // cannot be expressed that way (see SetNeedsArgumentBuffer). Turning argument
+                // buffers on changes the generated MSL for the whole module, so it stays off for
+                // every layout that does not need it - those keep byte-identical MSL.
+                o.argument_buffers = layout && layout->hasArgBufferSet;
+                if (o.argument_buffers)
+                {
+                    // Tier 2 is what lifts the per-stage resource ceiling and allows dynamic
+                    // indexing of an argument-buffer array; it is a precondition of granting
+                    // VriFeature_Bindless on Metal (see DeviceMTL::FillDeviceDesc).
+                    o.argument_buffers_tier = spirv_cross::CompilerMSL::Options::ArgumentBuffersTier::Tier2;
+                    // Emit every declared resource, not just the ones this stage happens to use.
+                    // Without it SPIRV-Cross drops unused members and renumbers the rest, so the
+                    // vertex and fragment stages would disagree on where [[id(n)]] n lives while
+                    // both read the same buffer. Combined with the explicit id pinning below this
+                    // gives one stage-independent layout per set.
+                    o.force_active_argument_buffer_resources = true;
+                }
                 if (viewMask) // multiview (single-pass stereo): gl_ViewIndex via vertex amplification
                 {
                     o.multiview                  = true;
@@ -136,20 +153,41 @@ namespace vri::mtl
                                                                  VriShaderStage_Compute;
                     for (uint32_t set = 0; set < layout->setBindings.size(); ++set)
                     {
+                        const bool argBuffer = layout->IsArgBuffer(set);
+                        // Sets that stay on the direct path must be marked discrete, or enabling
+                        // argument buffers for one set would sweep all of them into argument
+                        // buffers and invalidate their argument-table slots.
+                        if (o.argument_buffers && !argBuffer)
+                            comp.add_discrete_descriptor_set(set);
                         for (const BindingMTL& b : layout->setBindings[set])
                         {
-                            if (!(b.stages & stageBit))
+                            // An argument-buffer set is pinned for every stage that shares the
+                            // buffer, including stages that never read a given member: the layout
+                            // has to match across stages, not just cover what each stage uses.
+                            if (!argBuffer && !(b.stages & stageBit))
                                 continue;
                             spirv_cross::MSLResourceBinding rb = {};
                             rb.stage = model;
                             rb.desc_set = set;
                             rb.binding = b.baseRegister;
                             rb.count = b.count;
+                            // Direct: the argument-table slot. Argument buffer: the [[id(n)]].
                             // Acceleration structures bind to the Metal buffer argument table.
                             if (IsBufferType(b.type) || b.type == VriDescriptorType_AccelerationStructure) rb.msl_buffer = b.mslIndex;
                             else if (IsTextureType(b.type)) rb.msl_texture = b.mslIndex;
                             else                        rb.msl_sampler = b.mslIndex;
                             comp.add_msl_resource_binding(rb);
+                        }
+                        // Pin the argument buffer's own MTLBuffer slot, so CmdSetDescriptorSet
+                        // knows where to bind it without reflecting the compiled function.
+                        if (argBuffer)
+                        {
+                            spirv_cross::MSLResourceBinding ab = {};
+                            ab.stage = model;
+                            ab.desc_set = set;
+                            ab.binding = spirv_cross::kArgumentBufferBinding;
+                            ab.msl_buffer = layout->setLayouts[set].argBufferSlot;
+                            comp.add_msl_resource_binding(ab);
                         }
                     }
                     if (layout->hasPush && (layout->pushStages &
@@ -591,7 +629,10 @@ namespace vri::mtl
             sd.borderColor = ToMtlBorderColor(desc->borderColor);
             if (desc->compareEnable)
                 sd.compareFunction = ToMtlCompare(desc->compareOp);
-            sd.supportArgumentBuffers = NO;
+            // Required for the sampler to have a usable gpuResourceID, i.e. to be referenceable
+            // from an argument buffer. A sampler's descriptor set is not known at creation time,
+            // so this is on unconditionally; it does not change how the sampler filters.
+            sd.supportArgumentBuffers = YES;
 
             id<MTLSamplerState> sampler = [Dev(device)->Device() newSamplerStateWithDescriptor:sd];
             [sd release];
@@ -615,6 +656,35 @@ namespace vri::mtl
         }
 
         // ---- pipeline layout & pipelines -----------------------------------
+
+        // Does this set have to go through an argument buffer? Two independent reasons:
+        //
+        //   1. It declares bindless intent (VariableSized / PartiallyBound). The caller is
+        //      telling us the array is indexed dynamically and may be sparsely populated.
+        //   2. It does not fit what is left of the direct argument table. Metal binds at most
+        //      128 textures and 16 samplers per stage and those tables are flat across ALL
+        //      sets, so the test is against the running totals, not this set alone: a fixed
+        //      `Texture2D uTex[160]` material table overflows on its own, and four 40-texture
+        //      sets overflow together even though each one fits.
+        //
+        // Reason 2 is why the ceiling stops being a constant: a layout that outgrows direct
+        // binding is promoted instead of being rejected (or, worse, silently truncated).
+        bool SetNeedsArgumentBuffer(const VriDescriptorSetDesc& set, uint32_t usedTextures, uint32_t usedSamplers)
+        {
+            uint32_t textures = 0, samplers = 0;
+            for (uint32_t r = 0; r < set.rangeNum; ++r)
+            {
+                const VriDescriptorRangeDesc& range = set.ranges[r];
+                if (range.flags & (VriDescriptorRange_VariableSized | VriDescriptorRange_PartiallyBound))
+                    return true;
+                const uint32_t count = range.descriptorNum ? range.descriptorNum : 1;
+                if (IsTextureType(range.descriptorType))                 textures += count;
+                else if (range.descriptorType == VriDescriptorType_Sampler) samplers += count;
+            }
+            return usedTextures + textures > kMaxMtlDirectTextures ||
+                   usedSamplers + samplers > kMaxMtlDirectSamplers;
+        }
+
         VriResult VRI_CALL CreatePipelineLayout(VriDevice* device, const VriPipelineLayoutDesc* desc, VriPipelineLayout** out)
         {
             PipelineLayoutMTL* layout = new PipelineLayoutMTL{};
@@ -622,13 +692,33 @@ namespace vri::mtl
             // Assign Metal argument-table slots: separate counters per resource class,
             // flat across all sets (Metal tables are flat per stage). Push constants take
             // the next buffer slot after all descriptor buffers.
+            //
+            // A set promoted to the argument-buffer path consumes exactly ONE buffer slot (the
+            // argument buffer itself) and none of the texture/sampler tables; its contents are
+            // numbered in a per-set [[id(n)]] namespace instead. Layouts with no promoted set
+            // assign exactly the slots they always did, so their MSL is unchanged.
+            const bool bindlessOk = Dev(device)->Desc().hasBindless != VRI_FALSE;
             uint32_t bufferCounter = 0, textureCounter = 0, samplerCounter = 0;
             layout->setBindings.resize(desc->descriptorSetNum);
+            layout->setLayouts.resize(desc->descriptorSetNum);
             for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
             {
                 const VriDescriptorSetDesc& set = desc->descriptorSets[s];
                 const uint32_t setIdx = set.registerSpace < desc->descriptorSetNum ? set.registerSpace : s;
                 std::vector<BindingMTL>& dst = layout->setBindings[setIdx];
+                SetLayoutMTL& sl = layout->setLayouts[setIdx];
+
+                // Without argument-buffer support the set stays direct and overflows loudly at
+                // pipeline creation rather than silently dropping descriptors (see below).
+                const bool argBuffer = bindlessOk && SetNeedsArgumentBuffer(set, textureCounter, samplerCounter);
+                if (argBuffer)
+                {
+                    sl.model = SetBindingModel::ArgumentBuffer;
+                    sl.argBufferSlot = bufferCounter++;
+                    layout->hasArgBufferSet = true;
+                }
+
+                uint32_t argId = 0; // [[id(n)]] cursor, one namespace per set
                 for (uint32_t r = 0; r < set.rangeNum; ++r)
                 {
                     const VriDescriptorRangeDesc& range = set.ranges[r];
@@ -637,14 +727,37 @@ namespace vri::mtl
                     b.type = range.descriptorType;
                     b.count = range.descriptorNum ? range.descriptorNum : 1;
                     b.stages = range.shaderStages;
+                    if (argBuffer)
+                    {
+                        b.mslIndex = argId;
+                        argId += b.count;
+                        sl.argStages |= b.stages;
+                    }
                     // Acceleration structures occupy a Metal buffer slot (setAccelerationStructure
                     // shares the buffer argument table), so they count with the buffers.
-                    if (IsBufferType(range.descriptorType) || range.descriptorType == VriDescriptorType_AccelerationStructure)
+                    else if (IsBufferType(range.descriptorType) || range.descriptorType == VriDescriptorType_AccelerationStructure)
                                                                   { b.mslIndex = bufferCounter;  bufferCounter  += b.count; }
                     else if (IsTextureType(range.descriptorType)) { b.mslIndex = textureCounter; textureCounter += b.count; }
                     else                                          { b.mslIndex = samplerCounter; samplerCounter += b.count; }
                     dst.push_back(b);
                 }
+                sl.argEntryNum = argId;
+            }
+            // A direct set that overflows the argument table can only happen when bindless is
+            // unavailable (no Metal 3 / Tier 2). Fail loudly: the alternative is a pipeline whose
+            // out-of-range textures read as undefined, which looks like a shading bug, not a
+            // capability gap. Callers should have consulted VriDeviceDesc::bindlessTextureMaxNum.
+            if (textureCounter > kMaxMtlDirectTextures || samplerCounter > kMaxMtlDirectSamplers)
+            {
+                char msg[256];
+                std::snprintf(msg, sizeof(msg),
+                              "pipeline layout needs %u textures / %u samplers per stage, over Metal's direct "
+                              "argument-table limit of %u / %u, and argument-buffer bindless is unavailable "
+                              "on this device",
+                              textureCounter, samplerCounter, kMaxMtlDirectTextures, kMaxMtlDirectSamplers);
+                Dev(device)->ReportError(msg);
+                delete layout;
+                return VriResult_Unsupported;
             }
             if (desc->pushConstantNum > 0)
             {
@@ -843,6 +956,8 @@ namespace vri::mtl
             p->isMesh = hasMesh;
             p->objectTG = objTG;
             p->meshTG = meshTG;
+            for (uint32_t i = 0; i < desc->shaderNum; ++i)
+                p->stageMask |= desc->shaders[i].stage;
             p->viewCount = viewCount;
             p->viewBase = viewMask ? static_cast<uint32_t>(__builtin_ctz(viewMask)) : 0;
             *out = ToHandle(p);
@@ -890,6 +1005,7 @@ namespace vri::mtl
             p->isCompute = true;
             p->compute = cps;
             p->threadsPerThreadgroup = msl.localSize;
+            p->stageMask = VriShaderStage_Compute;
             *out = ToHandle(p);
             return VriResult_Success;
         }
@@ -910,10 +1026,15 @@ namespace vri::mtl
             *out = ToHandle(new DescriptorPoolMTL{Dev(device), {}});
             return VriResult_Success;
         }
+        void DestroyDescriptorSet(DescriptorSetMTL* s)
+        {
+            if (s->argBuffer) [s->argBuffer release];
+            delete s;
+        }
         void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool)
         {
             DescriptorPoolMTL* p = DPool(pool);
-            for (DescriptorSetMTL* s : p->sets) delete s;
+            for (DescriptorSetMTL* s : p->sets) DestroyDescriptorSet(s);
             p->sets.clear();
         }
         void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool)
@@ -928,26 +1049,117 @@ namespace vri::mtl
             const PipelineLayoutMTL* l = PLc(layout);
             if (setIndex >= l->setBindings.size())
                 return VriResult_InvalidArgument;
+            const SetLayoutMTL& sl = l->setLayouts[setIndex];
             for (uint32_t i = 0; i < setNum; ++i)
             {
                 DescriptorSetMTL* s = new DescriptorSetMTL{p->device, l, setIndex, {}};
+                if (sl.model == SetBindingModel::ArgumentBuffer)
+                {
+                    // One 8-byte entry per [[id(n)]]. Shared storage: Apple GPUs read argument
+                    // buffers from unified memory, so the entries are written in place with no
+                    // staging copy. Zeroed, so a partially-bound set reads null descriptors
+                    // rather than stale handles.
+                    const NSUInteger length = sl.argEntryNum * kMtlArgBufferEntrySize;
+                    s->argBuffer = [p->device->Device() newBufferWithLength:length
+                                                                   options:MTLResourceStorageModeShared];
+                    if (!s->argBuffer)
+                    {
+                        p->device->ReportError("failed to allocate a descriptor set's argument buffer");
+                        delete s;
+                        return VriResult_Failure;
+                    }
+                    std::memset([s->argBuffer contents], 0, length);
+                    s->entries.resize(sl.argEntryNum);
+                }
                 p->sets.push_back(s);
                 outSets[i] = ToHandle(s);
             }
             return VriResult_Success;
         }
+
+        // Write one descriptor into an argument buffer entry. Metal 3 / Tier 2 argument buffers
+        // are plain 8-byte-per-entry buffers: an MTLResourceID for a texture/sampler/acceleration
+        // structure, a 64-bit GPU address for a `constant T*`.
+        void EncodeArgument(DescriptorSetMTL* s, uint32_t entry, VriDescriptorType type, const DescriptorMTL* dsc)
+        {
+            if (entry >= s->entries.size())
+                return; // out of the set's declared range; nothing sane to write
+            uint64_t* slot = reinterpret_cast<uint64_t*>(static_cast<uint8_t*>([s->argBuffer contents]) +
+                                                         entry * kMtlArgBufferEntrySize);
+            DescriptorSetMTL::Entry e{};
+            *slot = 0; // null descriptor unless something is written below
+            if (dsc)
+            {
+                // MTLResourceID is the 8-byte handle an argument-buffer entry holds; it is
+                // returned by value, so it is copied through a named local.
+                if (type == VriDescriptorType_AccelerationStructure && dsc->accel)
+                {
+                    const MTLResourceID rid = dsc->accel.gpuResourceID;
+                    std::memcpy(slot, &rid, sizeof(uint64_t));
+                    e.resource = dsc->accel;
+                    e.tlas = dsc->accelObj; // a TLAS's referenced BLASes need residency too
+                }
+                else if (type == VriDescriptorType_Sampler && dsc->sampler)
+                {
+                    const MTLResourceID rid = dsc->sampler.gpuResourceID;
+                    std::memcpy(slot, &rid, sizeof(uint64_t));
+                    // Sampler states are not MTLResources and need no residency call.
+                }
+                else if (IsTextureType(type) && dsc->texture)
+                {
+                    const MTLResourceID rid = dsc->texture.gpuResourceID;
+                    std::memcpy(slot, &rid, sizeof(uint64_t));
+                    e.resource = dsc->texture;
+                    e.writable = type == VriDescriptorType_StorageTexture;
+                }
+                else if (IsBufferType(type) && dsc->buffer)
+                {
+                    const uint64_t address = [dsc->buffer gpuAddress] + dsc->bufferOffset;
+                    std::memcpy(slot, &address, sizeof(uint64_t));
+                    e.resource = dsc->buffer;
+                    e.writable = type == VriDescriptorType_StorageBuffer;
+                }
+            }
+            s->entries[entry] = e;
+            s->residencyDirty = true;
+        }
+
+        // Flatten the per-entry residency into the two arrays useResources: wants. Duplicates are
+        // harmless (the same texture bound twice is one residency fact), so this keeps insertion
+        // order rather than paying for a set.
+        void RebuildResidency(DescriptorSetMTL* s)
+        {
+            s->residentRead.clear();
+            s->residentReadWrite.clear();
+            s->residentTlas.clear();
+            for (const DescriptorSetMTL::Entry& e : s->entries)
+            {
+                if (e.tlas) s->residentTlas.push_back(e.tlas);
+                if (!e.resource) continue;
+                (e.writable ? s->residentReadWrite : s->residentRead).push_back(e.resource);
+            }
+            s->residencyDirty = false;
+        }
+
         void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet* set, uint32_t baseRange, uint32_t rangeNum, const VriDescriptorRangeUpdateDesc* updates)
         {
             DescriptorSetMTL* s = DSet(set);
             const std::vector<BindingMTL>& ranges = s->layout->setBindings[s->setIndex];
+            const bool argBuffer = s->argBuffer != nil;
             for (uint32_t r = 0; r < rangeNum; ++r)
             {
                 const VriDescriptorRangeUpdateDesc& u = updates[r];
                 const BindingMTL& info = ranges[baseRange + r];
                 for (uint32_t k = 0; k < u.descriptorNum; ++k)
                 {
+                    const uint32_t index = info.mslIndex + u.baseDescriptor + k;
+                    if (argBuffer)
+                    {
+                        EncodeArgument(s, index, info.type, Desc(u.descriptors[k]));
+                        continue;
+                    }
                     DescriptorSetMTL::Bound b{};
-                    b.mslIndex = info.mslIndex + u.baseDescriptor + k;
+                    b.mslIndex = index;
                     b.type = info.type;
                     b.stages = info.stages;
                     b.desc = Desc(u.descriptors[k]);
@@ -1209,11 +1421,61 @@ namespace vri::mtl
             }
         }
 
+        // Bind an argument-buffer set: the argument buffer itself goes to its reserved MTLBuffer
+        // slot, then everything it points at is made resident for this encoder. Metal tracks
+        // residency for directly-bound resources only; a resource reachable solely through an
+        // argument buffer is otherwise free to be evicted, and reads from it return undefined
+        // data (the same failure mode as the TLAS/BLAS case in BindOne).
+        void BindArgumentBufferSet(CommandBufferMTL* c, DescriptorSetMTL* s)
+        {
+            const SetLayoutMTL& sl = s->layout->setLayouts[s->setIndex];
+            if (s->residencyDirty)
+                RebuildResidency(s);
+            const NSUInteger readNum = s->residentRead.size();
+            const NSUInteger writeNum = s->residentReadWrite.size();
+            if (c->computeEnc)
+            {
+                [c->computeEnc setBuffer:s->argBuffer offset:0 atIndex:sl.argBufferSlot];
+                if (readNum)  [c->computeEnc useResources:s->residentRead.data() count:readNum usage:MTLResourceUsageRead];
+                if (writeNum) [c->computeEnc useResources:s->residentReadWrite.data() count:writeNum
+                                                    usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+                for (AccelerationStructureMTL* tlas : s->residentTlas)
+                    for (id<MTLAccelerationStructure> blas in tlas->instancedAS)
+                        [c->computeEnc useResource:blas usage:MTLResourceUsageRead];
+                return;
+            }
+            if (!c->renderEnc) return;
+            // Every compiled stage declares the argument buffer, so bind it to all of the bound
+            // pipeline's stages - not just the stages the set's ranges name. Falling back to the
+            // set's own stages covers CmdSetDescriptorSet arriving before a pipeline is bound.
+            const VriShaderStageFlags st = c->boundPipeline ? c->boundPipeline->stageMask : sl.argStages;
+            if (st & VriShaderStage_Vertex)   [c->renderEnc setVertexBuffer:s->argBuffer offset:0 atIndex:sl.argBufferSlot];
+            if (st & VriShaderStage_Fragment) [c->renderEnc setFragmentBuffer:s->argBuffer offset:0 atIndex:sl.argBufferSlot];
+            if (st & VriShaderStage_Mesh)     [c->renderEnc setMeshBuffer:s->argBuffer offset:0 atIndex:sl.argBufferSlot];
+            if (st & VriShaderStage_Task)     [c->renderEnc setObjectBuffer:s->argBuffer offset:0 atIndex:sl.argBufferSlot];
+            const MTLRenderStages stages = (MTLRenderStages)(((st & VriShaderStage_Vertex)   ? MTLRenderStageVertex : 0) |
+                                                             ((st & VriShaderStage_Fragment) ? MTLRenderStageFragment : 0) |
+                                                             ((st & VriShaderStage_Mesh)     ? MTLRenderStageMesh : 0) |
+                                                             ((st & VriShaderStage_Task)     ? MTLRenderStageObject : 0));
+            if (readNum)  [c->renderEnc useResources:s->residentRead.data() count:readNum
+                                               usage:MTLResourceUsageRead stages:stages];
+            if (writeNum) [c->renderEnc useResources:s->residentReadWrite.data() count:writeNum
+                                               usage:MTLResourceUsageRead | MTLResourceUsageWrite stages:stages];
+            for (AccelerationStructureMTL* tlas : s->residentTlas)
+                for (id<MTLAccelerationStructure> blas in tlas->instancedAS)
+                    [c->renderEnc useResource:blas usage:MTLResourceUsageRead stages:stages];
+        }
+
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t, const VriDescriptorSet* set)
         {
             if (!set) return;
             CommandBufferMTL* c = CB(cmd);
-            const DescriptorSetMTL* s = reinterpret_cast<const DescriptorSetMTL*>(set);
+            DescriptorSetMTL* s = const_cast<DescriptorSetMTL*>(reinterpret_cast<const DescriptorSetMTL*>(set));
+            if (s->argBuffer)
+            {
+                BindArgumentBufferSet(c, s);
+                return;
+            }
             for (const DescriptorSetMTL::Bound& b : s->bound)
                 BindOne(c, b);
         }
