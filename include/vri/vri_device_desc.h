@@ -135,6 +135,17 @@ typedef struct VriDeviceDesc
     uint32_t rtShaderGroupHandleSize;
     uint32_t rtShaderGroupBaseAlignment;
     uint32_t rtShaderGroupHandleAlignment;
+
+    /* Bindless capacity: the largest descriptorNum a single VriDescriptorRangeDesc
+       may declare for that type. These are device properties, not compile-time
+       constants - they differ by orders of magnitude across backends and hardware,
+       so a renderer sizing a material-texture table should clamp against them
+       rather than hardcode a limit that happens to hold on one backend.
+       0 means "this backend does not report a capacity": always the case when
+       hasBindless is false, and also on backends that have not filled it in yet
+       (currently reported by Vulkan and Metal). */
+    uint32_t bindlessTextureMaxNum;
+    uint32_t bindlessSamplerMaxNum;
 } VriDeviceDesc;
 
 VRI_EXTERN_C_END
