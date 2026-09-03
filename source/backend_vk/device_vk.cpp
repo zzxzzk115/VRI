@@ -877,9 +877,12 @@ namespace vri::vk
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
 
-        // Subgroup (wave) size + whether arithmetic wave ops are available.
+        // Subgroup (wave) size + whether arithmetic wave ops are available; props12 carries the
+        // descriptor-indexing (bindless) limits reported through VriDeviceDesc::bindless*MaxNum.
         VkPhysicalDeviceVulkan11Properties props11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES};
+        VkPhysicalDeviceVulkan12Properties props12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
         VkPhysicalDeviceProperties2        props2  = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        props11.pNext                              = &props12;
         props2.pNext                               = &props11;
         vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
 
@@ -937,10 +940,17 @@ namespace vri::vk
         m_desc.hasGeometryShader = baseFeatures.geometryShader ? VRI_TRUE : VRI_FALSE;
         m_desc.hasTessellation   = baseFeatures.tessellationShader ? VRI_TRUE : VRI_FALSE;
 
-        m_desc.enabledFeatures         = m_enabledFeatures;
-        m_desc.hasRayTracing           = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasMeshShader           = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasBindless             = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        m_desc.enabledFeatures = m_enabledFeatures;
+        m_desc.hasRayTracing   = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasMeshShader   = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasBindless     = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        // Bindless capacity. Update-after-bind is the mode bindless ranges are created in
+        // (core_vk.cpp), so its per-stage limits are the ones that actually bound a range.
+        if (m_desc.hasBindless)
+        {
+            m_desc.bindlessTextureMaxNum = props12.maxPerStageDescriptorUpdateAfterBindSampledImages;
+            m_desc.bindlessSamplerMaxNum = props12.maxPerStageDescriptorUpdateAfterBindSamplers;
+        }
         m_desc.hasVariableShadingRate  = (m_enabledFeatures & VriFeature_VariableShadingRate) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap      = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery             = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;

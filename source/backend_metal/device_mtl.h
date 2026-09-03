@@ -29,11 +29,13 @@ namespace vri::mtl
         void FillDeviceDesc();
         void FillRegistry();
         bool HasTimestampCounterSet() const;
+        bool SupportsArgumentBufferBindless() const;
 
         id<MTLDevice>        m_device = nil;
         id<MTLCommandQueue>  m_queue = nil;
         QueueMTL             m_queueObjs[VriQueueType_Count] = {};
         VriDeviceDesc        m_desc = {};
+        uint64_t             m_enabledFeatures = 0;
         VriCallbackInterface m_callback = {};
     };
 

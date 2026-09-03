@@ -24,6 +24,19 @@ namespace vri::mtl
     static constexpr uint32_t kMaxMtlBuffers = 31;
     inline uint32_t VertexBufferIndex(uint32_t streamSlot) { return kMaxMtlBuffers - 1 - streamSlot; }
 
+    // Directly-bound argument-table capacity per stage. These are the limits that make a
+    // descriptor set ineligible for direct binding and push it onto the argument-buffer
+    // path (see SetNeedsArgumentBuffer); they are NOT a cap on what a bindless range may
+    // declare - an argument buffer's capacity is reported as VriDeviceDesc::bindless*MaxNum.
+    static constexpr uint32_t kMaxMtlDirectTextures = 128;
+    static constexpr uint32_t kMaxMtlDirectSamplers = 16;
+
+    // Argument-buffer (bindless) encoding. Metal 3 / Tier 2 argument buffers are plain
+    // buffers of 8-byte entries, one per [[id(n)]]: MTLResourceID for a texture/sampler/
+    // acceleration structure, a 64-bit GPU address for a `constant T*`. SPIRV-Cross emits
+    // exactly that struct (see SpirvToMsl), so entry n lives at byte offset n * 8.
+    static constexpr uint32_t kMtlArgBufferEntrySize = 8;
+
     // Max occlusion queries per command buffer (one visibility-result slot each). The buffer is
     // bound at every render pass, so this caps total occlusion Begin/End pairs between submits.
     static constexpr uint32_t kMtlMaxOcclusionSlots = 4096;
@@ -112,24 +125,50 @@ namespace vri::mtl
         struct AccelerationStructureMTL* accelObj = nullptr; // TLAS: source object, to keep its BLASes resident
     };
 
-    // One descriptor range resolved to its Metal argument-table slot(s).
+    // One descriptor range resolved to its Metal slot(s). For a directly-bound set mslIndex is
+    // the argument-table slot for the range's type; for an argument-buffer set it is the
+    // [[id(n)]] of the range's first element in that set's single id namespace.
     struct BindingMTL
     {
         uint32_t            baseRegister;
         VriDescriptorType   type;
-        uint32_t            mslIndex; // buffer / texture / sampler slot, per type
+        uint32_t            mslIndex; // direct: per-type table slot / argument buffer: [[id(n)]]
         uint32_t            count;
         VriShaderStageFlags stages;
+    };
+
+    // Per-set binding model. A set is promoted to ArgumentBuffer when it declares bindless
+    // intent (VariableSized / PartiallyBound) or simply does not fit the direct argument
+    // table - that promotion is what removes the per-stage texture ceiling.
+    enum class SetBindingModel : uint8_t
+    {
+        Direct,
+        ArgumentBuffer,
+    };
+
+    struct SetLayoutMTL
+    {
+        SetBindingModel     model = SetBindingModel::Direct;
+        uint32_t            argBufferSlot = 0; // MTLBuffer index the argument buffer binds to
+        uint32_t            argEntryNum = 0;   // number of [[id(n)]] entries (buffer size / 8)
+        VriShaderStageFlags argStages = 0;     // union of the set's range stages
     };
 
     struct PipelineLayoutMTL
     {
         DeviceMTL*                            device;
         std::vector<std::vector<BindingMTL>>  setBindings; // [set][range]
+        std::vector<SetLayoutMTL>             setLayouts;  // [set], parallel to setBindings
         bool                                  hasPush = false;
+        bool                                  hasArgBufferSet = false; // any set on the AB path
         uint32_t                              pushBufferIndex = 0;
         uint32_t                              pushSize = 0;
         VriShaderStageFlags                   pushStages = 0;
+
+        bool IsArgBuffer(uint32_t set) const
+        {
+            return set < setLayouts.size() && setLayouts[set].model == SetBindingModel::ArgumentBuffer;
+        }
 
         const BindingMTL* Find(uint32_t set, uint32_t binding) const
         {
@@ -154,7 +193,26 @@ namespace vri::mtl
             VriShaderStageFlags stages;
             const DescriptorMTL* desc;
         };
-        std::vector<Bound>       bound; // resolved on UpdateDescriptorRanges
+        std::vector<Bound>       bound; // Direct sets: resolved on UpdateDescriptorRanges
+
+        // ---- argument-buffer sets (SetBindingModel::ArgumentBuffer) ----
+        // Metal does not make resources referenced through an argument buffer resident, so every
+        // referenced MTLResource has to be replayed as useResource at bind time. Residency is
+        // tracked per [[id(n)]] entry rather than appended per update, so re-updating a set
+        // replaces an entry instead of accumulating a stale duplicate of it.
+        struct Entry
+        {
+            id<MTLResource>                  resource = nil;   // nil: sampler or unpopulated
+            bool                             writable = false; // storage texture/buffer
+            struct AccelerationStructureMTL* tlas = nullptr;   // TLAS: also make its BLASes resident
+        };
+        id<MTLBuffer>                argBuffer = nil; // nil on a Direct set
+        std::vector<Entry>           entries;         // sized argEntryNum on allocation
+        // Flattened from `entries` on demand - useResources: takes one array per usage class.
+        std::vector<id<MTLResource>> residentRead;
+        std::vector<id<MTLResource>> residentReadWrite;
+        std::vector<struct AccelerationStructureMTL*> residentTlas;
+        bool                         residencyDirty = true;
     };
 
     struct DescriptorPoolMTL
@@ -178,6 +236,11 @@ namespace vri::mtl
         bool                        stencilTest;
         uint32_t                    stencilReference;
         MTLSize                     threadsPerThreadgroup; // compute local size (from SPIR-V)
+        // Stages this pipeline was actually built from. An argument buffer is declared by every
+        // compiled stage (force_active_argument_buffer_resources), including stages that read
+        // nothing from it, so this is the exact set that must have it bound (see
+        // BindArgumentBufferSet) - the set's own shaderStages would leave some of them unbound.
+        VriShaderStageFlags         stageMask;
         // Mesh-shader pipeline (object/mesh/fragment): threadgroup sizes for drawMeshThreadgroups.
         bool                        isMesh;
         MTLSize                     objectTG;  // task/object stage local size (1,1,1 if mesh-only)

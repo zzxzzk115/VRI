@@ -71,9 +71,36 @@ namespace vri::mtl
             if (!m_queueObjs[t].queue) { ReportError("newCommandQueue (per-type) failed"); return VriResult_Failure; }
         }
 
+        // ---- optional features: query -> grant -> report (bestEffort aware) ----
+        // Metal has nothing to switch on at device creation, so granting is purely a capability
+        // check; the feature bits still gate behaviour (CreatePipelineLayout consults hasBindless
+        // before promoting a set to an argument buffer).
+        const uint64_t requested = desc.enabledFeatures;
+        if (requested & VriFeature_Bindless)
+        {
+            if (SupportsArgumentBufferBindless())
+                m_enabledFeatures |= VriFeature_Bindless;
+            else if (desc.bestEffort == VRI_FALSE)
+            {
+                ReportError("bindless (Tier 2 argument buffers / Metal 3) not supported");
+                return VriResult_Unsupported;
+            }
+        }
+
         FillDeviceDesc();
         FillRegistry();
         return VriResult_Success;
+    }
+
+    // True when descriptor sets can be expressed as Metal 3 argument buffers. Tier 2 is the
+    // requirement that matters: it allows dynamic (non-uniform) indexing of an argument-buffer
+    // array and lifts the per-stage resource ceiling, which is the whole point of the path.
+    // MTLGPUFamilyMetal3 additionally guarantees the MSL 3.0 / gpuResourceID encoding the
+    // backend writes by hand (see EncodeArgument).
+    bool DeviceMTL::SupportsArgumentBufferBindless() const
+    {
+        return [m_device argumentBuffersSupport] >= MTLArgumentBuffersTier2 &&
+               [m_device supportsFamily:MTLGPUFamilyMetal3];
     }
 
     void DeviceMTL::FillDeviceDesc()
@@ -113,6 +140,18 @@ namespace vri::mtl
         m_desc.hasRayQuery = [m_device supportsRaytracing] ? VRI_TRUE : VRI_FALSE;
         // Mesh/object shaders require the Metal 3 family.
         m_desc.hasMeshShader = [m_device supportsFamily:MTLGPUFamilyMetal3] ? VRI_TRUE : VRI_FALSE;
+
+        m_desc.enabledFeatures = m_enabledFeatures;
+        m_desc.hasBindless     = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        if (m_desc.hasBindless)
+        {
+            // Tier 2 argument buffers address up to 500,000 resources per buffer on Apple GPUs,
+            // and unique samplers are capped at 1024 device-wide. Reported so a renderer sizes
+            // its material table against the device instead of against Metal's *direct* binding
+            // limit of 128 textures per stage, which no longer applies on this path.
+            m_desc.bindlessTextureMaxNum = 500000;
+            m_desc.bindlessSamplerMaxNum = 1024;
+        }
 
         // GPU queries: timestamps need the standard counter set + stage-boundary sampling; occlusion
         // (visibility result buffers) is always available. Apple GPUs expose no statistic counter set.

@@ -98,6 +98,7 @@ target("vri-tests")
         add_files("test_external_d3d12.cpp")  -- external memory/fence export (CUDA interop seam)
     end
     if has_config("vri_backend_metal") then
+        add_files("test_bindless_mtl.cpp")    -- bindless textures past the direct argument-table limit
         add_files("test_meshshader_mtl.cpp")  -- mesh shaders (MTLMeshRenderPipeline, MSL via SPIRV-Cross)
         add_files("test_vrs_mtl.cpp")         -- variable rate shading: explicit "unsupported" contract
         add_files("test_omm_mtl.cpp")         -- opacity micromap: explicit "unsupported" contract
