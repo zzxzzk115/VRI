@@ -442,12 +442,12 @@ TEST_CASE("Metal bindless: sample past the direct argument-table limit")
 
     // 512-entry PARTIALLY_BOUND array, 201 populated (cycling red/green/blue), sampled at
     // 200 -> 200 % 3 == 2 -> blue. Index 200 is unreachable through the direct table.
-    CHECK(RenderSampledIndex(c, dev, 512, VriDescriptorRange_PartiallyBound | VriDescriptorRange_VariableSized,
-                             201, 200) == kBlue);
+    CHECK(RenderSampledIndex(
+              c, dev, 512, VriDescriptorRange_PartiallyBound | VriDescriptorRange_VariableSized, 201, 200) == kBlue);
 
     // Same layout sampled below the limit still works - promotion must not break the easy case.
-    CHECK(RenderSampledIndex(c, dev, 512, VriDescriptorRange_PartiallyBound | VriDescriptorRange_VariableSized,
-                             201, 1) == kGreen);
+    CHECK(RenderSampledIndex(
+              c, dev, 512, VriDescriptorRange_PartiallyBound | VriDescriptorRange_VariableSized, 201, 1) == kGreen);
 }
 
 TEST_CASE("Metal bindless: a plain oversized texture array is promoted, not truncated")

@@ -940,10 +940,10 @@ namespace vri::vk
         m_desc.hasGeometryShader = baseFeatures.geometryShader ? VRI_TRUE : VRI_FALSE;
         m_desc.hasTessellation   = baseFeatures.tessellationShader ? VRI_TRUE : VRI_FALSE;
 
-        m_desc.enabledFeatures         = m_enabledFeatures;
-        m_desc.hasRayTracing           = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasMeshShader           = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
-        m_desc.hasBindless             = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
+        m_desc.enabledFeatures = m_enabledFeatures;
+        m_desc.hasRayTracing   = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasMeshShader   = (m_enabledFeatures & VriFeature_MeshShader) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasBindless     = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
         // Bindless capacity. Update-after-bind is the mode bindless ranges are created in
         // (core_vk.cpp), so its per-stage limits are the ones that actually bound a range.
         if (m_desc.hasBindless)
