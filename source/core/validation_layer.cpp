@@ -133,6 +133,10 @@ namespace vri::core
         {
             return DV(device)->core.GetVideoMemoryInfo(DV(device)->real, loc, out);
         }
+        VriResult VRI_CALL EnumerateObjects(const VriDevice* device, uint32_t* count, VriObjectInfo* out)
+        {
+            return DV(device)->core.EnumerateObjects(DV(device)->real, count, out);
+        }
         VriResult VRI_CALL GetQueue(VriDevice* device, VriQueueType type, uint32_t index, VriQueue** outQueue)
         {
             DeviceVal* d    = DV(device);
@@ -960,8 +964,8 @@ namespace vri::core
             t.CmdCopyBuffer               = CmdCopyBuffer;
             t.CmdClearStorageBuffer       = CmdClearStorageBuffer;
             t.CmdClearStorageTexture      = CmdClearStorageTexture;
-            // Pure query: nothing to validate, and a snapshot must not be filtered by the layer.
-            t.EnumerateObjects           = d->core.EnumerateObjects;
+            // Objects pass through, but the device still belongs to this layer.
+            t.EnumerateObjects           = d->core.EnumerateObjects ? EnumerateObjects : nullptr;
             t.CmdCopyTexture             = CmdCopyTexture;
             t.CmdUploadBufferToTexture   = CmdUploadBufferToTexture;
             t.CmdReadbackTextureToBuffer = CmdReadbackTextureToBuffer;
