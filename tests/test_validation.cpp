@@ -7,6 +7,7 @@
 #include <vri/vri.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace
 {
@@ -38,6 +39,43 @@ namespace
         return nullptr;
     }
 } // namespace
+
+TEST_CASE("VRI Validation enumerates the real device objects")
+{
+    for (const auto api : {VriGraphicsAPI_Vulkan, VriGraphicsAPI_D3D12})
+    {
+        VriDeviceCreationDesc dc {};
+        dc.graphicsAPI      = api;
+        dc.enableValidation = VRI_TRUE;
+        dc.bestEffort       = VRI_TRUE;
+        VriDevice* dev      = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+        {
+            MESSAGE("backend unavailable: " << static_cast<int>(api));
+            continue;
+        }
+        VriCoreInterface c {};
+        REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
+        REQUIRE(c.EnumerateObjects != nullptr);
+        VriBufferDesc desc {};
+        desc.size           = 256;
+        desc.usage          = VriBufferUsage_TransferSrc;
+        desc.memoryLocation = VriMemoryLocation_HostUpload;
+        VriBuffer* buffer   = nullptr;
+        REQUIRE(c.CreateBuffer(dev, &desc, &buffer) == VriResult_Success);
+        uint32_t count = 0;
+        REQUIRE(c.EnumerateObjects(dev, &count, nullptr) == VriResult_Success);
+        REQUIRE(count > 0);
+        std::vector<VriObjectInfo> objects(count);
+        REQUIRE(c.EnumerateObjects(dev, &count, objects.data()) == VriResult_Success);
+        bool found = false;
+        for (uint32_t i = 0; i < count; ++i)
+            found |= objects[i].handle == buffer;
+        CHECK(found);
+        c.DestroyBuffer(buffer);
+        vriDestroyDevice(dev);
+    }
+}
 
 TEST_CASE("VRI Validation flags a draw issued outside a render pass")
 {
