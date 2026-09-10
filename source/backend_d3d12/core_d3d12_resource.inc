@@ -157,8 +157,8 @@ uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
-    DeviceD3D12*          d  = Dev(device);
-    const DxgiFormatInfo  fi = ToDxgiFormatOrNone(desc->format);
+    DeviceD3D12*         d  = Dev(device);
+    const DxgiFormatInfo fi = ToDxgiFormatOrNone(desc->format);
     if (fi.format == DXGI_FORMAT_UNKNOWN)
     {
         *out = nullptr;

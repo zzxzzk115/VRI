@@ -153,6 +153,8 @@
             {
                 delete l;
                 d->ReportError("D3D12SerializeRootSignature failed");
+                if (err && err->GetBufferSize())
+                    d->ReportError(static_cast<const char*>(err->GetBufferPointer()));
                 return VriResult_Failure;
             }
             if (FAILED(d->Device()->CreateRootSignature(
