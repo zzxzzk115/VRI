@@ -158,7 +158,13 @@ uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
     DeviceD3D12*          d  = Dev(device);
-    const DxgiFormatInfo  fi = ToDxgiFormat(desc->format);
+    const DxgiFormatInfo  fi = ToDxgiFormatOrNone(desc->format);
+    if (fi.format == DXGI_FORMAT_UNKNOWN)
+    {
+        *out = nullptr;
+        d->ReportError("CreateTexture: unmapped DXGI format");
+        return VriResult_Unsupported;
+    }
     D3D12_HEAP_PROPERTIES hp = {};
     hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
     D3D12_RESOURCE_DESC rd   = {};

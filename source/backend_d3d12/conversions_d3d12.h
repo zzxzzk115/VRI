@@ -33,6 +33,15 @@ namespace vri::d3d12
         {VriFormat_RG32_SINT, {DXGI_FORMAT_R32G32_SINT, 8}},
         {VriFormat_RGBA32_UINT, {DXGI_FORMAT_R32G32B32A32_UINT, 16}},
         {VriFormat_RGBA32_SINT, {DXGI_FORMAT_R32G32B32A32_SINT, 16}},
+        // Compressed storage is measured in blocks, not integer bytes per texel.
+        // Copy/readback pitches come from GetCopyableFootprints.
+        {VriFormat_BC1_UNORM, {DXGI_FORMAT_BC1_UNORM, 0}},
+        {VriFormat_BC2_UNORM, {DXGI_FORMAT_BC2_UNORM, 0}},
+        {VriFormat_BC3_UNORM, {DXGI_FORMAT_BC3_UNORM, 0}},
+        {VriFormat_BC4_UNORM, {DXGI_FORMAT_BC4_UNORM, 0}},
+        {VriFormat_BC5_UNORM, {DXGI_FORMAT_BC5_UNORM, 0}},
+        {VriFormat_BC6H_UFLOAT, {DXGI_FORMAT_BC6H_UF16, 0}},
+        {VriFormat_BC7_UNORM, {DXGI_FORMAT_BC7_UNORM, 0}},
         {VriFormat_D32_SFLOAT, {DXGI_FORMAT_D32_FLOAT, 4}},
         {VriFormat_D24_UNORM_S8_UINT, {DXGI_FORMAT_D24_UNORM_S8_UINT, 4}},
     };
