@@ -59,6 +59,18 @@ jobs:
             mesa-vulkan-drivers libgl1-mesa-dri \
             xvfb
 
+      - name: Select installed lavapipe ICD (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # Mesa packages may use lvp_icd.json or an architecture-suffixed name.
+          mapfile -t icds < <(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd(\.[^/]*)?\.json$')
+          test "${#icds[@]}" -eq 1
+          test -r "${icds[0]}"
+          echo "VK_ICD_FILENAMES=${icds[0]}" >> "$GITHUB_ENV"
+          echo "VRI_TEST_REQUIRE_VULKAN=1" >> "$GITHUB_ENV"
+          cat "${icds[0]}"
+
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
 
@@ -84,7 +96,6 @@ jobs:
         if: runner.os == 'Linux'
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: xvfb-run -a xmake run vri-tests
 
       # Smoke-run a small, reliable subset of examples headless under llvmpipe (software GL).
@@ -92,18 +103,14 @@ jobs:
       # catches API/shader regressions that only manifest at runtime. Kept to a representative
       # subset (--only) so CI stays bounded; the full set is still covered by the compile gate.
       #
-      # GL only, not Vulkan: on this runner lavapipe's vkCreateInstance fails, so the examples
-      # (which treat a missing backend as a fatal error, unlike vri-tests which self-skips
-      # GPU backends) can't render on Vulkan here. llvmpipe GL renders all of them cleanly and
-      # is genuine software rasterization; the Vulkan path stays covered by the compile gate
-      # above on every OS, and by the WebGPU/WebGL headless E2E jobs at runtime.
-      - name: Smoke examples (Linux, headless via Xvfb + software GL/llvmpipe)
+      # Examples fail when device creation fails, so both native backends must render.
+      - name: Smoke examples (Linux, headless via Xvfb + lavapipe/llvmpipe)
         if: runner.os == 'Linux'
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: >-
           xvfb-run -a xmake examples
-          --backend=opengl --frames=3
+          --backend=vulkan,opengl --frames=3
           --only=triangle,cube,computeshader,offscreen
 
       - name: Test (Windows)

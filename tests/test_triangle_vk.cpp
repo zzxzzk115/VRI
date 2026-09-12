@@ -6,6 +6,7 @@
 #include <vri/vri.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #include "shaders/common/triangle_spv.h"
@@ -49,6 +50,9 @@ TEST_CASE("Vulkan: render a triangle offscreen and read back the center pixel")
     Vk vk;
     if (!InitVk(vk))
     {
+        // CI provisions a software ICD; losing it must fail the readback gate.
+        const char* required = std::getenv("VRI_TEST_REQUIRE_VULKAN");
+        REQUIRE_FALSE((required && std::strcmp(required, "1") == 0));
         MESSAGE("Vulkan device unavailable - skipping triangle render test");
         return;
     }
