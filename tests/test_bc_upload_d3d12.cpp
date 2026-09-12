@@ -9,7 +9,13 @@
 #include <cstring>
 #include <vector>
 
+// CI can enable the D3D12 option on non-Windows hosts, where no backend is built.
+// Keep device creation mandatory on Windows so missing coverage cannot pass silently.
+#ifdef _WIN32
 TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads")
+#else
+TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest::skip())
+#endif
 {
     std::atomic<unsigned> errors {0};
     VriDeviceCreationDesc dc {};
