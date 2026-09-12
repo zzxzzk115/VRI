@@ -505,23 +505,82 @@ void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
                                        VriBuffer*                      src,
                                        const VriBufferTextureCopyDesc* region)
 {
-    CommandBufferD3D12* c = CB(cmd);
-    TextureD3D12*       t = Tex(dst);
-    BufferD3D12*        b = Buf(src);
-    // Subresource = mip + arrayLayer * mipNum (baseLayer selects the array slice).
-    const UINT          sub = (region ? region->texture.mip : 0) + (region ? region->texture.baseLayer : 0) * t->mipNum;
-    const UINT64        srcOffset               = region ? region->bufferOffset : 0;
-    D3D12_RESOURCE_DESC rd                      = t->resource->GetDesc();
+    CommandBufferD3D12* c         = CB(cmd);
+    TextureD3D12*       t         = Tex(dst);
+    BufferD3D12*        b         = Buf(src);
+    const UINT          mip       = region ? region->texture.mip : 0;
+    const UINT          baseLayer = region ? region->texture.baseLayer : 0;
+    const UINT          layers    = region && region->texture.layerNum ? region->texture.layerNum : 1;
+    if (mip >= t->mipNum || baseLayer >= t->layerNum || layers > t->layerNum - baseLayer)
+    {
+        c->device->ReportError("texture-upload subresource out of bounds");
+        return;
+    }
+    const UINT x         = region ? region->texture.x : 0;
+    const UINT y         = region ? region->texture.y : 0;
+    const UINT z         = region ? region->texture.z : 0;
+    const UINT mipWidth  = (std::max)(1u, t->width >> mip);
+    const UINT mipHeight = (std::max)(1u, t->height >> mip);
+    const UINT mipDepth  = (std::max)(1u, t->depth >> mip);
+    const UINT width     = region && region->texture.width ? region->texture.width : mipWidth;
+    const UINT height    = region && region->texture.height ? region->texture.height : mipHeight;
+    const UINT depth     = region && region->texture.depth ? region->texture.depth : mipDepth;
+    if (x >= mipWidth || width > mipWidth - x || y >= mipHeight || height > mipHeight - y || z >= mipDepth ||
+        depth > mipDepth - z)
+    {
+        c->device->ReportError("texture-upload region out of bounds");
+        return;
+    }
+    D3D12_RESOURCE_DESC rd = t->resource->GetDesc();
+    // Describe the requested region, not the entire destination mip. Footprints account
+    // for compressed blocks even when the logical mip is smaller than one block.
+    rd.Width                                    = width;
+    rd.Height                                   = height;
+    rd.DepthOrArraySize                         = static_cast<UINT16>(depth);
+    rd.MipLevels                                = 1;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp       = {};
     UINT                               rows     = 0;
     UINT64                             rowBytes = 0, total = 0;
-    c->device->Device()->GetCopyableFootprints(&rd, sub, 1, 0, &fp, &rows, &rowBytes, &total); // footprint at offset 0
+    c->device->Device()->GetCopyableFootprints(&rd, 0, 1, 0, &fp, &rows, &rowBytes, &total);
+    if (total == UINT64_MAX || rows == 0 || rowBytes == 0)
+    {
+        c->device->ReportError("texture-upload invalid footprint");
+        return;
+    }
+    const UINT block        = t->texelSize == 0 ? 4 : 1;
+    const UINT sourceWidth  = region && region->bufferRowLength ? region->bufferRowLength : width;
+    const UINT sourceHeight = region && region->bufferImageHeight ? region->bufferImageHeight : height;
+    if (sourceWidth < width || sourceHeight < height || x % block || y % block ||
+        (width % block && x + width != mipWidth) || (height % block && y + height != mipHeight) ||
+        (region && region->bufferRowLength && sourceWidth % block) ||
+        (region && region->bufferImageHeight && sourceHeight % block))
+    {
+        c->device->ReportError("texture-upload invalid block region or source stride");
+        return;
+    }
+    const UINT64 blockBytes  = rowBytes / ((width + block - 1) / block);
+    const UINT64 sourcePitch = ((UINT64(sourceWidth) + block - 1) / block) * blockBytes;
+    const UINT64 sourceRows  = (UINT64(sourceHeight) + block - 1) / block;
+    const UINT64 srcOffset   = region ? region->bufferOffset : 0;
+    // Check divisions before multiplying application-controlled strides.
+    if (srcOffset > b->size || sourcePitch == 0 || sourceRows > UINT64_MAX / sourcePitch)
+    {
+        c->device->ReportError("texture-upload source buffer too small");
+        return;
+    }
+    const UINT64 sourceSlice = sourcePitch * sourceRows;
+    const UINT64 slices      = UINT64(depth) * layers;
+    const UINT64 tail        = (UINT64(rows) - 1) * sourcePitch + rowBytes;
+    if (tail > b->size - srcOffset || slices - 1 > (b->size - srcOffset - tail) / sourceSlice)
+    {
+        c->device->ReportError("texture-upload source buffer too small");
+        return;
+    }
     Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST);
 
     D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
     dstLoc.pResource                   = t->resource.Get();
     dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex            = sub;
     D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
     srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
 
@@ -529,47 +588,66 @@ void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
     // offset. If the app's tightly-packed staging already meets that (typical wide
     // textures, offset 0) copy it directly; otherwise pack the rows into an aligned temp
     // upload buffer (CPU memcpy from the mapped staging) so any texture size/offset works.
-    const bool aligned = rowBytes == fp.Footprint.RowPitch && (srcOffset % D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) == 0;
-    if (aligned || !b->mapped)
+    for (UINT layer = 0; layer < layers; ++layer)
     {
-        srcLoc.pResource              = b->resource.Get();
-        srcLoc.PlacedFootprint        = fp;
-        srcLoc.PlacedFootprint.Offset = srcOffset;
-        c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-    }
-    else
-    {
-        ComPtr<ID3D12Resource> temp;
-        D3D12_HEAP_PROPERTIES  hp = {};
-        hp.Type                   = D3D12_HEAP_TYPE_UPLOAD;
-        D3D12_RESOURCE_DESC bd    = {};
-        bd.Dimension              = D3D12_RESOURCE_DIMENSION_BUFFER;
-        bd.Width                  = total;
-        bd.Height                 = 1;
-        bd.DepthOrArraySize       = 1;
-        bd.MipLevels              = 1;
-        bd.Format                 = DXGI_FORMAT_UNKNOWN;
-        bd.SampleDesc.Count       = 1;
-        bd.Layout                 = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        if (FAILED(c->device->Device()->CreateCommittedResource(
-                &hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&temp))))
+        dstLoc.SubresourceIndex  = mip + (baseLayer + layer) * t->mipNum;
+        const UINT64 layerOffset = srcOffset + layer * depth * sourceSlice;
+        const bool   aligned     = sourcePitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT == 0 && sourcePitch <= UINT32_MAX &&
+                             sourceRows == rows && layerOffset % D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT == 0;
+        if (aligned)
         {
-            c->device->ReportError("texture-upload bounce buffer alloc failed");
-            return;
+            if (b->heapType == D3D12_HEAP_TYPE_DEFAULT)
+                TransitionBuffer(c, b, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            srcLoc.pResource                          = b->resource.Get();
+            srcLoc.PlacedFootprint                    = fp;
+            srcLoc.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(sourcePitch);
+            srcLoc.PlacedFootprint.Offset             = layerOffset;
+            c->list->CopyTextureRegion(&dstLoc, x, y, z, &srcLoc, nullptr);
         }
-        void*       tmp  = nullptr;
-        D3D12_RANGE none = {0, 0};
-        temp->Map(0, &none, &tmp);
-        const uint8_t* srcBase = static_cast<const uint8_t*>(b->mapped) + srcOffset;
-        for (UINT r = 0; r < rows; ++r)
-            std::memcpy(static_cast<uint8_t*>(tmp) + r * fp.Footprint.RowPitch,
-                        srcBase + r * rowBytes,
-                        static_cast<size_t>(rowBytes));
-        temp->Unmap(0, nullptr);
-        srcLoc.pResource       = temp.Get();
-        srcLoc.PlacedFootprint = fp; // offset 0
-        c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-        c->tempUploads.push_back(std::move(temp));
+        else
+        {
+            if (!b->mapped)
+            {
+                c->device->ReportError("unaligned texture-upload requires a mapped upload buffer");
+                return;
+            }
+            ComPtr<ID3D12Resource> temp;
+            D3D12_HEAP_PROPERTIES  hp = {};
+            hp.Type                   = D3D12_HEAP_TYPE_UPLOAD;
+            D3D12_RESOURCE_DESC bd    = {};
+            bd.Dimension              = D3D12_RESOURCE_DIMENSION_BUFFER;
+            bd.Width                  = total;
+            bd.Height                 = 1;
+            bd.DepthOrArraySize       = 1;
+            bd.MipLevels              = 1;
+            bd.Format                 = DXGI_FORMAT_UNKNOWN;
+            bd.SampleDesc.Count       = 1;
+            bd.Layout                 = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            if (FAILED(c->device->Device()->CreateCommittedResource(
+                    &hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&temp))))
+            {
+                c->device->ReportError("texture-upload bounce buffer alloc failed");
+                return;
+            }
+            void*       tmp  = nullptr;
+            D3D12_RANGE none = {0, 0};
+            if (FAILED(temp->Map(0, &none, &tmp)))
+            {
+                c->device->ReportError("texture-upload bounce buffer map failed");
+                return;
+            }
+            const uint8_t* srcBase = static_cast<const uint8_t*>(b->mapped) + layerOffset;
+            for (UINT slice = 0; slice < depth; ++slice)
+                for (UINT r = 0; r < rows; ++r)
+                    std::memcpy(static_cast<uint8_t*>(tmp) + (UINT64(slice) * rows + r) * fp.Footprint.RowPitch,
+                                srcBase + slice * sourceSlice + r * sourcePitch,
+                                static_cast<size_t>(rowBytes));
+            temp->Unmap(0, nullptr);
+            srcLoc.pResource       = temp.Get();
+            srcLoc.PlacedFootprint = fp; // offset 0
+            c->list->CopyTextureRegion(&dstLoc, x, y, z, &srcLoc, nullptr);
+            c->tempUploads.push_back(std::move(temp));
+        }
     }
 }
 // PIX/RenderDoc debug-group markers. We emit them through the command list's

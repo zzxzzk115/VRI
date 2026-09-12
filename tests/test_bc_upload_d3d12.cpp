@@ -56,7 +56,7 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
         td.height         = 128;
         td.depth          = 1;
         td.mipNum         = 8;
-        td.layerNum       = 1;
+        td.layerNum       = 3;
         td.sampleNum      = 1;
         td.usage          = VriTextureUsage_ShaderResource | VriTextureUsage_TransferSrc | VriTextureUsage_TransferDst;
         td.memoryLocation = VriMemoryLocation_Device;
@@ -65,12 +65,13 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
         for (unsigned mip : {0u, 5u, 7u})
         {
             INFO("mip = ", mip);
-            const unsigned             width        = td.width >> mip;
-            const unsigned             rows         = (width + 3) / 4;
-            const unsigned             rowBytes     = rows * blockBytes;
-            const unsigned             sourceOffset = mip ? blockBytes : 0;
-            const unsigned             rowPitch     = (rowBytes + 255) & ~255u;
-            std::vector<unsigned char> source(sourceOffset + rows * rowBytes);
+            const unsigned             width         = td.width >> mip;
+            const unsigned             rows          = (width + 3) / 4;
+            const unsigned             rowBytes      = rows * blockBytes;
+            const unsigned             sourceOffset  = mip ? blockBytes : 0;
+            const unsigned             rowPitch      = (rowBytes + 255) & ~255u;
+            const unsigned             readbackSlice = (rows * rowPitch + 511) & ~511u;
+            std::vector<unsigned char> source(sourceOffset + 2 * rows * rowBytes);
             for (size_t i = 0; i < source.size(); ++i)
                 source[i] = static_cast<unsigned char>((i * 37 + mip * 13) & 255);
             VriBufferDesc bd {};
@@ -83,7 +84,7 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
             REQUIRE(mapped != nullptr);
             std::memcpy(mapped, source.data(), source.size());
             c.UnmapBuffer(upload);
-            bd.size             = rows * rowPitch;
+            bd.size             = 2 * readbackSlice;
             bd.usage            = VriBufferUsage_TransferDst;
             bd.memoryLocation   = VriMemoryLocation_HostReadback;
             VriBuffer* readback = nullptr;
@@ -96,15 +97,68 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
             REQUIRE(c.CreateFence(device, 0, &fence) == VriResult_Success);
             REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
             VriBufferTextureCopyDesc copy {};
-            copy.bufferOffset     = sourceOffset;
-            copy.texture.aspect   = VriImageAspect_Color;
-            copy.texture.mip      = mip;
-            copy.texture.layerNum = 1;
-            copy.texture.width    = width;
-            copy.texture.height   = width;
+            copy.bufferOffset      = sourceOffset;
+            copy.texture.aspect    = VriImageAspect_Color;
+            copy.texture.mip       = mip;
+            copy.texture.baseLayer = 1;
+            copy.texture.layerNum  = 2;
+            copy.texture.width     = width;
+            copy.texture.height    = width;
             c.CmdUploadBufferToTexture(cmd, texture, upload, &copy);
-            copy.bufferOffset = 0;
-            c.CmdReadbackTextureToBuffer(cmd, readback, texture, &copy);
+            std::vector<VriBuffer*> patches;
+            if (mip == 0)
+            {
+                // Patch only three blocks per row, leaving sentinel blocks around the region.
+                // Exercise tight, padded, and directly usable D3D12 source pitches.
+                for (unsigned mode : {0u, 1u, 2u})
+                {
+                    const unsigned             patchPitch  = mode == 2 ? 256 : (mode == 1 ? 5 : 3) * blockBytes;
+                    const unsigned             patchOffset = mode == 2 ? 512 : blockBytes;
+                    const unsigned             patchRows   = mode == 1 ? 3 : 2;
+                    std::vector<unsigned char> patch(patchOffset + (patchRows + 1) * patchPitch + 3 * blockBytes, 0xe7);
+                    for (unsigned layer = 0; layer < 2; ++layer)
+                        for (unsigned row = 0; row < 2; ++row)
+                            for (unsigned byte = 0; byte < 3 * blockBytes; ++byte)
+                                patch[patchOffset + (layer * patchRows + row) * patchPitch + byte] =
+                                    static_cast<unsigned char>(layer * 17 + mode * 61 + row * 23 + byte);
+                    VriBufferDesc patchDesc {};
+                    patchDesc.size           = patch.size();
+                    patchDesc.usage          = VriBufferUsage_TransferSrc;
+                    patchDesc.memoryLocation = VriMemoryLocation_HostUpload;
+                    VriBuffer* patchBuffer   = nullptr;
+                    REQUIRE(c.CreateBuffer(device, &patchDesc, &patchBuffer) == VriResult_Success);
+                    void* patchData = c.MapBuffer(patchBuffer, 0, patchDesc.size);
+                    REQUIRE(patchData != nullptr);
+                    std::memcpy(patchData, patch.data(), patch.size());
+                    c.UnmapBuffer(patchBuffer);
+                    patches.push_back(patchBuffer);
+                    VriBufferTextureCopyDesc patchCopy {};
+                    patchCopy.bufferOffset      = patchOffset;
+                    patchCopy.bufferRowLength   = mode == 0 ? 0 : patchPitch / blockBytes * 4;
+                    patchCopy.bufferImageHeight = mode == 1 ? 12 : 0;
+                    patchCopy.texture.aspect    = VriImageAspect_Color;
+                    patchCopy.texture.baseLayer = 1;
+                    patchCopy.texture.layerNum  = 2;
+                    patchCopy.texture.x         = 4 + mode * 16;
+                    patchCopy.texture.y         = 8;
+                    patchCopy.texture.width     = 12;
+                    patchCopy.texture.height    = 8;
+                    c.CmdUploadBufferToTexture(cmd, texture, patchBuffer, &patchCopy);
+                    for (unsigned layer = 0; layer < 2; ++layer)
+                        for (unsigned row = 0; row < 2; ++row)
+                            std::memcpy(source.data() + (layer * rows + row + 2) * rowBytes +
+                                            (1 + mode * 4) * blockBytes,
+                                        patch.data() + patchOffset + (layer * patchRows + row) * patchPitch,
+                                        3 * blockBytes);
+                }
+            }
+            copy.texture.layerNum = 1;
+            for (unsigned layer = 0; layer < 2; ++layer)
+            {
+                copy.texture.baseLayer = layer + 1;
+                copy.bufferOffset      = layer * readbackSlice;
+                c.CmdReadbackTextureToBuffer(cmd, readback, texture, &copy);
+            }
             REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);
             VriFenceSubmitDesc signal {};
             signal.fence = fence;
@@ -118,14 +172,18 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
             c.Wait(fence, 1);
             const auto* result = static_cast<const unsigned char*>(c.MapBuffer(readback, 0, bd.size));
             REQUIRE(result != nullptr);
-            for (unsigned row = 0; row < rows; ++row)
-                CHECK(std::memcmp(result + row * rowPitch, source.data() + sourceOffset + row * rowBytes, rowBytes) ==
-                      0);
+            for (unsigned layer = 0; layer < 2; ++layer)
+                for (unsigned row = 0; row < rows; ++row)
+                    CHECK(std::memcmp(result + layer * readbackSlice + row * rowPitch,
+                                      source.data() + sourceOffset + (layer * rows + row) * rowBytes,
+                                      rowBytes) == 0);
             c.UnmapBuffer(readback);
             c.DestroyFence(fence);
             c.DestroyCommandAllocator(allocator);
             c.DestroyBuffer(readback);
             c.DestroyBuffer(upload);
+            for (VriBuffer* patch : patches)
+                c.DestroyBuffer(patch);
         }
         c.DestroyTexture(texture);
     }
