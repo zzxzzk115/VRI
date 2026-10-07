@@ -65,6 +65,7 @@ target("vri-tests")
     add_files("test_debuggroup_xbackend.cpp") -- debug-group markers (DX12 PIX BeginEvent/EndEvent) wrap work without corrupting it
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
+        add_packages("vulkan-headers") -- device-creation extension regression uses native Vulkan types
         add_files("test_triangle_vk.cpp")
         add_files("test_core_phase2_vk.cpp")
         add_files("test_features_vk.cpp")

@@ -95,6 +95,11 @@ Per-backend implementation notes — the fallbacks, caveats, and the native exte
 uses — are in **[DETAIL.md](DETAIL.md)**. The threading contract (which calls may run concurrently,
 and where the caller must synchronize) is in **[docs/threading.md](docs/threading.md)**.
 
+Vulkan enables `VK_NV_shader_subgroup_partitioned` when the device advertises it,
+so Slang `WaveMatch` / `WaveMulti*` shaders can use partitioned subgroup operations
+without application-side device creation hooks. Devices without this extension
+retain their existing core subgroup support.
+
 ## Building
 
 VRI uses [xmake](https://xmake.io).
