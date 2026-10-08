@@ -14,6 +14,7 @@ namespace vri::vk
 {
     struct SwapChainVK
     {
+        ~SwapChainVK() { DebugObjectsVK::Untrack(this); }
         DeviceVK*               device;
         VkSurfaceKHR            surface;
         VkSwapchainKHR          swapchain;
@@ -30,7 +31,11 @@ namespace vri::vk
         VriPresentMode requestedPresentMode;
     };
 
-    inline VriSwapChain* ToHandle(SwapChainVK* s) { return reinterpret_cast<VriSwapChain*>(s); }
+    inline VriSwapChain* ToHandle(SwapChainVK* s)
+    {
+        DebugObjectsVK::Track(s, s->device, VK_OBJECT_TYPE_SWAPCHAIN_KHR, s->swapchain);
+        return reinterpret_cast<VriSwapChain*>(s);
+    }
 
     const VriSwapChainInterface* GetSwapChainInterfaceVK();
 } // namespace vri::vk

@@ -9,27 +9,37 @@
 
 #include <vri/vri.h>
 
+#include "debug_vk.h"
+
 namespace vri::vk
 {
     class DeviceVK;
 
     struct QueueVK
     {
+        ~QueueVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK* device;
         VkQueue   queue;
         uint32_t  familyIndex;
         uint32_t  indexInFamily;
     };
 
+    struct CommandBufferVK;
     struct CommandAllocatorVK
     {
-        DeviceVK*     device;
-        VkCommandPool pool;
-        VriQueueType  queueType;
+        ~CommandAllocatorVK();
+
+        DeviceVK*                     device;
+        VkCommandPool                 pool;
+        VriQueueType                  queueType;
+        std::vector<CommandBufferVK*> buffers;
     };
 
     struct CommandBufferVK
     {
+        ~CommandBufferVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*       device;
         VkCommandBuffer cmd;
         // recording state
@@ -37,8 +47,17 @@ namespace vri::vk
         VkPipelineBindPoint boundBindPoint;
     };
 
+    inline CommandAllocatorVK::~CommandAllocatorVK()
+    {
+        for (auto* buffer : buffers)
+            delete buffer;
+        DebugObjectsVK::Untrack(this);
+    }
+
     struct BufferVK
     {
+        ~BufferVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*     device;
         VkBuffer      buffer;
         VmaAllocation allocation; // null if not VMA-owned
@@ -51,6 +70,8 @@ namespace vri::vk
 
     struct AccelerationStructureVK
     {
+        ~AccelerationStructureVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*                      device;
         VkAccelerationStructureKHR     as;
         VkBuffer                       buffer; // backing store (ACCELERATION_STRUCTURE_STORAGE)
@@ -66,11 +87,14 @@ namespace vri::vk
     };
     inline VriAccelerationStructure* ToHandle(AccelerationStructureVK* a)
     {
+        DebugObjectsVK::Track(a, a->device, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, a->as);
         return reinterpret_cast<VriAccelerationStructure*>(a);
     }
 
     struct MicromapVK
     {
+        ~MicromapVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*                  device;
         VkMicromapEXT              micromap;
         VkBuffer                   buffer; // backing store (MICROMAP_STORAGE)
@@ -82,10 +106,16 @@ namespace vri::vk
         uint32_t                   subdivisionLevel;
         uint32_t                   triangleCount;
     };
-    inline VriMicromap* ToHandle(MicromapVK* m) { return reinterpret_cast<VriMicromap*>(m); }
+    inline VriMicromap* ToHandle(MicromapVK* m)
+    {
+        DebugObjectsVK::Track(m, m->device, VK_OBJECT_TYPE_MICROMAP_EXT, m->micromap);
+        return reinterpret_cast<VriMicromap*>(m);
+    }
 
     struct TextureVK
     {
+        ~TextureVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*     device;
         VkImage       image;
         VmaAllocation allocation; // null if wrapped (not owned)
@@ -103,6 +133,8 @@ namespace vri::vk
     // A view (texture/buffer) or a sampler.
     struct DescriptorVK
     {
+        ~DescriptorVK() { DebugObjectsVK::Untrack(this); }
+
         enum class Kind
         {
             TextureView,
@@ -136,6 +168,8 @@ namespace vri::vk
 
     struct PipelineLayoutVK
     {
+        ~PipelineLayoutVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*                          device;
         VkPipelineLayout                   layout;
         std::vector<VkDescriptorSetLayout> setLayouts;
@@ -151,22 +185,37 @@ namespace vri::vk
         uint32_t           pushSize   = 0;
     };
 
+    struct DescriptorSetVK;
     struct DescriptorPoolVK
     {
-        DeviceVK*        device;
-        VkDescriptorPool pool;
+        ~DescriptorPoolVK();
+
+        DeviceVK*                     device;
+        VkDescriptorPool              pool;
+        std::vector<DescriptorSetVK*> sets;
     };
 
     struct DescriptorSetVK
     {
+        ~DescriptorSetVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*               device;
         VkDescriptorSet         set;
         const PipelineLayoutVK* layout;
         uint32_t                setIndex;
     };
 
+    inline DescriptorPoolVK::~DescriptorPoolVK()
+    {
+        for (auto* set : sets)
+            delete set;
+        DebugObjectsVK::Untrack(this);
+    }
+
     struct PipelineVK
     {
+        ~PipelineVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*           device;
         VkPipeline          pipeline;
         VkPipelineBindPoint bindPoint;
@@ -174,31 +223,47 @@ namespace vri::vk
 
     struct FenceVK
     {
+        ~FenceVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*   device;
         VkSemaphore timeline; // timeline semaphore
     };
 
     struct MemoryVK
     {
+        ~MemoryVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*     device;
         VmaAllocation allocation;
     };
 
     struct QueryPoolVK
     {
+        ~QueryPoolVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*   device;
         VkQueryPool pool;
         VkQueryType type;
         uint32_t    count;
     };
-    inline VriQueryPool* ToHandle(QueryPoolVK* q) { return reinterpret_cast<VriQueryPool*>(q); }
+    inline VriQueryPool* ToHandle(QueryPoolVK* q)
+    {
+        DebugObjectsVK::Track(q, q->device, VK_OBJECT_TYPE_QUERY_POOL, q->pool);
+        return reinterpret_cast<VriQueryPool*>(q);
+    }
 
     struct PipelineCacheVK
     {
+        ~PipelineCacheVK() { DebugObjectsVK::Untrack(this); }
+
         DeviceVK*       device;
         VkPipelineCache cache;
     };
-    inline VriPipelineCache* ToHandle(PipelineCacheVK* p) { return reinterpret_cast<VriPipelineCache*>(p); }
+    inline VriPipelineCache* ToHandle(PipelineCacheVK* p)
+    {
+        DebugObjectsVK::Track(p, p->device, VK_OBJECT_TYPE_PIPELINE_CACHE, p->cache);
+        return reinterpret_cast<VriPipelineCache*>(p);
+    }
     // The VkPipelineCache to seed a create with (VK_NULL_HANDLE when the desc has none).
     inline VkPipelineCache PipeCache(VriPipelineCache* h)
     {
@@ -217,16 +282,74 @@ namespace vri::vk
         return reinterpret_cast<const T*>(h);
     }
 
-    inline VriQueue*            ToHandle(QueueVK* q) { return reinterpret_cast<VriQueue*>(q); }
-    inline VriCommandAllocator* ToHandle(CommandAllocatorVK* a) { return reinterpret_cast<VriCommandAllocator*>(a); }
-    inline VriCommandBuffer*    ToHandle(CommandBufferVK* c) { return reinterpret_cast<VriCommandBuffer*>(c); }
-    inline VriBuffer*           ToHandle(BufferVK* b) { return reinterpret_cast<VriBuffer*>(b); }
-    inline VriTexture*          ToHandle(TextureVK* t) { return reinterpret_cast<VriTexture*>(t); }
-    inline VriDescriptor*       ToHandle(DescriptorVK* d) { return reinterpret_cast<VriDescriptor*>(d); }
-    inline VriPipelineLayout*   ToHandle(PipelineLayoutVK* p) { return reinterpret_cast<VriPipelineLayout*>(p); }
-    inline VriPipeline*         ToHandle(PipelineVK* p) { return reinterpret_cast<VriPipeline*>(p); }
-    inline VriFence*            ToHandle(FenceVK* f) { return reinterpret_cast<VriFence*>(f); }
-    inline VriMemory*           ToHandle(MemoryVK* m) { return reinterpret_cast<VriMemory*>(m); }
-    inline VriDescriptorPool*   ToHandle(DescriptorPoolVK* p) { return reinterpret_cast<VriDescriptorPool*>(p); }
-    inline VriDescriptorSet*    ToHandle(DescriptorSetVK* s) { return reinterpret_cast<VriDescriptorSet*>(s); }
+    inline VriQueue* ToHandle(QueueVK* q)
+    {
+        DebugObjectsVK::Track(q, q->device, VK_OBJECT_TYPE_QUEUE, q->queue);
+        return reinterpret_cast<VriQueue*>(q);
+    }
+    inline VriCommandAllocator* ToHandle(CommandAllocatorVK* a)
+    {
+        DebugObjectsVK::Track(a, a->device, VK_OBJECT_TYPE_COMMAND_POOL, a->pool);
+        return reinterpret_cast<VriCommandAllocator*>(a);
+    }
+    inline VriCommandBuffer* ToHandle(CommandBufferVK* c)
+    {
+        DebugObjectsVK::Track(c, c->device, VK_OBJECT_TYPE_COMMAND_BUFFER, c->cmd);
+        return reinterpret_cast<VriCommandBuffer*>(c);
+    }
+    inline VriBuffer* ToHandle(BufferVK* b)
+    {
+        DebugObjectsVK::Track(b, b->device, VK_OBJECT_TYPE_BUFFER, b->buffer);
+        return reinterpret_cast<VriBuffer*>(b);
+    }
+    inline VriTexture* ToHandle(TextureVK* t)
+    {
+        DebugObjectsVK::Track(t, t->device, VK_OBJECT_TYPE_IMAGE, t->image);
+        return reinterpret_cast<VriTexture*>(t);
+    }
+    inline VriDescriptor* ToHandle(DescriptorVK* d)
+    {
+        switch (d->kind)
+        {
+            case DescriptorVK::Kind::TextureView:
+                DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_IMAGE_VIEW, d->imageView);
+                break;
+            case DescriptorVK::Kind::BufferView:
+                DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_BUFFER_VIEW, d->bufferView);
+                break;
+            case DescriptorVK::Kind::Sampler:
+                DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_SAMPLER, d->sampler);
+                break;
+            default:
+                DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_UNKNOWN, uint64_t {0});
+                break;
+        }
+        return reinterpret_cast<VriDescriptor*>(d);
+    }
+    inline VriPipelineLayout* ToHandle(PipelineLayoutVK* p)
+    {
+        DebugObjectsVK::Track(p, p->device, VK_OBJECT_TYPE_PIPELINE_LAYOUT, p->layout);
+        return reinterpret_cast<VriPipelineLayout*>(p);
+    }
+    inline VriPipeline* ToHandle(PipelineVK* p)
+    {
+        DebugObjectsVK::Track(p, p->device, VK_OBJECT_TYPE_PIPELINE, p->pipeline);
+        return reinterpret_cast<VriPipeline*>(p);
+    }
+    inline VriFence* ToHandle(FenceVK* f)
+    {
+        DebugObjectsVK::Track(f, f->device, VK_OBJECT_TYPE_SEMAPHORE, f->timeline);
+        return reinterpret_cast<VriFence*>(f);
+    }
+    VriMemory*                ToHandle(MemoryVK* m);
+    inline VriDescriptorPool* ToHandle(DescriptorPoolVK* p)
+    {
+        DebugObjectsVK::Track(p, p->device, VK_OBJECT_TYPE_DESCRIPTOR_POOL, p->pool);
+        return reinterpret_cast<VriDescriptorPool*>(p);
+    }
+    inline VriDescriptorSet* ToHandle(DescriptorSetVK* s)
+    {
+        DebugObjectsVK::Track(s, s->device, VK_OBJECT_TYPE_DESCRIPTOR_SET, s->set);
+        return reinterpret_cast<VriDescriptorSet*>(s);
+    }
 } // namespace vri::vk

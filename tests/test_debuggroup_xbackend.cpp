@@ -57,7 +57,7 @@ namespace
 
     // Copy a known pattern staging -> device -> readback, with every command wrapped in
     // an outer debug group and the readback copy in a nested inner group.
-    Probe RunDebugGroupCopy(VriGraphicsAPI api)
+    Probe RunDebugGroupCopy(VriGraphicsAPI api, VriBool validation = VRI_TRUE)
     {
         Probe                p;
         MsgState             msg;
@@ -67,7 +67,7 @@ namespace
 
         VriDeviceCreationDesc dc {};
         dc.graphicsAPI       = api;
-        dc.enableValidation  = VRI_TRUE;
+        dc.enableValidation  = validation;
         dc.bestEffort        = VRI_TRUE;
         dc.callbackInterface = &cb;
         VriDevice* dev       = nullptr;
@@ -117,6 +117,19 @@ namespace
         REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
         VriFence* fence = nullptr;
         REQUIRE(c.CreateFence(dev, 0, &fence) == VriResult_Success);
+
+        if (api == VriGraphicsAPI_Vulkan)
+        {
+            c.SetDebugName(staging, "vri.test.staging");
+            c.SetDebugName(device, "vri.test.device");
+            c.SetDebugName(readback, "vri.test.readback");
+            c.SetDebugName(alloc, "vri.test.command-pool");
+            c.SetDebugName(cmd, "vri.test.command-buffer");
+            c.SetDebugName(fence, "vri.test.fence");
+            c.SetDebugName(queue, "vri.test.graphics-queue");
+            c.SetDebugName(dev, "vri.test.device-handle");
+            c.SetDebugName(readback, nullptr);
+        }
 
         const int errBefore = msg.errors;
         REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
@@ -180,10 +193,10 @@ namespace
         return p;
     }
 
-    void Check(VriGraphicsAPI api)
+    void Check(VriGraphicsAPI api, VriBool validation = VRI_TRUE)
     {
         const std::string tag   = std::string(ApiName(api)) + " debug-group copy";
-        const Probe       probe = RunDebugGroupCopy(api);
+        const Probe       probe = RunDebugGroupCopy(api, validation);
         if (!probe.ran)
         {
             const std::string m = tag + " unavailable - skipped";
@@ -203,4 +216,9 @@ TEST_CASE("debug-group: nested Begin/End markers wrap GPU work without corruptin
     Check(VriGraphicsAPI_OpenGL);
     Check(VriGraphicsAPI_D3D12);
     Check(VriGraphicsAPI_Metal);
+}
+
+TEST_CASE("debug-group: Vulkan names and nested markers work without validation")
+{
+    Check(VriGraphicsAPI_Vulkan, VRI_FALSE);
 }
