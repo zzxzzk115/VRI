@@ -10,6 +10,7 @@ namespace
 {
     std::vector<VkObjectType> g_types;
     std::vector<uint64_t>     g_handles;
+    std::vector<std::string>  g_names;
     std::vector<std::string>  g_labels;
     uint32_t                  g_ends = 0;
 
@@ -17,6 +18,7 @@ namespace
     {
         g_types.push_back(info->objectType);
         g_handles.push_back(info->objectHandle);
+        g_names.emplace_back(info->pObjectName ? info->pObjectName : "");
         return VK_SUCCESS;
     }
     VKAPI_ATTR void VKAPI_CALL CaptureBegin(VkCommandBuffer, const VkDebugUtilsLabelEXT* label)
@@ -75,6 +77,7 @@ TEST_CASE("Vulkan debug-utils Release annotations dispatch native object types w
     REQUIRE(vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core) == VriResult_Success);
     g_types.clear();
     g_handles.clear();
+    g_names.clear();
     g_labels.clear();
     g_ends = 0;
 
@@ -109,6 +112,25 @@ TEST_CASE("Vulkan debug-utils Release annotations dispatch native object types w
     CHECK(g_handles[1] == 102);
     CHECK(g_handles[2] == 103);
     CHECK(g_handles[3] == 104);
+
+    DescriptorVK acceleration {};
+    acceleration.device = backend;
+    acceleration.kind   = DescriptorVK::Kind::AccelerationStructure;
+    acceleration.accel  = Native<VkAccelerationStructureKHR>(107);
+    core.SetDebugName(ToHandle(&acceleration), "AS view");
+    CHECK(g_types.back() == VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR);
+    CHECK(g_handles.back() == 107);
+
+    // This is the same logical handle with a recreated native object (e.g. swapchain resize).
+    buffer.buffer = Native<VkBuffer>(108);
+    ToHandle(&buffer);
+    CHECK(g_handles.back() == 108);
+    CHECK(g_names.back() == "buffer");
+    core.SetDebugName(bufferHandle, nullptr);
+    const auto namedCount = g_names.size();
+    buffer.buffer         = Native<VkBuffer>(109);
+    ToHandle(&buffer);
+    CHECK(g_names.size() == namedCount);
 
     auto* commandHandle = ToHandle(&command);
     core.CmdBeginDebugGroup(commandHandle, "outer");

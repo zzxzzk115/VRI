@@ -317,6 +317,9 @@ namespace vri::vk
             case DescriptorVK::Kind::BufferView:
                 DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_BUFFER_VIEW, d->bufferView);
                 break;
+            case DescriptorVK::Kind::AccelerationStructure:
+                DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, d->accel);
+                break;
             case DescriptorVK::Kind::Sampler:
                 DebugObjectsVK::Track(d, d->device, VK_OBJECT_TYPE_SAMPLER, d->sampler);
                 break;

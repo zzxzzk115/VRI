@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 
@@ -22,6 +23,7 @@ namespace vri::vk
             DeviceVK*    device = nullptr;
             VkObjectType type   = VK_OBJECT_TYPE_UNKNOWN;
             uint64_t     handle = 0;
+            std::string  name;
         };
 
         template<typename H>
@@ -36,8 +38,37 @@ namespace vri::vk
         template<typename H>
         static void Track(const void* object, DeviceVK* device, VkObjectType type, H handle)
         {
-            const std::lock_guard lock {Mutex()};
-            Objects()[object] = {device, type, NativeHandle(handle)};
+            Object renamed;
+            {
+                const std::lock_guard lock {Mutex()};
+                auto&                 entry   = Objects()[object];
+                const auto            native  = NativeHandle(handle);
+                const bool            changed = entry.handle != native || entry.type != type || entry.device != device;
+                entry.device                  = device;
+                entry.type                    = type;
+                entry.handle                  = native;
+                if (changed && !entry.name.empty())
+                    renamed = entry;
+            }
+            // Recreating a native object must retain its logical VRI object's label.
+            // Native dispatch happens outside the registry lock (tool layers may reenter).
+            if (renamed.device)
+                ApplyName(renamed);
+        }
+
+        static Object SetName(const void* object, const char* name)
+        {
+            Object named;
+            {
+                const std::lock_guard lock {Mutex()};
+                const auto            it = Objects().find(object);
+                if (it == Objects().end())
+                    return {};
+                it->second.name = name ? name : "";
+                named           = it->second;
+            }
+            ApplyName(named);
+            return named;
         }
 
         static void Untrack(const void* object)
@@ -54,6 +85,8 @@ namespace vri::vk
         }
 
     private:
+        static void ApplyName(const Object& object);
+
         static std::mutex& Mutex()
         {
             static std::mutex mutex;

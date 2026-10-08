@@ -1781,18 +1781,9 @@ namespace vri::vk
         void VRI_CALL DeviceWaitIdle(VriDevice* device) { vkDeviceWaitIdle(Dev(device)->Device()); }
         void VRI_CALL SetDebugName(void* object, const char* name)
         {
-            const auto native = DebugObjectsVK::Find(object);
-            if (!native.device)
-                return;
-            native.device->Objects().SetName(object, name);
-            const auto setName = native.device->Ext().SetDebugUtilsObjectName;
-            if (!setName || !native.handle || native.type == VK_OBJECT_TYPE_UNKNOWN)
-                return;
-            VkDebugUtilsObjectNameInfoEXT info {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT};
-            info.objectType   = native.type;
-            info.objectHandle = native.handle;
-            info.pObjectName  = name;
-            setName(native.device->Device(), &info);
+            const auto native = DebugObjectsVK::SetName(object, name);
+            if (native.device)
+                native.device->Objects().SetName(object, name);
         }
 
         VriResult VRI_CALL EnumerateObjects(const VriDevice* device, uint32_t* count, VriObjectInfo* out)
