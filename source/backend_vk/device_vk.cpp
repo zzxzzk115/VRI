@@ -13,6 +13,7 @@
 
 #include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -535,6 +536,15 @@ namespace vri::vk
             extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
         for (uint32_t i = 0; i < desc.requiredDeviceExtensionNum; ++i)
             extensions.push_back(desc.requiredDeviceExtensions[i]);
+
+        // Slang's WaveMatch / WaveMulti* emit SPV_NV_shader_subgroup_partitioned.
+        // This extension has no feature struct: enabling its name is sufficient.
+        // Like core subgroup operations, make it available to shaders when supported.
+        if (hasExt(VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) &&
+            std::none_of(extensions.begin(), extensions.end(), [](const char* enabled) {
+                return std::strcmp(enabled, VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0;
+            }))
+            extensions.push_back(VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME);
 
         // MoltenVK: a portability device (e.g. Metal via VK_KHR_portability_enumeration) that
         // advertises VK_KHR_portability_subset MUST enable it in vkCreateDevice, or device

@@ -4,9 +4,11 @@
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
+#include <vulkan/vulkan.h>
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace
 {
@@ -160,4 +162,66 @@ TEST_CASE("Vulkan: interop interface exposes native handles and wraps textures")
 
     c.DestroyTexture(wrapped); // borrowed -> must NOT free the underlying image
     c.DestroyTexture(texture); // owns + frees the image
+}
+
+TEST_CASE("Vulkan: partitioned subgroup extension is enabled when supported")
+{
+    if (!VulkanAvailable())
+    {
+        MESSAGE("Vulkan unavailable - skipping");
+        return;
+    }
+    struct Probe
+    {
+        bool     called = false, supported = false;
+        uint32_t enabledCount = 0;
+    } probe;
+    VriVulkanCreateHooks hooks {};
+    hooks.api            = VriGraphicsAPI_Vulkan;
+    hooks.userData       = &probe;
+    hooks.createInstance = [](void*, const void* info, void* output) -> int32_t {
+        return vkCreateInstance(
+            static_cast<const VkInstanceCreateInfo*>(info), nullptr, static_cast<VkInstance*>(output));
+    };
+    hooks.createDevice = [](void* user, void* physical, const void* info, void* output) -> int32_t {
+        auto& p           = *static_cast<Probe*>(user);
+        p.called          = true;
+        const auto gpu    = static_cast<VkPhysicalDevice>(physical);
+        uint32_t   count  = 0;
+        auto       result = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &count, nullptr);
+        if (result != VK_SUCCESS)
+            return result;
+        std::vector<VkExtensionProperties> extensions(count);
+        result = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &count, extensions.data());
+        if (result != VK_SUCCESS)
+            return result;
+        for (uint32_t i = 0; i < count; ++i)
+            p.supported |=
+                std::strcmp(extensions[i].extensionName, VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0;
+        const auto& ci = *static_cast<const VkDeviceCreateInfo*>(info);
+        for (uint32_t i = 0; i < ci.enabledExtensionCount; ++i)
+            p.enabledCount +=
+                std::strcmp(ci.ppEnabledExtensionNames[i], VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0;
+        return vkCreateDevice(gpu, &ci, nullptr, static_cast<VkDevice*>(output));
+    };
+    Ctx                   ctx;
+    VriDeviceCreationDesc desc {};
+    desc.graphicsAPI      = VriGraphicsAPI_Vulkan;
+    desc.enableValidation = VRI_TRUE;
+    desc.nativeCreateInfo = &hooks;
+    REQUIRE(vriCreateDevice(&desc, &ctx.device) == VriResult_Success);
+    CHECK(probe.called);
+    CHECK(probe.enabledCount == (probe.supported ? 1u : 0u));
+    if (probe.supported)
+    {
+        const char  requiredName[]      = VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME;
+        const char* required[]          = {requiredName};
+        desc.requiredDeviceExtensions   = required;
+        desc.requiredDeviceExtensionNum = 1;
+        probe                           = {};
+        Ctx requested;
+        REQUIRE(vriCreateDevice(&desc, &requested.device) == VriResult_Success);
+        CHECK(probe.called);
+        CHECK(probe.enabledCount == 1u);
+    }
 }
