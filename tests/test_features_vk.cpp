@@ -173,7 +173,8 @@ TEST_CASE("Vulkan: partitioned subgroup extension is enabled when supported")
     }
     struct Probe
     {
-        bool called = false, supported = false, enabled = false;
+        bool     called = false, supported = false;
+        uint32_t enabledCount = 0;
     } probe;
     VriVulkanCreateHooks hooks {};
     hooks.api            = VriGraphicsAPI_Vulkan;
@@ -199,7 +200,7 @@ TEST_CASE("Vulkan: partitioned subgroup extension is enabled when supported")
                 std::strcmp(extensions[i].extensionName, VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0;
         const auto& ci = *static_cast<const VkDeviceCreateInfo*>(info);
         for (uint32_t i = 0; i < ci.enabledExtensionCount; ++i)
-            p.enabled |=
+            p.enabledCount +=
                 std::strcmp(ci.ppEnabledExtensionNames[i], VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0;
         return vkCreateDevice(gpu, &ci, nullptr, static_cast<VkDevice*>(output));
     };
@@ -210,5 +211,17 @@ TEST_CASE("Vulkan: partitioned subgroup extension is enabled when supported")
     desc.nativeCreateInfo = &hooks;
     REQUIRE(vriCreateDevice(&desc, &ctx.device) == VriResult_Success);
     CHECK(probe.called);
-    CHECK(probe.enabled == probe.supported);
+    CHECK(probe.enabledCount == (probe.supported ? 1u : 0u));
+    if (probe.supported)
+    {
+        const char  requiredName[]      = VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME;
+        const char* required[]          = {requiredName};
+        desc.requiredDeviceExtensions   = required;
+        desc.requiredDeviceExtensionNum = 1;
+        probe                           = {};
+        Ctx requested;
+        REQUIRE(vriCreateDevice(&desc, &requested.device) == VriResult_Success);
+        CHECK(probe.called);
+        CHECK(probe.enabledCount == 1u);
+    }
 }
