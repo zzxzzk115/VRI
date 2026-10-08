@@ -285,7 +285,7 @@ namespace vri::vk
             v->kind         = DescriptorVK::Kind::AccelerationStructure;
             v->device       = Dev(device);
             v->accel        = AS(as)->as;
-            *out            = reinterpret_cast<VriDescriptor*>(v);
+            *out            = ToHandle(v);
             return VriResult_Success;
         }
 

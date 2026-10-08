@@ -255,7 +255,8 @@ namespace vri::vk
                 vkDestroySwapchainKHR(d->Device(), sc->swapchain, nullptr);
             DestroyTextures(sc);
 
-            sc->swapchain   = newSwapchain;
+            sc->swapchain = newSwapchain;
+            DebugObjectsVK::Track(sc, d, VK_OBJECT_TYPE_SWAPCHAIN_KHR, newSwapchain);
             sc->format      = chosen.format;
             sc->extent      = extent;
             sc->presentMode = mode;

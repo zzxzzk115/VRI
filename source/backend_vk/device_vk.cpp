@@ -74,6 +74,7 @@ namespace vri::vk
 
     DeviceVK::~DeviceVK()
     {
+        DebugObjectsVK::Untrack(this);
         if (m_device)
             vkDeviceWaitIdle(m_device);
         if (m_allocator)
@@ -140,6 +141,7 @@ namespace vri::vk
         LoadExtensionFunctions();
         FillDeviceDesc();
         FillRegistry();
+        DebugObjectsVK::Track(this, this, VK_OBJECT_TYPE_DEVICE, m_device);
         return VriResult_Success;
     }
 
@@ -177,11 +179,15 @@ namespace vri::vk
         for (uint32_t i = 0; i < desc.requiredInstanceExtensionNum; ++i)
             extensions.push_back(desc.requiredInstanceExtensions[i]);
 
+        // Tool annotations are useful in optimized Release builds without validation.
+        m_debugUtils = HasInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        if (m_debugUtils)
+            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
         std::vector<const char*> layers;
         if (m_validation && HasLayer("VK_LAYER_KHRONOS_validation"))
         {
             layers.push_back("VK_LAYER_KHRONOS_validation");
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
         else
         {
@@ -223,7 +229,7 @@ namespace vri::vk
             return VriResult_Failure;
         }
 
-        if (m_validation)
+        if (m_validation && m_debugUtils)
         {
             auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
                 vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT"));
@@ -523,6 +529,10 @@ namespace vri::vk
 
         std::vector<const char*> extensions;
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        // NonSemantic shader metadata is core in Vulkan 1.3; enable the extension
+        // when a pre-1.3 device exposes it so profiling bytecode is also accepted.
+        if (!useVk13Core && hasExt(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME))
+            extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
         for (uint32_t i = 0; i < desc.requiredDeviceExtensionNum; ++i)
             extensions.push_back(desc.requiredDeviceExtensions[i]);
 
@@ -997,6 +1007,15 @@ namespace vri::vk
     // Resolve extension entry points for the feature set granted at creation.
     void DeviceVK::LoadExtensionFunctions()
     {
+        if (m_debugUtils)
+        {
+            m_ext.CmdBeginDebugUtilsLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+                vkGetDeviceProcAddr(m_device, "vkCmdBeginDebugUtilsLabelEXT"));
+            m_ext.CmdEndDebugUtilsLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+                vkGetDeviceProcAddr(m_device, "vkCmdEndDebugUtilsLabelEXT"));
+            m_ext.SetDebugUtilsObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+                vkGetDeviceProcAddr(m_device, "vkSetDebugUtilsObjectNameEXT"));
+        }
         // Core 1.3 entry points, loaded core-name-first with a KHR-alias fallback for
         // pre-1.3 drivers (MoltenVK reports 1.2 and only exposes the KHR variants).
         auto LoadCoreOrKhr = [&](const char* core, const char* khr) {

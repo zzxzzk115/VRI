@@ -17,6 +17,14 @@
 
 namespace vri::vk
 {
+    VriMemory* ToHandle(MemoryVK* m)
+    {
+        VmaAllocationInfo info {};
+        vmaGetAllocationInfo(m->device->Allocator(), m->allocation, &info);
+        DebugObjectsVK::Track(m, m->device, VK_OBJECT_TYPE_DEVICE_MEMORY, info.deviceMemory);
+        return reinterpret_cast<VriMemory*>(m);
+    }
+
     namespace
     {
         inline DeviceVK*               Dev(VriDevice* h) { return reinterpret_cast<DeviceVK*>(h); }
@@ -242,7 +250,9 @@ namespace vri::vk
             if (vkAllocateCommandBuffers(a->device->Device(), &ai, &cmd) != VK_SUCCESS)
                 return VriResult_Failure;
 
-            *out = ToHandle(new CommandBufferVK {a->device, cmd, nullptr, VK_PIPELINE_BIND_POINT_GRAPHICS});
+            auto* buffer = new CommandBufferVK {a->device, cmd, nullptr, VK_PIPELINE_BIND_POINT_GRAPHICS};
+            a->buffers.push_back(buffer);
+            *out = ToHandle(buffer);
             return VriResult_Success;
         }
 
@@ -1156,6 +1166,9 @@ namespace vri::vk
         {
             DescriptorPoolVK* p = DPool(pool);
             vkResetDescriptorPool(p->device->Device(), p->pool, 0);
+            for (auto* set : p->sets)
+                delete set;
+            p->sets.clear();
         }
 
         void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool)
@@ -1202,7 +1215,11 @@ namespace vri::vk
                 return VriResult_Failure;
 
             for (uint32_t i = 0; i < setNum; ++i)
-                outSets[i] = ToHandle(new DescriptorSetVK {p->device, sets[i], l, setIndex});
+            {
+                auto* set = new DescriptorSetVK {p->device, sets[i], l, setIndex};
+                p->sets.push_back(set);
+                outSets[i] = ToHandle(set);
+            }
             return VriResult_Success;
         }
 
@@ -1696,8 +1713,26 @@ namespace vri::vk
                 CB(cmd)->cmd, t->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Buf(dst)->buffer, 1, &c);
         }
 
-        void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
-        void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
+        void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer* cmd, const char* name)
+        {
+            if (!cmd)
+                return;
+            const auto& ext = CB(cmd)->device->Ext();
+            if (!ext.CmdBeginDebugUtilsLabel || !ext.CmdEndDebugUtilsLabel)
+                return;
+            VkDebugUtilsLabelEXT label {VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
+            label.pLabelName = name ? name : "";
+            ext.CmdBeginDebugUtilsLabel(CB(cmd)->cmd, &label);
+        }
+
+        void VRI_CALL CmdEndDebugGroup(VriCommandBuffer* cmd)
+        {
+            if (!cmd)
+                return;
+            const auto& ext = CB(cmd)->device->Ext();
+            if (ext.CmdBeginDebugUtilsLabel && ext.CmdEndDebugUtilsLabel)
+                ext.CmdEndDebugUtilsLabel(CB(cmd)->cmd);
+        }
 
         // ---- submission ----------------------------------------------------
         void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
@@ -1744,22 +1779,11 @@ namespace vri::vk
 
         void VRI_CALL QueueWaitIdle(VriQueue* queue) { vkQueueWaitIdle(Q(queue)->queue); }
         void VRI_CALL DeviceWaitIdle(VriDevice* device) { vkDeviceWaitIdle(Dev(device)->Device()); }
-        // Was a no-op. It now records the label against the tracked object, which is what makes an
-        // EnumerateObjects listing readable - without it every row is a pointer and a size.
-        //
-        // The Vulkan-side name (VK_EXT_debug_utils) is deliberately NOT set from here: the handle
-        // is an opaque VRI pointer and mapping it back to the right VkObjectType per object kind
-        // would be a second dispatch table with its own drift. RenderDoc reads the group markers
-        // this backend already emits.
         void VRI_CALL SetDebugName(void* object, const char* name)
         {
-            if (object == nullptr)
-                return;
-            // Every tracked object stores its device as its first member, which is what lets one
-            // entry point name any of them without a type tag.
-            DeviceVK* d = *reinterpret_cast<DeviceVK**>(object);
-            if (d != nullptr)
-                d->Objects().SetName(object, name);
+            const auto native = DebugObjectsVK::SetName(object, name);
+            if (native.device)
+                native.device->Objects().SetName(object, name);
         }
 
         VriResult VRI_CALL EnumerateObjects(const VriDevice* device, uint32_t* count, VriObjectInfo* out)

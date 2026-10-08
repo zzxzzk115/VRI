@@ -205,3 +205,15 @@ clang-format, so your formatting stays CI-clean automatically.
 
 VRI is released under the [MIT License](LICENSE). The bundled FlightHelmet model is CC0, from the
 Khronos glTF sample models.
+
+## GPU tool annotations in Release
+
+Vulkan object names (`SetDebugName`) and nested command markers
+(`CmdBeginDebugGroup` / `CmdEndDebugGroup`) work in optimized Release builds.
+VRI enables `VK_EXT_debug_utils` when available independently of validation;
+profiling does not require `enableValidation`. Unsupported loaders safely no-op.
+Names reach native Vulkan objects and the memory-accounting registry, including
+views, samplers, pipelines, layouts, queues, command objects and resources.
+Markers must be balanced on the same command buffer. Shader source correlation
+additionally requires debug information in the SPIR-V supplied by the caller.
+VRI preserves that bytecode when creating shader modules.

@@ -37,6 +37,9 @@ namespace vri::vk
         // whatever feature set was granted). Zero-initialized; null == unavailable.
         struct ExtFunctions
         {
+            PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+            PFN_vkCmdEndDebugUtilsLabelEXT   CmdEndDebugUtilsLabel   = nullptr;
+            PFN_vkSetDebugUtilsObjectNameEXT SetDebugUtilsObjectName = nullptr;
             // Core 1.3 (synchronization2 + dynamic rendering). Loaded by entry point so a
             // pre-1.3 driver (e.g. MoltenVK, which reports 1.2) resolves them to the KHR
             // aliases instead of crashing on a null core dispatch slot.
@@ -112,6 +115,7 @@ namespace vri::vk
 
         QueueVK  m_queues[VriQueueType_Count]        = {};
         uint32_t m_queueFamilies[VriQueueType_Count] = {};
+        bool     m_debugUtils                        = false;
         bool     m_validation                        = false;
         // Software (CPU) rendering was requested (graphicsAPI == VriGraphicsAPI_Software): pick a
         // VK_PHYSICAL_DEVICE_TYPE_CPU device (SwiftShader / lavapipe) and never a GPU.
