@@ -15,9 +15,18 @@ Think "[NRI](https://github.com/NVIDIA-RTX/NRI), but with more graphics APIs and
 
 ## Showcase
 
-![Vulkan path tracer rendering the FlightHelmet glTF model at 128 samples and four bounces.](docs/images/showcase.webp)
+![Vulkan path tracer rendering FlightHelmet at 128 samples.](docs/images/showcase.webp)
 
-Vulkan path tracer rendering the FlightHelmet glTF model at 128 samples and four bounces. [Capture and reproduction notes](docs/showcase.md).
+Vulkan path tracer rendering the FlightHelmet glTF model at 128 samples and four bounces. The bundled FlightHelmet model is CC0.
+
+To capture the example:
+
+```sh
+xmake build -y -j4 example-pathtracer
+VRI_MAX_FRAMES=132 VRI_CAPTURE=/tmp/vri-pathtracer.bmp xmake run example-pathtracer
+```
+
+The example writes a 960×720 BMP after accumulating the default 128 samples.
 
 ## Highlights
 
