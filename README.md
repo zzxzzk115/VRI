@@ -13,6 +13,12 @@ OpenGL, on desktop, mobile/embedded, and the web.
 
 Think "[NRI](https://github.com/NVIDIA-RTX/NRI), but with more graphics APIs and more platforms."
 
+## Showcase
+
+![Vulkan path tracer rendering the FlightHelmet glTF model at 128 samples and four bounces.](docs/images/showcase.webp)
+
+Vulkan path tracer rendering the FlightHelmet glTF model at 128 samples and four bounces. [Capture and reproduction notes](docs/showcase.md).
+
 ## Highlights
 
 - **One API, every backend.** A single explicit, low-level surface (à la Vulkan/D3D12) that maps
