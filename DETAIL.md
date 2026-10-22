@@ -6,6 +6,39 @@ the native extension each path uses. For the at-a-glance support matrix, see the
 (which calls may run concurrently and where the caller must synchronize), see
 [docs/threading.md](docs/threading.md).
 
+## For NRI users
+
+VRI shares NRI's explicit programming model, not its complete API. This comparison uses
+[NRI revision `79d76a9`](https://github.com/NVIDIA-RTX/NRI/tree/79d76a9a78689ef58ee7962b1d8ed7e7a3efe18d)
+(header version 190). NRI evolves independently; matching names do not establish matching signatures or capabilities.
+
+| Area | Familiar model | VRI difference |
+| --- | --- | --- |
+| Dispatch and objects | Create a device, query a sized interface table, use opaque handles. | C declarations use `Vri*` types and pointer parameters; the C++ wrapper is optional. Function-table layout is not NRI-compatible. |
+| Command allocation | CommandAllocator owns command-recording storage. | `CreateCommandAllocator` takes a device and queue type, rather than NRI's queue. |
+| Resources and memory | Texture/Buffer descriptors, memory locations and explicit binding. | `CreateBuffer`/`CreateTexture` normally allocate and bind automatically. The explicit memory path queries a creation descriptor, closer to NRI's `Get*MemoryDesc2`; do not assume NRI's resource-query or allocation signatures. |
+| Descriptor sets | PipelineLayout contains set/range declarations; pools allocate sets. | `AllocateDescriptorSets` has no variable-descriptor-count argument. `UpdateDescriptorRanges` takes one set and consecutive range indices, rather than NRI's array of update records. |
+| Constants and binding | Bind the pipeline layout before descriptor sets and constants. | `CmdSetConstants` uses a push-constant declaration index, data and size; it is not NRI's `CmdSetRootConstants` descriptor with offset/bind point. |
+| Barriers | Explicit before/after access, stages and texture layout. | Inspect `VriBarrierGroupDesc` and its supported fields; NRI flags and numeric enum values are not interchangeable. |
+| Synchronization | Fence is a monotonic timeline used by queues and the host. | VRI submit/idle functions currently return `void`; NRI returns a result. A VRI Fence is not Vulkan's binary host fence. |
+| Optional features | Query device capabilities and extension tables. | The supported surface and table boundaries differ. Gate each path on the returned VRI capabilities, not the NRI feature list. |
+
+The normal sequence remains device -> core interface -> queue/allocator -> resources/layout/pipeline ->
+record barriers and commands -> submit with a timeline signal -> wait before reuse or destruction.
+For descriptor updates, `baseRange` indexes the declared `ranges` array. It is **not** a shader binding number:
+range index 0 can declare `baseRegister = 7`; its descriptors are updated through range index 0.
+
+Current native Vulkan rendering uses Y-up clip space through a negative-height viewport, with depth in [0, 1].
+There is no device convention selector yet. Configurable presets/overrides are planned and must update shaders,
+helpers and backend behavior together. Matrix storage and world handedness are application math policies, not
+requirements imposed by Vulkan or by the name of a preset.
+
+The OpenGL/WebGPU timeline paths currently publish requested signal values at submission, and WebGPU descriptor
+updates do not yet preserve all prior writes. These are implementation gaps to fix, not intended NRI semantics
+or evidence of completion. Existing successful image tests do not establish correctness of these untested cases.
+
+## Backend details
+
 **✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **⬜ Planned** (the API supports it; not yet in VRI) &nbsp;·&nbsp; **❌ Unsupported by the API**
 
 - **Planned (⬜).** A few cells are things the backend's API *can* do but VRI hasn't wired yet —

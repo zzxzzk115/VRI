@@ -11,7 +11,9 @@
 and platforms. Write your renderer once — VRI runs it on Vulkan, Direct3D 12, Metal, WebGPU, and
 OpenGL, on desktop, mobile/embedded, and the web.
 
-Think "[NRI](https://github.com/NVIDIA-RTX/NRI), but with more graphics APIs and more platforms."
+The explicit API follows [NRI](https://github.com/NVIDIA-RTX/NRI): function tables, opaque handles,
+descriptor ranges and timeline fences. It also provides OpenGL/GLES/WebGL paths. VRI is not source- or
+ABI-compatible with NRI; see [the NRI user guide](DETAIL.md#for-nri-users) for concrete differences.
 
 ## Showcase
 
@@ -46,7 +48,8 @@ The example writes a 960×720 BMP after accumulating the default 128 samples.
   target's native bytecode.
 
 [Cooperative-vector shader inference](DETAIL.md#cooperative-vector-shader-inference) is optional and Vulkan-only;
-query it before compiling or running that path. The comprehensive 0.2.0 API migration is a separate PR #24 task.
+query it before compiling or running that path. VRI retains one NRI-style interface. Customizable
+device conventions are planned separately; neither a Vulkan-style rewrite nor a second API is planned.
 
 ## Supported platforms & backends
 
