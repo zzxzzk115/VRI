@@ -123,6 +123,7 @@ jobs:
   macos:
     name: desktop (macos-latest)
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
@@ -140,16 +141,31 @@ jobs:
         uses: xmake-io/github-action-setup-xmake@v1
 
       - name: Configure
-        run: >-
-          xmake f -y -m release -p macosx
-          --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y
-          --vri_build_tests=y --vri_build_tools=n --vri_build_examples=n
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/.tmp/ci
+          xmake f -vD -y -m release -p macosx \
+            --vri_backend_vulkan=y --vri_backend_wgpu=y --vri_backend_gl=y \
+            --vri_build_tests=y --vri_build_tools=n --vri_build_examples=n \
+            2>&1 | tee build/.tmp/ci/configure-macos.log
 
       - name: Build (compile gate)
+        timeout-minutes: 30
         run: xmake build -y vri-tests
 
       - name: Test (macOS - backends self-skip without a device)
+        timeout-minutes: 10
         run: xmake run vri-tests
+
+      - name: Save macOS configuration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-configuration
+          path: build/.tmp/ci/configure-macos.log
+          if-no-files-found: ignore
 
   # End-to-end WebGL: build the GL backend to wasm and render the triangle + UBO
   # triangle in headless Chrome (WebGL2 via SwiftShader - no GPU needed).
