@@ -12,6 +12,8 @@
 #include <cstring>
 #include <vector>
 
+extern "C" int vriTestCooperativeVectorC(VriDevice* device, size_t tableSize, size_t infoSize, uint32_t* propertyCount);
+
 namespace
 {
     constexpr uint32_t kSampleNum = 65;
@@ -379,7 +381,11 @@ TEST_CASE("cooperative vector: opt-in, queries, conversion bounds and inference"
         CHECK(ctx.neural.GetCooperativeVectorDeviceProperties(ctx.device, nullptr) == VriResult_InvalidArgument);
         CHECK(ctx.neural.GetCooperativeVectorDeviceProperties(nullptr, &properties) == VriResult_InvalidArgument);
         CHECK(ctx.neural.GetCooperativeVectorProperties(ctx.device, nullptr, nullptr) == VriResult_InvalidArgument);
+        uint32_t cPropertyCount = 0;
+        CHECK(vriTestCooperativeVectorC(
+                  ctx.device, sizeof(ctx.neural), sizeof(VriConvertCooperativeVectorMatrixInfo), &cPropertyCount) == 0);
         auto combinations = Combinations(ctx);
+        CHECK(cPropertyCount == combinations.size());
         std::printf("CoopVec capabilities: %zu tuples, max components %u, stages 0x%x\n",
                     combinations.size(),
                     properties.maxCooperativeVectorComponents,
