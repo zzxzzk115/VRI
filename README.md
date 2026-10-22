@@ -45,9 +45,8 @@ The example writes a 960×720 BMP after accumulating the default 128 samples.
 - **Shaders authored in [Slang](https://github.com/shader-slang/slang)**, compiled offline to each
   target's native bytecode.
 
-The **0.2.0 development API** is being aligned with Vulkan terminology in stages; existing APIs have not all
-migrated. [Transition order and implemented shader-inference extension](DETAIL.md#02-api-direction).
-Cooperative-vector inference is currently optional and Vulkan-only; query it before compiling or running that path.
+[Cooperative-vector shader inference](DETAIL.md#cooperative-vector-shader-inference) is optional and Vulkan-only;
+query it before compiling or running that path. The comprehensive 0.2.0 API migration is a separate PR #24 task.
 
 ## Supported platforms & backends
 

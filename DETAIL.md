@@ -111,37 +111,11 @@ the native extension each path uses. For the at-a-glance support matrix, see the
   (`vkCmdClearColorImage` / `ClearUnorderedAccessView{Float,Uint}` / `glClearTexImage`, GL 4.4),
   gated by `hasClearStorageTexture`.
 
-## 0.2 API direction
+## API migration scope
 
-The public API is moving toward Vulkan terminology and explicit data flow. The development version is
-**0.2.0**; the transition is incomplete. Keep `vriGetInterface()` as the checked dispatch mechanism and
-keep backend objects opaque. Vulkan-shaped declarations do not make VRI handles native Vulkan handles.
-Native interop remains a separate interface.
-
-Conventions will be chosen once at device/context initialization: the default preset is Vulkan, with
-Direct3D and Metal presets and independent overrides. Backend selection is separate from mathematical conventions.
-No process-global setting or per-frame mode switch is needed. Matrix storage, vector multiplication order,
-handedness, clip-space Y, depth range and UV origin must be explicit; Vulkan itself does not prescribe host matrix
-storage or world handedness. A preset's non-API choices are project defaults, not requirements of that graphics API.
-Shader compilation/cooking and CPU helpers must consume the same initialized choice. Explicit projection/UV helpers
-remain available for local conversions. The existing Y-up backend convention has **not** migrated yet; it must
-change with shader transforms, viewport/winding handling and asymmetric image tests across backends.
-
-| Order | Change | State |
-| --- | --- | --- |
-| 0 | Introduce context-owned initialization of convention presets/overrides; default to Vulkan without coupling the convention to backend selection. | Next, including shader/artifact validation and pixel parity. |
-| 1 | New extensions use operation-specific `*Info`, property structs and count/array queries. | Cooperative-vector slice implemented and tested on Vulkan. |
-| 2 | Replace descriptor ranges with explicit bindings, descriptor counts, descriptor-set layouts and write operations; separate descriptor array elements from binding numbers. | Next. Update all backends, examples and consumers together. |
-| 3 | Align resource and command-allocation vocabulary: Image/ImageView, CommandPool, `*CreateInfo`, allocation and reset scope. | Planned. Resource ownership must remain explicit. |
-| 4 | Align recording with dynamic rendering and synchronization2; distinguish GPU semaphores from host fences and make submission stage scopes explicit. | Planned. Preserve existing synchronization behavior with readback regressions. |
-| 5 | Align device/features/limits, pipeline state and surface/swapchain declarations; keep backend-specific requirements queryable. | Planned. Validate each supported backend independently. |
-| 6 | Update libvultra, Vultra and VultraLab consumers, cooking and platform tests; advance their fixed VRI revision. | Required before accepting the complete transition. Their existing pins have not changed. |
-
-For each group, change declarations, backend/validation tables, callers and tests in one slice. Do not keep
-compatibility aliases. Use Vulkan meanings where a concept is shared; document actual cross-backend differences,
-including coordinate conventions, capability requirements and memory ownership. Do not add unused `pNext` chains
-or native-only fields merely to make a struct look familiar. Public API release versions may increase;
-serialized formats remain version 1 during pre-release development.
+The comprehensive Vulkan-style API redesign, configurable coordinate conventions and **0.2.0** version bump
+belong to the separate PR #24 task. The cooperative-vector work in PR #23 adds an optional interface to the
+current API; it does not change existing coordinate conventions or complete the broader migration.
 
 ## Cooperative-vector shader inference
 
