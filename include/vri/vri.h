@@ -25,15 +25,16 @@
 #include "vri_sync.h"
 #include "vri_core.h"
 
-#include "ext/vri_ext_swapchain.h"
-#include "ext/vri_ext_interop.h"
-#include "ext/vri_ext_raytracing.h"
-#include "ext/vri_ext_omm.h"
-#include "ext/vri_ext_meshshader.h"
-#include "ext/vri_ext_vrs.h"
+#include "ext/vri_ext_cooperative_vector.h"
 #include "ext/vri_ext_external.h"
-#include "ext/vri_ext_query.h"
 #include "ext/vri_ext_imgui.h"
+#include "ext/vri_ext_interop.h"
+#include "ext/vri_ext_meshshader.h"
+#include "ext/vri_ext_omm.h"
 #include "ext/vri_ext_pipeline_cache.h"
+#include "ext/vri_ext_query.h"
+#include "ext/vri_ext_raytracing.h"
+#include "ext/vri_ext_swapchain.h"
+#include "ext/vri_ext_vrs.h"
 
 #endif /* VRI_H */

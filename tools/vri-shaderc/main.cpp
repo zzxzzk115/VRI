@@ -12,13 +12,13 @@
 //
 // Usage:
 //   vri-shaderc <input.slang> -o <output.h> --var <g_name>
-//               [--target spirv|wgsl|dxbc|dxil] [--profile <p>]
+//               [--target spirv|wgsl|dxbc|dxil] [--profile <p>] [--capability <name>]
 //
 // This is the Phase-3 replacement for the temporary `xmake shaders` task that
 // shelled out to the system slangc binary.
 
-#include <slang.h>
 #include <slang-com-ptr.h>
+#include <slang.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -205,7 +205,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-    std::string input, output, varName, profileName, targetName = "spirv";
+    std::string input, output, varName, profileName, capabilityName, targetName = "spirv";
     for (int i = 1; i < argc; ++i)
     {
         std::string a = argv[i];
@@ -215,6 +215,8 @@ int main(int argc, char** argv)
             varName = argv[++i];
         else if (a == "--profile" && i + 1 < argc)
             profileName = argv[++i];
+        else if (a == "--capability" && i + 1 < argc)
+            capabilityName = argv[++i];
         else if (a == "--target" && i + 1 < argc)
             targetName = argv[++i];
         else if (!a.empty() && a[0] != '-')
@@ -223,7 +225,9 @@ int main(int argc, char** argv)
 
     if (input.empty() || output.empty() || varName.empty())
     {
-        std::fprintf(stderr, "usage: vri-shaderc <input.slang> -o <output.h> --var <g_name> [--target spirv|wgsl|dxbc|dxil] [--profile <p>]\n");
+        std::fprintf(stderr,
+                     "usage: vri-shaderc <input.slang> -o <output.h> --var <g_name> [--target spirv|wgsl|dxbc|dxil] "
+                     "[--profile <p>] [--capability <name>]\n");
         return 2;
     }
 
@@ -254,7 +258,19 @@ int main(int argc, char** argv)
     if (!wgsl)
         target.profile = global->findProfile(profileName.c_str());
 
-    slang::CompilerOptionEntry options[2] = {};
+    slang::CompilerOptionEntry options[3] = {};
+    if (!capabilityName.empty())
+    {
+        const auto capability = global->findCapability(capabilityName.c_str());
+        if (capability == SLANG_CAPABILITY_UNKNOWN)
+        {
+            std::fprintf(stderr, "vri-shaderc: unknown capability %s\n", capabilityName.c_str());
+            return 2;
+        }
+        options[2].name            = slang::CompilerOptionName::Capability;
+        options[2].value.kind      = slang::CompilerOptionValueKind::Int;
+        options[2].value.intValue0 = capability;
+    }
     // Preserve original entry-point names in SPIR-V (don't rename to "main"),
     // so a single multi-entry module can be referenced by name per stage.
     options[0].name = slang::CompilerOptionName::VulkanUseEntryPointName;
@@ -278,6 +294,15 @@ int main(int argc, char** argv)
     sessionDesc.searchPathCount = 2;
     sessionDesc.compilerOptionEntries = options;
     sessionDesc.compilerOptionEntryCount = d3d ? 0 : (wgsl ? 1 : 2); // SPIR-V-only options
+    if (!capabilityName.empty())
+    {
+        if (d3d || wgsl)
+        {
+            std::fprintf(stderr, "vri-shaderc: --capability currently requires --target spirv\n");
+            return 2;
+        }
+        sessionDesc.compilerOptionEntryCount = 3;
+    }
 
     ComPtr<slang::ISession> session;
     if (SLANG_FAILED(global->createSession(sessionDesc, session.writeRef())))

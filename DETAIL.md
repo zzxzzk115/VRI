@@ -111,6 +111,108 @@ the native extension each path uses. For the at-a-glance support matrix, see the
   (`vkCmdClearColorImage` / `ClearUnorderedAccessView{Float,Uint}` / `glClearTexImage`, GL 4.4),
   gated by `hasClearStorageTexture`.
 
+## 0.2 API direction
+
+The public API is moving toward Vulkan terminology and explicit data flow. The development version is
+**0.2.0**; the transition is incomplete. Keep `vriGetInterface()` as the checked dispatch mechanism and
+keep backend objects opaque. Vulkan-shaped declarations do not make VRI handles native Vulkan handles.
+Native interop remains a separate interface.
+
+Conventions will be chosen once at device/context initialization: the default preset is Vulkan, with
+Direct3D and Metal presets and independent overrides. Backend selection is separate from mathematical conventions.
+No process-global setting or per-frame mode switch is needed. Matrix storage, vector multiplication order,
+handedness, clip-space Y, depth range and UV origin must be explicit; Vulkan itself does not prescribe host matrix
+storage or world handedness. A preset's non-API choices are project defaults, not requirements of that graphics API.
+Shader compilation/cooking and CPU helpers must consume the same initialized choice. Explicit projection/UV helpers
+remain available for local conversions. The existing Y-up backend convention has **not** migrated yet; it must
+change with shader transforms, viewport/winding handling and asymmetric image tests across backends.
+
+| Order | Change | State |
+| --- | --- | --- |
+| 0 | Introduce context-owned initialization of convention presets/overrides; default to Vulkan without coupling the convention to backend selection. | Next, including shader/artifact validation and pixel parity. |
+| 1 | New extensions use operation-specific `*Info`, property structs and count/array queries. | Cooperative-vector slice implemented and tested on Vulkan. |
+| 2 | Replace descriptor ranges with explicit bindings, descriptor counts, descriptor-set layouts and write operations; separate descriptor array elements from binding numbers. | Next. Update all backends, examples and consumers together. |
+| 3 | Align resource and command-allocation vocabulary: Image/ImageView, CommandPool, `*CreateInfo`, allocation and reset scope. | Planned. Resource ownership must remain explicit. |
+| 4 | Align recording with dynamic rendering and synchronization2; distinguish GPU semaphores from host fences and make submission stage scopes explicit. | Planned. Preserve existing synchronization behavior with readback regressions. |
+| 5 | Align device/features/limits, pipeline state and surface/swapchain declarations; keep backend-specific requirements queryable. | Planned. Validate each supported backend independently. |
+| 6 | Update libvultra, Vultra and VultraLab consumers, cooking and platform tests; advance their fixed VRI revision. | Required before accepting the complete transition. Their existing pins have not changed. |
+
+For each group, change declarations, backend/validation tables, callers and tests in one slice. Do not keep
+compatibility aliases. Use Vulkan meanings where a concept is shared; document actual cross-backend differences,
+including coordinate conventions, capability requirements and memory ownership. Do not add unused `pNext` chains
+or native-only fields merely to make a struct look familiar. Public API release versions may increase;
+serialized formats remain version 1 during pre-release development.
+
+## Cooperative-vector shader inference
+
+`VriFeature_CooperativeVector` enables the optional `VRI_INTERFACE_COOPERATIVE_VECTOR` table and
+`VriDeviceDesc::hasCooperativeVector`. First implementation: Vulkan; other backends do not provide the table.
+A required request (`bestEffort = false`) fails with `Unsupported` if unavailable. A best-effort request may
+create a device with the flag unset. This is not a general ML runtime and does not silently replace inference
+with scalar arithmetic.
+
+- `GetCooperativeVectorDeviceProperties()` reports supported shader stages and maximum vector length.
+- `GetCooperativeVectorProperties()` enumerates complete input/interpretation/matrix/bias/result type tuples.
+  Query the count, allocate the array, then read it. Independently supported scalar types cannot be freely combined.
+- `ConvertCooperativeVectorMatrix()` takes `VriConvertCooperativeVectorMatrixInfo`: borrowed host addresses,
+  byte capacities, component types, matrix dimensions, layouts and strides. A null destination queries its size.
+  Short source/destination buffers and overlapping ranges fail before conversion writes. Same-type layout conversion,
+  Float32/Float16 conversion and Float32/Float16 to/from supported Float8 are implemented.
+
+The inference-optimal representation is device/driver-specific. Store portable weights and convert on load;
+use the normal VRI buffer upload path afterward. Matrix offsets passed to Slang must satisfy its alignment rules;
+the test packs each matrix/bias at a 64-byte boundary. Shaders own network shape and activation functions.
+Training, GPU matrix conversion and inference on D3D12/Metal/WebGPU/GL are not implemented. Availability of a
+ray/mesh stage here does not enable that separate stage feature.
+
+The Vulkan shader baseline enables queried cooperative vectors, replicated composites and Vulkan memory model,
+which the pinned Slang CoopVec lowering requires. Available Float16/Int8 arithmetic is enabled too; component-type
+extensions are enabled when advertised. All feature checks and native conversions stay inside VRI.
+See [Khronos cooperative vectors](https://docs.vulkan.org/features/latest/features/proposals/VK_NV_cooperative_vector.html),
+[host matrix conversion](https://docs.vulkan.org/refpages/latest/refpages/source/vkConvertCooperativeVectorMatrixNV.html)
+and [Slang CoopVec](https://docs.shader-slang.org/en/stable/external/core-module-reference/types/coopvec-04/index.html).
+
+```sh
+xmake f -m release --vri_build_examples=n --vri_build_tests=y --vri_build_tools=y
+xmake build vri-tests vri-shaderc
+xmake run vri-tests --test-case='cooperative vector:*'
+
+# Regenerate only this test shader, with the required capability explicit.
+build/linux/x86_64/release/vri-shaderc shaders/tests/neural_inference.slang \
+    -o shaders/tests/neural_inference_spv.h --var g_neuralInferenceSpv \
+    --target spirv --capability spvCooperativeVectorNV
+```
+
+The offline test evaluates 65 inputs through an 8 → 16 → 4 FP16 MLP with ReLU, compares every output against
+independent CPU arithmetic, checks opt-in/unsupported behavior, count queries, conversion bounds and exact
+Float16/Float8 weight round trips. Both raw and validation-wrapped devices run the same test. Linux RTX 4060
+Laptop maximum MLP error: 0.000122070 (limit 0.002). This is not acceptance on other devices or backends.
+
+The `example-mlp` image demo uses a trained 2 -> 32 -> 32 -> 3 ReLU network. Its FP32 portable weights
+are converted once to FP16/device-optimal matrices and FP16 biases, then uploaded through ordinary VRI buffers.
+The example has no SDL/ImGui, window, external model file or inference SDK. It reuses GPU resources between finite
+frames, waits for completion before readback/destruction, and exports reference/prediction/error panels.
+
+On the tested RTX 4060 Laptop, 256x256 inference has maximum CPU-reference error 0.0023849 (limit 0.01),
+analytic-fit RMSE 0.0130625 (limit 0.03), and at most one UNORM byte of image error. The 137x137 case also passes.
+These are correctness checks, not inference performance measurements. OpenGL reports unsupported (exit 77);
+`xmake examples` counts such skips separately and still fails on diagnostics or other nonzero exit codes.
+
+The original procedural target, deterministic training seed, Adam implementation and generated weights are in
+`examples/mlp/`. Retraining is optional and requires NumPy; use the normal formatter after generation:
+
+```sh
+python examples/mlp/train.py
+clang-format -i examples/mlp/model_weights.h
+build/linux/x86_64/release/vri-shaderc shaders/examples/mlp_image.slang \
+    -o shaders/examples/mlp_image_spv.h --var g_mlpImageSpv \
+    --target spirv --capability spvCooperativeVectorNV
+```
+
+`VriCooperativeVectorProperties::transpose` advertises *additional* support for transposition of optimal-layout
+matrices; a true value does not prevent ordinary non-transposed multiplication.
+[Khronos property contract](https://docs.vulkan.org/refpages/latest/refpages/source/VkCooperativeVectorPropertiesNV.html).
+
 ## Software (CPU) rendering
 
 `VriGraphicsAPI_Software` renders **without a GPU** by running VRI's Vulkan backend on top of a

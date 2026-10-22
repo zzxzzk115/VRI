@@ -45,6 +45,10 @@ The example writes a 960×720 BMP after accumulating the default 128 samples.
 - **Shaders authored in [Slang](https://github.com/shader-slang/slang)**, compiled offline to each
   target's native bytecode.
 
+The **0.2.0 development API** is being aligned with Vulkan terminology in stages; existing APIs have not all
+migrated. [Transition order and implemented shader-inference extension](DETAIL.md#02-api-direction).
+Cooperative-vector inference is currently optional and Vulkan-only; query it before compiling or running that path.
+
 ## Supported platforms & backends
 
 | Backend | Platforms |
@@ -162,8 +166,9 @@ xmake run example-cube   # hosts the page in your browser
 
 ## Examples
 
-Every example runs across the backends and the web, with a Dear ImGui control panel (rendered
-through VRI's built-in ImGui renderer, `ext/vri_ext_imgui.h`). Backend is auto-selected; override on desktop with
+The portable graphics examples include a Dear ImGui panel rendered through VRI's built-in renderer
+(`ext/vri_ext_imgui.h`). Feature demos have the capability/platform limits listed below; the profiler and MLP
+examples run without a window or UI. Backend is auto-selected; override on desktop with
 `VRI_API=vulkan|webgpu|opengl|d3d12|metal|software`, or in the browser with `?backend=webgpu|webgl`.
 
 ```sh
@@ -174,6 +179,7 @@ xmake run example-pbrbasic            # PBR metallic-roughness sphere grid
 xmake run example-pushconstants       # push constants across backends
 xmake run example-normalmapping       # tangent-space normal mapping
 xmake run example-computeshader       # compute writes a plasma to a storage image
+xmake run example-asynccompute        # double-buffered plasma on the compute queue
 xmake run example-offscreen           # render-to-texture + multiple render targets
 xmake run example-descriptorindexing  # bindless texturing (with fallback)
 xmake run example-shadowmapping       # directional-light PCF shadow mapping
@@ -205,6 +211,23 @@ A console-only example (no window/UI) demonstrates GPU timing:
 ```sh
 xmake run example-profiler            # GPU timestamp profiler (VRI_API=vulkan|d3d12)
 ```
+
+A second window-free example evaluates a trained **2 -> 32 -> 32 -> 3** FP16/ReLU MLP in a Slang
+compute shader. It needs Vulkan cooperative vectors; other backends/devices report **SKIP (exit 77)**,
+without substituting CPU inference. Model weights and SPIR-V are checked in; normal builds/runs require no Python.
+
+```sh
+xmake build example-mlp
+VRI_API=vulkan xmake run example-mlp --size 256 --frames 3 --output build/mlp.bmp
+```
+
+![Analytic reference, FP16 neural prediction and absolute error amplified eight times.](docs/images/mlp.webp)
+
+The image contains **analytic RGB reference | neural prediction | absolute error x8**, in linear UNORM RGB.
+Every prediction is checked against independent CPU evaluation; the example also checks fit error and all three
+image panels. An odd size such as `--size 137` exercises dispatch bounds and padded readback rows.
+[DETAIL.md](DETAIL.md#cooperative-vector-shader-inference) describes the capability/conversion API and optional training.
+`xmake examples --only=mlp --backend=vulkan,opengl --frames=3` reports unsupported runs separately from passes.
 
 One example is opt-in because it needs an extra SDK:
 

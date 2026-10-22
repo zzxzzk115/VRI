@@ -109,6 +109,7 @@ task("examples")
         end
         local strict = not option.get("no-strict")
         local failures = {}
+        local passed, skipped = 0, 0
 
         local function append_failure(msg)
             table.insert(failures, msg)
@@ -178,7 +179,12 @@ task("examples")
                         end
                     end
                 end
-                if exitcode ~= 0 then
+                if exitcode == 77 then
+                    skipped = skipped + 1
+                    cprint("${yellow}SKIP:${clear} %s / %s (required device capability unavailable)", backend, target)
+                elseif exitcode == 0 then
+                    passed = passed + 1
+                else
                     append_failure(string.format("%s / %s: exited with %s", backend, target, tostring(exitcode or "unknown")))
                 end
             end
@@ -188,6 +194,6 @@ task("examples")
             raise("examples task failed with %d issue(s)", #failures)
         end
         local frame_desc = frames and (frames .. " frame(s)") or "unbounded"
-        cprint("${green}examples:${clear} all runs passed (%d example targets x %d backend(s), %s)", #examples, #backends, frame_desc)
+        cprint("${green}examples:${clear} %d passed, %d skipped (%d targets x %d backends, %s)", passed, skipped, #examples, #backends, frame_desc)
     end)
 task_end()

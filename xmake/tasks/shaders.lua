@@ -56,7 +56,12 @@ task("shaders")
             -- SPIR-V (Vulkan) + WGSL (WebGPU) from the same Slang source
             local spvHeader = path.join(dir, base .. "_spv.h")
             local spvVar = "g_" .. stem(base) .. "Spv"
-            os.runv(exe, {slang, "-o", spvHeader, "--var", spvVar, "--target", "spirv"})
+            local spvArgs = {slang, "-o", spvHeader, "--var", spvVar, "--target", "spirv"}
+            if base == "neural_inference" or base == "mlp_image" then
+                table.insert(spvArgs, "--capability")
+                table.insert(spvArgs, "spvCooperativeVectorNV")
+            end
+            os.runv(exe, spvArgs)
 
             -- WGSL is best-effort: WebGPU has no geometry/tessellation stages, so
             -- those shaders only produce SPIR-V (consumed by Vulkan + desktop GL).

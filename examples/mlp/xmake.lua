@@ -1,0 +1,10 @@
+-- Window-free neural image inference. Normal builds use checked-in model/shader data.
+target("example-mlp")
+    set_kind("binary")
+    set_languages("cxx23")
+    set_default(false)
+    add_deps("vri")
+    add_includedirs("$(projectdir)")
+    add_files("main.cpp")
+    set_rundir("$(projectdir)")
+target_end()

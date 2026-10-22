@@ -74,15 +74,17 @@ typedef struct VriDeviceCreationDesc
 /* Optional features requestable at device creation. */
 typedef enum VriFeatureBits
 {
-    VriFeature_None         = 0,
-    VriFeature_RayTracing   = 1ull << 0,
-    VriFeature_MeshShader   = 1ull << 1,
-    VriFeature_LowLatency   = 1ull << 2,
-    VriFeature_Bindless     = 1ull << 3,
+    VriFeature_None                = 0,
+    VriFeature_RayTracing          = 1ull << 0,
+    VriFeature_MeshShader          = 1ull << 1,
+    VriFeature_LowLatency          = 1ull << 2,
+    VriFeature_Bindless            = 1ull << 3,
     VriFeature_VariableShadingRate = 1ull << 4,
     VriFeature_OpacityMicromap     = 1ull << 5,
     VriFeature_RayQuery            = 1ull << 6, /* inline ray tracing (no RT pipeline/SBT) */
-    VriFeature_ExternalMemory      = 1ull << 7  /* external memory/semaphore export (CUDA/OptiX/cross-API/-process interop) */
+    VriFeature_ExternalMemory =
+        1ull << 7, /* external memory/semaphore export (CUDA/OptiX/cross-API/-process interop) */
+    VriFeature_CooperativeVector = 1ull << 8 /* shader matrix-vector inference; see ext/vri_ext_cooperative_vector.h */
 } VriFeatureBits;
 
 VRI_EXTERN_C_END

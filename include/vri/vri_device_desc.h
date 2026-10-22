@@ -146,6 +146,8 @@ typedef struct VriDeviceDesc
        (currently reported by Vulkan and Metal). */
     uint32_t bindlessTextureMaxNum;
     uint32_t bindlessSamplerMaxNum;
+
+    VriBool hasCooperativeVector; /* enabled shader inference extension, not a general ML-runtime capability */
 } VriDeviceDesc;
 
 VRI_EXTERN_C_END
