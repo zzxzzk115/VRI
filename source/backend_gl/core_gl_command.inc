@@ -611,6 +611,8 @@ CmdDrawIndexedIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset
     CommandBufferGL* c = CB(cmd);
 #if !defined(VRI_GL_ES_HEADERS)
     SetupVertexAttribs(c);
+    // The element binding belongs to the VAO selected by SetupVertexAttribs.
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
     if (drawNum > 1 && c->device->Features().drawIndirect)
         glMultiDrawElementsIndirect(c->topology,
@@ -684,6 +686,8 @@ void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
         return;
     }
     SetupVertexAttribs(c);
+    // The element binding belongs to the VAO selected by SetupVertexAttribs.
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->indexBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, Buf(buffer)->id);
     glBindBuffer(GL_PARAMETER_BUFFER, Buf(countBuffer)->id);
     glMultiDrawElementsIndirectCount(c->topology,
