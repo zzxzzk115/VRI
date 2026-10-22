@@ -41,6 +41,10 @@ if has_config("vri_backend_gl") or has_config("vri_backend_metal") then
     if has_config("vri_backend_gl") and not is_plat("wasm") then
         if not has_config("vri_backend_gl_es") then
             add_requires("glad v0.1.36", {configs = {profile = "core", api = "gl=4.6"}})
+            if is_plat("macosx") then
+                -- glad runs Python as a host generator, not as an embedded library.
+                add_requireconfs("glad.python", {kind = "binary", system = true})
+            end
         end
         if not is_plat("linux") then
             add_requires("glfw 3.4")
