@@ -39,7 +39,7 @@ local _vri_examples = {
     {name = "gpudriven", desktop_only = true},
     -- Headless GPU profiler built on the timestamp query interface (console-only, no UI).
     {name = "profiler", desktop_only = true},
-    -- Window-free, trained FP16 MLP. Unsupported devices report SKIP (exit 77).
+    -- Interactive trained FP16 MLP, with --offline QA. Unsupported devices report SKIP (exit 77).
     {name = "mlp", desktop_only = true},
     -- CUDA <-> VRI external-memory interop. Desktop-only, and opt-in via
     -- --vri_build_cuda_interop=y because it needs the CUDA Toolkit (nvcc + cudart).

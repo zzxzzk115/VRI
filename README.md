@@ -167,8 +167,8 @@ xmake run example-cube   # hosts the page in your browser
 ## Examples
 
 The portable graphics examples include a Dear ImGui panel rendered through VRI's built-in renderer
-(`ext/vri_ext_imgui.h`). Feature demos have the capability/platform limits listed below; the profiler and MLP
-examples run without a window or UI. Backend is auto-selected; override on desktop with
+(`ext/vri_ext_imgui.h`). Feature demos have the capability/platform limits listed below. The profiler is window-free;
+MLP offers both an interactive window and an offline mode. Backend is auto-selected; override on desktop with
 `VRI_API=vulkan|webgpu|opengl|d3d12|metal|software`, or in the browser with `?backend=webgpu|webgl`.
 
 ```sh
@@ -212,22 +212,26 @@ A console-only example (no window/UI) demonstrates GPU timing:
 xmake run example-profiler            # GPU timestamp profiler (VRI_API=vulkan|d3d12)
 ```
 
-A second window-free example evaluates a trained **2 -> 32 -> 32 -> 3** FP16/ReLU MLP in a Slang
+The interactive MLP example evaluates a trained **2 -> 32 -> 32 -> 3** FP16/ReLU network in a Slang
 compute shader. It needs Vulkan cooperative vectors; other backends/devices report **SKIP (exit 77)**,
 without substituting CPU inference. Model weights and SPIR-V are checked in; normal builds/runs require no Python.
 
 ```sh
 xmake build example-mlp
-VRI_API=vulkan xmake run example-mlp --size 256 --frames 3 --output build/mlp.bmp
+VRI_API=vulkan xmake run example-mlp             # interactive window
+VRI_API=vulkan xmake run example-mlp --offline --size 256 --frames 3 --output build/mlp.bmp
 ```
 
-![Analytic reference, FP16 neural prediction and absolute error amplified eight times.](docs/images/mlp.webp)
+![Interactive MLP comparison with reference, FP16 prediction and amplified error.](docs/images/mlp.webp)
 
-The image contains **analytic RGB reference | neural prediction | absolute error x8**, in linear UNORM RGB.
+The window displays **analytic RGB reference | neural prediction | amplified absolute error**, with live error
+amplification and preview zoom. Inference is recorded each frame using the same GPU path as `--offline`, which
+creates no window or ImGui context. Error amplification defaults to x8; images use linear UNORM RGB.
 Every prediction is checked against independent CPU evaluation; the example also checks fit error and all three
 image panels. An odd size such as `--size 137` exercises dispatch bounds and padded readback rows.
 [DETAIL.md](DETAIL.md#cooperative-vector-shader-inference) describes the capability/conversion API and optional training.
-`xmake examples --only=mlp --backend=vulkan,opengl --frames=3` reports unsupported runs separately from passes.
+`xmake examples --only=mlp --backend=vulkan,opengl --frames=3` uses the offline host and reports unsupported runs
+separately from passes. Python/NumPy is needed only to run the optional `examples/mlp/train.py` trainer.
 
 One example is opt-in because it needs an extra SDK:
 

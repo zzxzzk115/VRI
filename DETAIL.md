@@ -190,8 +190,11 @@ Laptop maximum MLP error: 0.000122070 (limit 0.002). This is not acceptance on o
 
 The `example-mlp` image demo uses a trained 2 -> 32 -> 32 -> 3 ReLU network. Its FP32 portable weights
 are converted once to FP16/device-optimal matrices and FP16 biases, then uploaded through ordinary VRI buffers.
-The example has no SDL/ImGui, window, external model file or inference SDK. It reuses GPU resources between finite
-frames, waits for completion before readback/destruction, and exports reference/prediction/error panels.
+The default SDL3/ImGui window compares reference/prediction/error, with live error amplification and preview zoom.
+`--offline` runs the same compute/verification path without initializing SDL video or ImGui; automated example runs
+select it explicitly. No external model file, Python environment or inference SDK is needed for either mode.
+GPU resources are reused; command recording stays before the display pass, and the GUI cache is released only
+after GPU completion and before destroying its texture view. Both modes verify and export the three panels.
 
 On the tested RTX 4060 Laptop, 256x256 inference has maximum CPU-reference error 0.0023849 (limit 0.01),
 analytic-fit RMSE 0.0130625 (limit 0.03), and at most one UNORM byte of image error. The 137x137 case also passes.

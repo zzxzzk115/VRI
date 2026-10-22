@@ -1,4 +1,4 @@
--- Window-free neural image inference. Normal builds use checked-in model/shader data.
+-- Interactive neural image inference with --offline regression; all model/shader data is checked in.
 target("example-mlp")
     set_kind("binary")
     set_languages("cxx23")
@@ -6,5 +6,6 @@ target("example-mlp")
     add_deps("vri")
     add_includedirs("$(projectdir)")
     add_files("main.cpp")
+    add_packages("libsdl3", "imgui")
     set_rundir("$(projectdir)")
 target_end()

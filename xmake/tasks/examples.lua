@@ -145,15 +145,17 @@ task("examples")
             if not file then
                 return "__VRI_EXIT__-1\n"
             end
+            -- This example also has a native window; the automated gate uses its true offline host.
+            local arguments = targetname == "example-mlp" and " --offline" or ""
             if is_host("windows") then
                 local frameenv = frames and string.format("$env:VRI_MAX_FRAMES=%s; ", psquote(frames)) or ""
-                local cmd = string.format("Push-Location %s; $env:VRI_API=%s; %s& %s *>&1; $code=$LASTEXITCODE; Pop-Location; Write-Output ('__VRI_EXIT__' + $code); exit 0",
-                    psquote(rundir), psquote(backend), frameenv, psquote(file))
+                local cmd = string.format("Push-Location %s; $env:VRI_API=%s; %s& %s%s *>&1; $code=$LASTEXITCODE; Pop-Location; Write-Output ('__VRI_EXIT__' + $code); exit 0",
+                    psquote(rundir), psquote(backend), frameenv, psquote(file), arguments)
                 return os.iorunv("powershell", {"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd})
             else
                 local frameenv = frames and string.format("VRI_MAX_FRAMES=%s ", shquote(frames)) or ""
-                local cmd = string.format("cd %s && VRI_API=%s %s%s 2>&1; code=$?; echo __VRI_EXIT__$code; exit 0",
-                    shquote(rundir), shquote(backend), frameenv, shquote(file))
+                local cmd = string.format("cd %s && VRI_API=%s %s%s%s 2>&1; code=$?; echo __VRI_EXIT__$code; exit 0",
+                    shquote(rundir), shquote(backend), frameenv, shquote(file), arguments)
                 return os.iorunv("sh", {"-c", cmd})
             end
         end

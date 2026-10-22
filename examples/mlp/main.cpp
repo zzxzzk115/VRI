@@ -1,5 +1,5 @@
-// Window-free neural image regression. The checked-in model is evaluated entirely on the GPU.
-#include "../common/capture.h"
+// Interactive neural texture comparison, with an explicit window-free regression mode.
+#include "../common/example_app.h"
 #include "model_weights.h"
 #include "shaders/examples/mlp_image_spv.h"
 
@@ -40,15 +40,17 @@ namespace
 
     struct Options
     {
-        uint32_t              size   = 256;
-        uint32_t              frames = 1;
-        std::filesystem::path output = "build/mlp.bmp";
-        VriGraphicsAPI        api    = VriGraphicsAPI_Auto;
+        uint32_t              size    = 256;
+        uint32_t              frames  = 0;
+        bool                  offline = false;
+        std::filesystem::path output  = "build/mlp.bmp";
+        VriGraphicsAPI        api     = VriGraphicsAPI_Auto;
     };
 
     Options ParseOptions(int argc, char** argv)
     {
         Options options;
+        bool    outputSpecified = false;
         if (const char* api = std::getenv("VRI_API"))
         {
             const std::string_view name(api);
@@ -67,13 +69,17 @@ namespace
             else if (name != "auto")
                 throw std::runtime_error("Unknown VRI_API: " + std::string(name));
         }
-        if (const char* capture = std::getenv("VRI_CAPTURE"))
-            options.output = capture;
+
         if (const char* frames = std::getenv("VRI_MAX_FRAMES"))
             options.frames = ParseNumber(frames, 10000);
         for (int i = 1; i < argc; ++i)
         {
             const std::string_view argument(argv[i]);
+            if (argument == "--offline")
+            {
+                options.offline = true;
+                continue;
+            }
             if (i + 1 == argc)
                 throw std::runtime_error("Missing value for " + std::string(argument));
             if (argument == "--size")
@@ -81,9 +87,23 @@ namespace
             else if (argument == "--frames")
                 options.frames = ParseNumber(argv[++i], 10000);
             else if (argument == "--output")
-                options.output = argv[++i];
+            {
+                options.output  = argv[++i];
+                outputSpecified = true;
+            }
             else
                 throw std::runtime_error("Unknown argument: " + std::string(argument));
+        }
+        if (options.offline)
+        {
+            if (options.frames == 0)
+                options.frames = 1;
+            // VRI_CAPTURE names the presented window image in interactive mode.
+            if (!outputSpecified)
+            {
+                if (const char* capture = std::getenv("VRI_CAPTURE"))
+                    options.output = capture;
+            }
         }
         return options;
     }
@@ -168,30 +188,36 @@ namespace
                 if (m_image)
                     m_core.DestroyTexture(m_image);
             }
-            vriDestroyDevice(m_device);
+            if (m_ownsDevice)
+                vriDestroyDevice(m_device);
         }
 
-        bool Initialize(const Options& options)
+        bool Initialize(const Options& options, VriDevice* borrowedDevice)
         {
-            VriCallbackInterface callback {};
-            callback.userArg         = this;
-            callback.MessageCallback = [](void* user, VriMessageSeverity severity, const char* message) {
-                if (severity == VriMessageSeverity_Error)
-                    ++static_cast<NeuralImage*>(user)->m_errors;
-                const char* level = "INFO";
-                if (severity == VriMessageSeverity_Error)
-                    level = "ERROR";
-                else if (severity == VriMessageSeverity_Warning)
-                    level = "WARN";
-                std::fprintf(stderr, "[VRI][%s] %s\n", level, message);
-            };
-            VriDeviceCreationDesc device {};
-            device.graphicsAPI       = options.api;
-            device.enableValidation  = VRI_TRUE;
-            device.enabledFeatures   = VriFeature_CooperativeVector;
-            device.bestEffort        = VRI_TRUE;
-            device.callbackInterface = &callback;
-            Check(vriCreateDevice(&device, &m_device), "Create device");
+            m_device = borrowedDevice;
+            if (!m_device)
+            {
+                VriCallbackInterface callback {};
+                callback.userArg         = this;
+                callback.MessageCallback = [](void* user, VriMessageSeverity severity, const char* message) {
+                    if (severity == VriMessageSeverity_Error)
+                        ++static_cast<NeuralImage*>(user)->m_errors;
+                    const char* level = "INFO";
+                    if (severity == VriMessageSeverity_Error)
+                        level = "ERROR";
+                    else if (severity == VriMessageSeverity_Warning)
+                        level = "WARN";
+                    std::fprintf(stderr, "[VRI][%s] %s\n", level, message);
+                };
+                VriDeviceCreationDesc device {};
+                device.graphicsAPI       = options.api;
+                device.enableValidation  = VRI_TRUE;
+                device.enabledFeatures   = VriFeature_CooperativeVector;
+                device.bestEffort        = VRI_TRUE;
+                device.callbackInterface = &callback;
+                Check(vriCreateDevice(&device, &m_device), "Create device");
+                m_ownsDevice = true;
+            }
             Check(vriGetInterface(m_device, VRI_INTERFACE_CORE, sizeof(m_core), &m_core), "Get core interface");
             const auto* desc = m_core.GetDeviceDesc(m_device);
             std::printf("[mlp] %s; API %d; cooperative vectors: %s\n",
@@ -229,9 +255,12 @@ namespace
             CreateResources(packed);
             CreatePipeline();
             Check(m_core.GetQueue(m_device, VriQueueType_Graphics, 0, &m_queue), "Get queue");
-            Check(m_core.CreateCommandAllocator(m_device, VriQueueType_Graphics, &m_allocator), "Create allocator");
-            Check(m_core.CreateCommandBuffer(m_allocator, &m_commands), "Create command buffer");
-            Check(m_core.CreateFence(m_device, 0, &m_fence), "Create completion fence");
+            if (options.offline)
+            {
+                Check(m_core.CreateCommandAllocator(m_device, VriQueueType_Graphics, &m_allocator), "Create allocator");
+                Check(m_core.CreateCommandBuffer(m_allocator, &m_commands), "Create command buffer");
+                Check(m_core.CreateFence(m_device, 0, &m_fence), "Create completion fence");
+            }
             return true;
         }
 
@@ -241,50 +270,9 @@ namespace
             {
                 m_core.ResetCommandAllocator(m_allocator);
                 Check(m_core.BeginCommandBuffer(m_commands), "Begin commands");
-                VriBufferBarrierDesc buffer {};
-                buffer.buffer = m_predictions;
-                if (frame != 0)
-                    buffer.before = {VriAccess_CopySourceRead, VriPipelineStage_Transfer};
-                buffer.after = {VriAccess_ShaderResourceStorageWrite, VriPipelineStage_ComputeShader};
-                VriTextureBarrierDesc image {};
-                image.texture       = m_image;
-                image.before.layout = frame == 0 ? VriLayout_Undefined : VriLayout_CopySource;
-                image.before.access = frame == 0 ? VriAccess_None : VriAccess_CopySourceRead;
-                image.before.stages = frame == 0 ? VriPipelineStage_None : VriPipelineStage_Transfer;
-                image.after         = {VriAccess_ShaderResourceStorageWrite,
-                                       VriLayout_ShaderResourceStorage,
-                                       VriPipelineStage_ComputeShader};
-                image.aspect        = VriImageAspect_Color;
-                VriBarrierGroupDesc barriers {};
-                barriers.buffers    = &buffer;
-                barriers.bufferNum  = 1;
-                barriers.textures   = &image;
-                barriers.textureNum = 1;
-                m_core.CmdBarrier(m_commands, &barriers);
-                m_core.CmdSetPipeline(m_commands, m_pipeline);
-                m_core.CmdSetPipelineLayout(m_commands, m_layout);
-                m_core.CmdSetDescriptorSet(m_commands, 0, m_set);
-                m_core.CmdSetConstants(m_commands, 0, &m_params, sizeof(m_params));
-                const VriDispatchDesc dispatch {(m_params.size + 7) / 8, (m_params.size + 7) / 8, 1};
-                m_core.CmdDispatch(m_commands, &dispatch);
-                buffer.before = buffer.after;
-                buffer.after  = {VriAccess_CopySourceRead, VriPipelineStage_Transfer};
-                image.before  = image.after;
-                image.after   = {VriAccess_CopySourceRead, VriLayout_CopySource, VriPipelineStage_Transfer};
-                m_core.CmdBarrier(m_commands, &barriers);
-                VriBufferCopyDesc valuesCopy {};
-                valuesCopy.size = ValuesBytes();
-                m_core.CmdCopyBuffer(m_commands, m_valuesReadback, m_predictions, &valuesCopy);
-                VriBufferTextureCopyDesc imageCopy {};
-                imageCopy.bufferRowLength  = m_rowBytes / 4;
-                imageCopy.texture.width    = m_params.size * 3;
-                imageCopy.texture.height   = m_params.size;
-                imageCopy.texture.depth    = 1;
-                imageCopy.texture.layerNum = 1;
-                imageCopy.texture.aspect   = VriImageAspect_Color;
-                m_core.CmdReadbackTextureToBuffer(m_commands, m_imageReadback, m_image, &imageCopy);
+                Record(m_commands);
                 Check(m_core.EndCommandBuffer(m_commands), "End commands");
-                const VriFenceSubmitDesc signal {m_fence, frame + 1, VriPipelineStage_AllCommands};
+                const VriFenceSubmitDesc signal {m_fence, ++m_submission, VriPipelineStage_AllCommands};
                 VriQueueSubmitDesc       submit {};
                 submit.commandBuffers   = &m_commands;
                 submit.commandBufferNum = 1;
@@ -294,6 +282,61 @@ namespace
                 m_core.Wait(m_fence, signal.value);
             }
         }
+
+        // The caller owns command submission/completion; both hosts record the same inference/readback path.
+        void Record(VriCommandBuffer* commands)
+        {
+            VriBufferBarrierDesc buffer {};
+            buffer.buffer = m_predictions;
+            if (m_recorded)
+                buffer.before = {VriAccess_CopySourceRead, VriPipelineStage_Transfer};
+            buffer.after = {VriAccess_ShaderResourceStorageWrite, VriPipelineStage_ComputeShader};
+            VriTextureBarrierDesc image {};
+            image.texture       = m_image;
+            image.before.layout = m_recorded ? VriLayout_ShaderResource : VriLayout_Undefined;
+            image.before.access = m_recorded ? VriAccess_ShaderResourceRead : VriAccess_None;
+            image.before.stages = m_recorded ? VriPipelineStage_FragmentShader : VriPipelineStage_None;
+            image.after         = {
+                VriAccess_ShaderResourceStorageWrite, VriLayout_ShaderResourceStorage, VriPipelineStage_ComputeShader};
+            image.aspect = VriImageAspect_Color;
+            VriBarrierGroupDesc barriers {};
+            barriers.buffers    = &buffer;
+            barriers.bufferNum  = 1;
+            barriers.textures   = &image;
+            barriers.textureNum = 1;
+            m_core.CmdBarrier(commands, &barriers);
+            m_core.CmdSetPipeline(commands, m_pipeline);
+            m_core.CmdSetPipelineLayout(commands, m_layout);
+            m_core.CmdSetDescriptorSet(commands, 0, m_set);
+            m_core.CmdSetConstants(commands, 0, &m_params, sizeof(m_params));
+            const VriDispatchDesc dispatch {(m_params.size + 7) / 8, (m_params.size + 7) / 8, 1};
+            m_core.CmdDispatch(commands, &dispatch);
+            buffer.before = buffer.after;
+            buffer.after  = {VriAccess_CopySourceRead, VriPipelineStage_Transfer};
+            image.before  = image.after;
+            image.after   = {VriAccess_CopySourceRead, VriLayout_CopySource, VriPipelineStage_Transfer};
+            m_core.CmdBarrier(commands, &barriers);
+            VriBufferCopyDesc valuesCopy {};
+            valuesCopy.size = ValuesBytes();
+            m_core.CmdCopyBuffer(commands, m_valuesReadback, m_predictions, &valuesCopy);
+            VriBufferTextureCopyDesc imageCopy {};
+            imageCopy.bufferRowLength  = m_rowBytes / 4;
+            imageCopy.texture.width    = m_params.size * 3;
+            imageCopy.texture.height   = m_params.size;
+            imageCopy.texture.depth    = 1;
+            imageCopy.texture.layerNum = 1;
+            imageCopy.texture.aspect   = VriImageAspect_Color;
+            m_core.CmdReadbackTextureToBuffer(commands, m_imageReadback, m_image, &imageCopy);
+            image.before = image.after;
+            image.after  = {VriAccess_ShaderResourceRead, VriLayout_ShaderResource, VriPipelineStage_FragmentShader};
+            barriers.buffers   = nullptr;
+            barriers.bufferNum = 0;
+            m_core.CmdBarrier(commands, &barriers);
+            m_recorded = true;
+        }
+
+        VriDescriptor* ImageView() const { return m_views[2]; }
+        void           SetErrorScale(float value) { m_params.errorScale = value; }
 
         void VerifyAndSave(const std::filesystem::path& path)
         {
@@ -321,7 +364,9 @@ namespace
                         maxInferenceError  = std::max(maxInferenceError, std::abs(gpu[channel] - cpu[channel]));
                         squaredFitError += error * error;
                         const std::array<double, 3> panels {
-                            reference[channel], gpu[channel], std::clamp(std::abs(error) * kErrorScale, 0.0, 1.0)};
+                            reference[channel],
+                            gpu[channel],
+                            std::clamp(std::abs(error) * m_params.errorScale, 0.0, 1.0)};
                         for (uint32_t panel = 0; panel < 3; ++panel)
                         {
                             const size_t index = static_cast<size_t>(y) * m_rowBytes + (x + panel * m_params.size) * 4;
@@ -358,7 +403,9 @@ namespace
                 std::filesystem::create_directories(path.parent_path());
             if (!WriteBmpBGRA(path.string().c_str(), bgra.data(), m_params.size * 3, m_params.size))
                 throw std::runtime_error("Cannot write " + path.string());
-            std::printf("[mlp] Saved %s: reference | MLP | absolute error x8\n", path.string().c_str());
+            std::printf("[mlp] Saved %s: reference | MLP | absolute error x%g\n",
+                        path.string().c_str(),
+                        static_cast<double>(m_params.errorScale));
         }
 
     private:
@@ -425,15 +472,16 @@ namespace
                          VriMemoryLocation_HostReadback,
                          &m_imageReadback);
             VriTextureDesc image {};
-            image.type           = VriTextureType_2D;
-            image.format         = VriFormat_RGBA8_UNORM;
-            image.width          = m_params.size * 3;
-            image.height         = m_params.size;
-            image.depth          = 1;
-            image.mipNum         = 1;
-            image.layerNum       = 1;
-            image.sampleNum      = 1;
-            image.usage          = VriTextureUsage_ShaderResourceStorage | VriTextureUsage_TransferSrc;
+            image.type      = VriTextureType_2D;
+            image.format    = VriFormat_RGBA8_UNORM;
+            image.width     = m_params.size * 3;
+            image.height    = m_params.size;
+            image.depth     = 1;
+            image.mipNum    = 1;
+            image.layerNum  = 1;
+            image.sampleNum = 1;
+            image.usage =
+                VriTextureUsage_ShaderResourceStorage | VriTextureUsage_TransferSrc | VriTextureUsage_ShaderResource;
             image.memoryLocation = VriMemoryLocation_Device;
             Check(m_core.CreateTexture(m_device, &image, &m_image), "Create image");
             VriBufferViewDesc view {};
@@ -519,30 +567,125 @@ namespace
         VriBuffer*                    m_valuesReadback = nullptr;
         VriBuffer*                    m_imageReadback  = nullptr;
         VriTexture*                   m_image          = nullptr;
+        bool                          m_ownsDevice     = false; // Offline owns the device; preview borrows ExampleApp.
+        bool                          m_recorded       = false;
+        uint64_t                      m_submission     = 0;
         Params                        m_params {};
         uint32_t                      m_rowBytes = 0;
         int                           m_errors   = 0;
     };
+
+    void StopPreview(vriex::ExampleApp& app, VriDescriptor* view)
+    {
+        // Retire callback borrows and GUI descriptor-cache references before destroying the neural image.
+        app.onGui       = nullptr;
+        app.onPreRender = nullptr;
+        app.c.DeviceWaitIdle(app.dev);
+        app.guiApi.FreeImguiTexture(app.gui, view);
+    }
+
+    bool RunPreview(const Options& options)
+    {
+        vriex::ExampleApp app;
+        app.requestFeatures = VriFeature_CooperativeVector;
+        app.Init("mlp", 1160, 520, false);
+        bool supported = false;
+        try
+        {
+            NeuralImage image;
+            supported = image.Initialize(options, app.dev);
+            if (supported)
+            {
+                float errorScale = kErrorScale;
+                float zoom       = 1.0f;
+                app.onGui        = [&] {
+                    ImGui::TextUnformatted("GPU neural texture / 2 -> 32 -> 32 -> 3 / FP16 + ReLU");
+                    ImGui::TextUnformatted("Pretrained weights: no Python or training at runtime.");
+                    ImGui::SliderFloat("Error amplification", &errorScale, 1.0f, 32.0f, "%.1fx");
+                    ImGui::SliderFloat("Preview zoom", &zoom, 1.0f, 4.0f, "%.1fx");
+                    image.SetErrorScale(errorScale);
+                    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+                    const float side = std::max(1.0f, std::min((displaySize.x - 64.0f) / 3.0f, displaySize.y - 185.0f));
+                    const std::array<const char*, 3> labels {
+                        "Analytic reference", "FP16 neural prediction", "Absolute error"};
+                    if (ImGui::BeginTable(
+                            "comparison", 3, ImGuiTableFlags_SizingStretchSame, ImVec2(side * 3 + 24.0f, 0)))
+                    {
+                        const float minimum =
+                            std::min(0.5f, 0.5f - 0.5f / zoom + 0.5f / static_cast<float>(options.size));
+                        const float maximum = 1.0f - minimum;
+                        for (int panel = 0; panel < 3; ++panel)
+                        {
+                            ImGui::TableNextColumn();
+                            ImGui::TextUnformatted(labels[panel]);
+                            const float column = static_cast<float>(panel);
+                            ImGui::Image(reinterpret_cast<ImTextureID>(image.ImageView()),
+                                         ImVec2(side, side),
+                                         ImVec2((column + minimum) / 3.0f, minimum),
+                                         ImVec2((column + maximum) / 3.0f, maximum));
+                        }
+                        ImGui::EndTable();
+                    }
+                };
+                app.onPreRender = [&](VriCommandBuffer* commands) { image.Record(commands); };
+                app.SetupCapture();
+                if (options.frames != 0)
+                    app.maxFrames = options.frames;
+                try
+                {
+                    app.Run();
+                    if (app.frameValue > 1)
+                        image.VerifyAndSave(options.output);
+                }
+                catch (...)
+                {
+                    StopPreview(app, image.ImageView());
+                    throw;
+                }
+                StopPreview(app, image.ImageView());
+            }
+        }
+        catch (...)
+        {
+            app.Shutdown();
+            throw;
+        }
+        app.Shutdown();
+        return supported;
+    }
 } // namespace
 
 int main(int argc, char** argv)
 {
     try
     {
-        const auto  options = ParseOptions(argc, argv);
-        NeuralImage image;
-        if (!image.Initialize(options))
+        const auto options   = ParseOptions(argc, argv);
+        bool       supported = false;
+        if (options.offline)
+        {
+            NeuralImage image;
+            supported = image.Initialize(options, nullptr);
+            if (supported)
+            {
+                image.Render(options.frames);
+                image.VerifyAndSave(options.output);
+            }
+        }
+        else
+        {
+            supported = RunPreview(options);
+        }
+        if (!supported)
         {
             std::puts("[mlp] SKIP: requires compute cooperative vectors with FP16 matrix/bias/input/output (exit 77)");
             return 77;
         }
-        image.Render(options.frames);
-        image.VerifyAndSave(options.output);
     }
     catch (const std::exception& error)
     {
-        std::fprintf(
-            stderr, "[mlp] %s\nUsage: example-mlp [--size N] [--frames N] [--output image.bmp]\n", error.what());
+        std::fprintf(stderr,
+                     "[mlp] %s\nUsage: example-mlp [--offline] [--size N] [--frames N] [--output image.bmp]\n",
+                     error.what());
         return 1;
     }
     return 0;
