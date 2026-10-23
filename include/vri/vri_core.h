@@ -50,6 +50,7 @@ VRI_API VriResult VRI_CALL vriGetInterface(const VriDevice* device, const char* 
 #define VRI_INTERFACE_VRS "VriShadingRateInterface"
 #define VRI_INTERFACE_OMM "VriOpacityMicromapInterface"
 #define VRI_INTERFACE_EXTERNAL "VriExternalInterface"
+#define VRI_INTERFACE_COOPERATIVE_VECTOR "VriCooperativeVectorInterface"
 #define VRI_INTERFACE_QUERY "VriQueryInterface"
 #define VRI_INTERFACE_IMGUI "VriImguiInterface"
 #define VRI_INTERFACE_PIPELINE_CACHE "VriPipelineCacheInterface"

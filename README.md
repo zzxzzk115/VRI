@@ -11,7 +11,9 @@
 and platforms. Write your renderer once — VRI runs it on Vulkan, Direct3D 12, Metal, WebGPU, and
 OpenGL, on desktop, mobile/embedded, and the web.
 
-Think "[NRI](https://github.com/NVIDIA-RTX/NRI), but with more graphics APIs and more platforms."
+The explicit API follows [NRI](https://github.com/NVIDIA-RTX/NRI): function tables, opaque handles,
+descriptor ranges and timeline fences. It also provides OpenGL/GLES/WebGL paths. VRI is not source- or
+ABI-compatible with NRI; see [the NRI user guide](DETAIL.md#for-nri-users) for concrete differences.
 
 ## Showcase
 
@@ -44,6 +46,10 @@ The example writes a 960×720 BMP after accumulating the default 128 samples.
 - **Built-in validation layer.** Opt-in precondition/lifecycle checks; zero cost when off.
 - **Shaders authored in [Slang](https://github.com/shader-slang/slang)**, compiled offline to each
   target's native bytecode.
+
+[Cooperative-vector shader inference](DETAIL.md#cooperative-vector-shader-inference) is optional and Vulkan-only;
+query it before compiling or running that path. VRI retains one NRI-style interface. Customizable
+device conventions are planned separately; neither a Vulkan-style rewrite nor a second API is planned.
 
 ## Supported platforms & backends
 
@@ -162,8 +168,9 @@ xmake run example-cube   # hosts the page in your browser
 
 ## Examples
 
-Every example runs across the backends and the web, with a Dear ImGui control panel (rendered
-through VRI's built-in ImGui renderer, `ext/vri_ext_imgui.h`). Backend is auto-selected; override on desktop with
+The portable graphics examples include a Dear ImGui panel rendered through VRI's built-in renderer
+(`ext/vri_ext_imgui.h`). Feature demos have the capability/platform limits listed below. The profiler is window-free;
+MLP offers both an interactive window and an offline mode. Backend is auto-selected; override on desktop with
 `VRI_API=vulkan|webgpu|opengl|d3d12|metal|software`, or in the browser with `?backend=webgpu|webgl`.
 
 ```sh
@@ -174,6 +181,7 @@ xmake run example-pbrbasic            # PBR metallic-roughness sphere grid
 xmake run example-pushconstants       # push constants across backends
 xmake run example-normalmapping       # tangent-space normal mapping
 xmake run example-computeshader       # compute writes a plasma to a storage image
+xmake run example-asynccompute        # double-buffered plasma on the compute queue
 xmake run example-offscreen           # render-to-texture + multiple render targets
 xmake run example-descriptorindexing  # bindless texturing (with fallback)
 xmake run example-shadowmapping       # directional-light PCF shadow mapping
@@ -205,6 +213,27 @@ A console-only example (no window/UI) demonstrates GPU timing:
 ```sh
 xmake run example-profiler            # GPU timestamp profiler (VRI_API=vulkan|d3d12)
 ```
+
+The interactive MLP example evaluates a trained **2 -> 32 -> 32 -> 3** FP16/ReLU network in a Slang
+compute shader. It needs Vulkan cooperative vectors; other backends/devices report **SKIP (exit 77)**,
+without substituting CPU inference. Model weights and SPIR-V are checked in; normal builds/runs require no Python.
+
+```sh
+xmake build example-mlp
+VRI_API=vulkan xmake run example-mlp             # interactive window
+VRI_API=vulkan xmake run example-mlp --offline --size 256 --frames 3 --output build/mlp.bmp
+```
+
+![Interactive MLP comparison with reference, FP16 prediction and amplified error.](docs/images/mlp.webp)
+
+The window displays **analytic RGB reference | neural prediction | amplified absolute error**, with live error
+amplification and preview zoom. Inference is recorded each frame using the same GPU path as `--offline`, which
+creates no window or ImGui context. Error amplification defaults to x8; images use linear UNORM RGB.
+Every prediction is checked against independent CPU evaluation; the example also checks fit error and all three
+image panels. An odd size such as `--size 137` exercises dispatch bounds and padded readback rows.
+[DETAIL.md](DETAIL.md#cooperative-vector-shader-inference) describes the capability/conversion API and optional training.
+`xmake examples --only=mlp --backend=vulkan,opengl --frames=3` uses the offline host and reports unsupported runs
+separately from passes. Python/NumPy is needed only to run the optional `examples/mlp/train.py` trainer.
 
 One example is opt-in because it needs an extra SDK:
 

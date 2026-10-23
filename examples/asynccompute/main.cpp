@@ -375,6 +375,7 @@ int main(int, char**)
         app.c.CmdDraw(cmd, &d);
     };
 
+    app.SetupCapture();
     app.Run();
     return 0;
 }

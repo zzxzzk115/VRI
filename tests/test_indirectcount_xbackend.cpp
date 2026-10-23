@@ -7,6 +7,7 @@
 
 #include <vri/vri.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 
@@ -33,18 +34,26 @@ namespace
     // count). Four identical procedural-triangle draws {vertexNum, instanceNum, baseVertex, baseInstance}.
     const uint32_t kArgs[4 * 4] = {3u, 1u, 0u, 0u, 3u, 1u, 0u, 0u, 3u, 1u, 0u, 0u, 3u, 1u, 0u, 0u};
 
-    // Upload `bytes` into a new IndirectBuffer; records the copy + barrier into `cmd`. `staging` is
+    enum class DrawMode
+    {
+        ArraysCount,
+        IndexedCount,
+        Indexed
+    };
+
+    // Upload `bytes` into an index/indirect buffer; records the copy + barrier into `cmd`. `staging` is
     // returned so the caller can free it after the submit.
-    VriBuffer* MakeIndirect(const VriCoreInterface& c,
-                            VriDevice*              dev,
-                            VriCommandBuffer*       cmd,
-                            const void*             data,
-                            uint64_t                bytes,
-                            VriBuffer**             staging)
+    VriBuffer* MakeInputBuffer(const VriCoreInterface& c,
+                               VriDevice*              dev,
+                               VriCommandBuffer*       cmd,
+                               VriBufferUsageFlags     usage,
+                               const void*             data,
+                               uint64_t                bytes,
+                               VriBuffer**             staging)
     {
         VriBufferDesc bd {};
         bd.size           = bytes;
-        bd.usage          = VriBufferUsage_IndirectBuffer | VriBufferUsage_TransferDst;
+        bd.usage          = usage | VriBufferUsage_TransferDst;
         bd.memoryLocation = VriMemoryLocation_Device;
         VriBuffer* buf    = nullptr;
         REQUIRE(c.CreateBuffer(dev, &bd, &buf) == VriResult_Success);
@@ -62,8 +71,10 @@ namespace
         bb.buffer        = buf;
         bb.before.access = VriAccess_CopyDestinationWrite;
         bb.before.stages = VriPipelineStage_Transfer;
-        bb.after.access  = VriAccess_IndirectBufferRead;
-        bb.after.stages  = VriPipelineStage_DrawIndirect;
+        bb.after.access =
+            usage == VriBufferUsage_IndexBuffer ? VriAccess_IndexBufferRead : VriAccess_IndirectBufferRead;
+        bb.after.stages =
+            usage == VriBufferUsage_IndexBuffer ? VriPipelineStage_VertexInput : VriPipelineStage_DrawIndirect;
         VriBarrierGroupDesc g {};
         g.buffers   = &bb;
         g.bufferNum = 1;
@@ -76,6 +87,7 @@ namespace
                             VriDevice*              dev,
                             VriQueue*               queue,
                             uint32_t                drawCount,
+                            DrawMode                mode,
                             const Shaders&          shaders)
     {
         VriTextureDesc td {};
@@ -143,10 +155,29 @@ namespace
         REQUIRE(c.CreateFence(dev, 0, &fence) == VriResult_Success);
 
         REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
-        VriBuffer* argStg = nullptr;
-        VriBuffer* cntStg = nullptr;
-        VriBuffer* args   = MakeIndirect(c, dev, cmd, kArgs, sizeof(kArgs), &argStg);
-        VriBuffer* count  = MakeIndirect(c, dev, cmd, &drawCount, sizeof(uint32_t), &cntStg);
+        VriBuffer*                               argStg   = nullptr;
+        VriBuffer*                               cntStg   = nullptr;
+        VriBuffer*                               indexStg = nullptr;
+        VriBuffer*                               indices  = nullptr;
+        const bool                               indexed  = mode != DrawMode::ArraysCount;
+        const uint32_t                           stride   = indexed ? sizeof(VriDrawIndexedDesc) : kStride;
+        std::array<VriDrawIndexedDesc, kMaxDraw> indexedArgs {};
+        for (auto& argument : indexedArgs)
+        {
+            argument.indexNum    = 3;
+            argument.instanceNum = 1;
+        }
+        const void* records = indexed ? static_cast<const void*>(indexedArgs.data()) : static_cast<const void*>(kArgs);
+        VriBuffer*  args =
+            MakeInputBuffer(c, dev, cmd, VriBufferUsage_IndirectBuffer, records, kMaxDraw * stride, &argStg);
+        VriBuffer* count =
+            MakeInputBuffer(c, dev, cmd, VriBufferUsage_IndirectBuffer, &drawCount, sizeof(drawCount), &cntStg);
+        if (indexed)
+        {
+            constexpr std::array<uint16_t, 3> triangle {0, 1, 2};
+            indices =
+                MakeInputBuffer(c, dev, cmd, VriBufferUsage_IndexBuffer, triangle.data(), sizeof(triangle), &indexStg);
+        }
         {
             VriTextureBarrierDesc tb {};
             tb.texture       = color;
@@ -180,7 +211,18 @@ namespace
         c.CmdSetPipeline(cmd, pipeline);
         c.CmdSetPipelineLayout(cmd, layout);
         // maxDrawNum is kMaxDraw, but the GPU count buffer holds the real count.
-        c.CmdDrawIndirectCount(cmd, args, 0, count, 0, kMaxDraw, kStride);
+        if (indexed)
+        {
+            c.CmdSetIndexBuffer(cmd, indices, 0, VriIndexType_UInt16);
+            if (mode == DrawMode::IndexedCount)
+                c.CmdDrawIndexedIndirectCount(cmd, args, 0, count, 0, kMaxDraw, stride);
+            else
+                c.CmdDrawIndexedIndirect(cmd, args, 0, 1, stride);
+        }
+        else
+        {
+            c.CmdDrawIndirectCount(cmd, args, 0, count, 0, kMaxDraw, stride);
+        }
         c.CmdEndRendering(cmd);
         {
             VriTextureBarrierDesc tb {};
@@ -226,6 +268,10 @@ namespace
         c.DestroyBuffer(args);
         c.DestroyBuffer(count);
         c.DestroyBuffer(argStg);
+        if (indices)
+            c.DestroyBuffer(indices);
+        if (indexStg)
+            c.DestroyBuffer(indexStg);
         c.DestroyBuffer(cntStg);
         c.DestroyBuffer(readback);
         c.DestroyDescriptor(colorView);
@@ -256,10 +302,15 @@ namespace
         VriQueue* queue = nullptr;
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
-        const uint8_t red1 = RenderWithCount(c, dev, queue, 1, shaders); // GPU count 1 -> triangle drawn
-        const uint8_t red0 = RenderWithCount(c, dev, queue, 0, shaders); // GPU count 0 -> nothing drawn
+        const uint8_t red1 =
+            RenderWithCount(c, dev, queue, 1, DrawMode::ArraysCount, shaders); // GPU count 1 -> triangle drawn
+        const uint8_t red0 =
+            RenderWithCount(c, dev, queue, 0, DrawMode::ArraysCount, shaders); // GPU count 0 -> nothing drawn
         CHECK(red1 > 200);
         CHECK(red0 < 60);
+        CHECK(RenderWithCount(c, dev, queue, 1, DrawMode::IndexedCount, shaders) > 200);
+        CHECK(RenderWithCount(c, dev, queue, 0, DrawMode::IndexedCount, shaders) < 60);
+        CHECK(RenderWithCount(c, dev, queue, 1, DrawMode::Indexed, shaders) > 200);
         vriDestroyDevice(dev);
     }
 } // namespace

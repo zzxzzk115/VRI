@@ -109,6 +109,7 @@ task("examples")
         end
         local strict = not option.get("no-strict")
         local failures = {}
+        local passed, skipped = 0, 0
 
         local function append_failure(msg)
             table.insert(failures, msg)
@@ -144,15 +145,17 @@ task("examples")
             if not file then
                 return "__VRI_EXIT__-1\n"
             end
+            -- This example also has a native window; the automated gate uses its true offline host.
+            local arguments = targetname == "example-mlp" and " --offline" or ""
             if is_host("windows") then
                 local frameenv = frames and string.format("$env:VRI_MAX_FRAMES=%s; ", psquote(frames)) or ""
-                local cmd = string.format("Push-Location %s; $env:VRI_API=%s; %s& %s *>&1; $code=$LASTEXITCODE; Pop-Location; Write-Output ('__VRI_EXIT__' + $code); exit 0",
-                    psquote(rundir), psquote(backend), frameenv, psquote(file))
+                local cmd = string.format("Push-Location %s; $env:VRI_API=%s; %s& %s%s *>&1; $code=$LASTEXITCODE; Pop-Location; Write-Output ('__VRI_EXIT__' + $code); exit 0",
+                    psquote(rundir), psquote(backend), frameenv, psquote(file), arguments)
                 return os.iorunv("powershell", {"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd})
             else
                 local frameenv = frames and string.format("VRI_MAX_FRAMES=%s ", shquote(frames)) or ""
-                local cmd = string.format("cd %s && VRI_API=%s %s%s 2>&1; code=$?; echo __VRI_EXIT__$code; exit 0",
-                    shquote(rundir), shquote(backend), frameenv, shquote(file))
+                local cmd = string.format("cd %s && VRI_API=%s %s%s%s 2>&1; code=$?; echo __VRI_EXIT__$code; exit 0",
+                    shquote(rundir), shquote(backend), frameenv, shquote(file), arguments)
                 return os.iorunv("sh", {"-c", cmd})
             end
         end
@@ -178,7 +181,12 @@ task("examples")
                         end
                     end
                 end
-                if exitcode ~= 0 then
+                if exitcode == 77 then
+                    skipped = skipped + 1
+                    cprint("${yellow}SKIP:${clear} %s / %s (required device capability unavailable)", backend, target)
+                elseif exitcode == 0 then
+                    passed = passed + 1
+                else
                     append_failure(string.format("%s / %s: exited with %s", backend, target, tostring(exitcode or "unknown")))
                 end
             end
@@ -188,6 +196,6 @@ task("examples")
             raise("examples task failed with %d issue(s)", #failures)
         end
         local frame_desc = frames and (frames .. " frame(s)") or "unbounded"
-        cprint("${green}examples:${clear} all runs passed (%d example targets x %d backend(s), %s)", #examples, #backends, frame_desc)
+        cprint("${green}examples:${clear} %d passed, %d skipped (%d targets x %d backends, %s)", passed, skipped, #examples, #backends, frame_desc)
     end)
 task_end()

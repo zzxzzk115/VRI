@@ -49,6 +49,16 @@ namespace
     DeviceBase* CreateBackend(VriGraphicsAPI api, const VriDeviceCreationDesc& desc, VriResult& result)
     {
         result = VriResult_Unsupported;
+        if (api != VriGraphicsAPI_Vulkan && api != VriGraphicsAPI_Software &&
+            (desc.enabledFeatures & VriFeature_CooperativeVector) && desc.bestEffort == VRI_FALSE)
+        {
+            if (desc.callbackInterface && desc.callbackInterface->MessageCallback)
+                desc.callbackInterface->MessageCallback(
+                    desc.callbackInterface->userArg,
+                    VriMessageSeverity_Error,
+                    "cooperative vectors are not implemented by the requested backend");
+            return nullptr;
+        }
         switch (api)
         {
 #if defined(VRI_BACKEND_VULKAN)

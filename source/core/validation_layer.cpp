@@ -80,6 +80,8 @@ namespace vri::core
             VriQueryInterface           query;         // the backend's real query-pool table (if supported)
             VriPipelineCacheInterface   pipelineCache; // the backend's real pipeline-cache table (if supported)
             VriInteropInterface         interop;       // the backend's real native-handle interop table (if supported)
+
+            VriCooperativeVectorInterface cooperativeVector {};
             // wrappers without an explicit destroy entry point, freed at device teardown
             std::vector<QueueVal*>  queues;
             std::vector<CmdBufVal*> cmds;
@@ -782,6 +784,33 @@ namespace vri::core
                 return;
             c->dev->omm.CmdBuildMicromap(c->real, desc);
         }
+        VriResult VRI_CALL CooperativeVectorGetProperties(VriDevice* device, VriCooperativeVectorDeviceProperties* out)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            auto* d = DV(device);
+            return d->cooperativeVector.GetCooperativeVectorDeviceProperties(d->real, out);
+        }
+
+        VriResult VRI_CALL CooperativeVectorGetCombinations(VriDevice*                      device,
+                                                            uint32_t*                       count,
+                                                            VriCooperativeVectorProperties* out)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            auto* d = DV(device);
+            return d->cooperativeVector.GetCooperativeVectorProperties(d->real, count, out);
+        }
+
+        VriResult VRI_CALL CooperativeVectorConvertMatrix(VriDevice*                                   device,
+                                                          const VriConvertCooperativeVectorMatrixInfo* pInfo)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            auto* d = DV(device);
+            return d->cooperativeVector.ConvertCooperativeVectorMatrix(d->real, pInfo);
+        }
+
         // external memory/semaphore export: unwrap the device on every call (and the fence on
         // GetFenceHandle). Returned buffers/textures are not wrapped (resource plane). The
         // returned fence IS wrapped (the app holds FenceVal-wrapped fences).
@@ -1175,6 +1204,19 @@ namespace vri::core
             w.CmdCopyQueries                      = QueryCmdCopyQueries;
             w.GetCalibratedTimestamps             = QueryGetCalibratedTimestamps;
             *static_cast<VriQueryInterface*>(out) = w;
+            return VriResult_Success;
+        }
+        if (nameIs(VRI_INTERFACE_COOPERATIVE_VECTOR))
+        {
+            if (size != sizeof(VriCooperativeVectorInterface))
+                return VriResult_InvalidArgument;
+            const VriResult r = reinterpret_cast<DeviceBase*>(d->real)->GetInterface(
+                VRI_INTERFACE_COOPERATIVE_VECTOR, sizeof(d->cooperativeVector), &d->cooperativeVector);
+            if (r != VriResult_Success)
+                return r;
+            static const VriCooperativeVectorInterface kWrapped = {
+                CooperativeVectorGetProperties, CooperativeVectorGetCombinations, CooperativeVectorConvertMatrix};
+            *static_cast<VriCooperativeVectorInterface*>(out) = kWrapped;
             return VriResult_Success;
         }
         if (nameIs(VRI_INTERFACE_PIPELINE_CACHE))

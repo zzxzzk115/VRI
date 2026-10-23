@@ -1,4 +1,5 @@
 #include "device_vk.h"
+#include "cooperative_vector_vk.h"
 #include "core_vk.h"
 #include "external_vk.h"
 #include "interop_vk.h"
@@ -140,6 +141,12 @@ namespace vri::vk
             return r;
 
         LoadExtensionFunctions();
+        if (m_enabledFeatures & VriFeature_CooperativeVector)
+        {
+            r = InitializeCooperativeVectors();
+            if (r != VriResult_Success)
+                return r;
+        }
         FillDeviceDesc();
         FillRegistry();
         DebugObjectsVK::Track(this, this, VK_OBJECT_TYPE_DEVICE, m_device);
@@ -389,6 +396,10 @@ namespace vri::vk
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT};
         VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT pageableSup = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT};
+        VkPhysicalDeviceCooperativeVectorFeaturesNV cvSup = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV};
+        VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT replicateSup = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_REPLICATED_COMPOSITES_FEATURES_EXT};
         VkPhysicalDeviceVulkan12Features v12Sup  = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures         baseSup = {}; // core features: geometry/tessellation/fillModeNonSolid
         {
@@ -443,6 +454,16 @@ namespace vri::vk
             {
                 *q = &pageableSup;
                 q  = &pageableSup.pNext;
+            }
+            if (hasExt(VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME))
+            {
+                *q = &cvSup;
+                q  = &cvSup.pNext;
+            }
+            if (hasExt(VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME))
+            {
+                *q = &replicateSup;
+                q  = &replicateSup.pNext;
             }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
             vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
@@ -653,7 +674,11 @@ namespace vri::vk
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
         VkPhysicalDeviceOpacityMicromapFeaturesEXT ommEn = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT};
-        VkPhysicalDeviceRayQueryFeaturesKHR rqEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+        VkPhysicalDeviceRayQueryFeaturesKHR         rqEn = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+        VkPhysicalDeviceCooperativeVectorFeaturesNV cvEn = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV};
+        VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT replicateEn = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_REPLICATED_COMPOSITES_FEATURES_EXT};
 
         void**         chainTail   = baseTail; // append optional feature structs here
         const uint64_t requested   = desc.enabledFeatures;
@@ -830,6 +855,37 @@ namespace vri::vk
                 return VriResult_Unsupported;
         }
 
+        if (requested & VriFeature_CooperativeVector)
+        {
+            if (hasExt(VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME) && cvSup.cooperativeVector &&
+                hasExt(VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME) && replicateSup.shaderReplicatedComposites &&
+                v12Sup.vulkanMemoryModel)
+            {
+                extensions.push_back(VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME);
+                // Component enum values used by matrix conversion belong to these extensions.
+                if (hasExt(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME))
+                    extensions.push_back(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+                if (hasExt(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME))
+                    extensions.push_back(VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME);
+                cvEn.cooperativeVector = VK_TRUE;
+                *chainTail             = &cvEn;
+                chainTail              = &cvEn.pNext;
+                // Slang CoopVec lowering requires replicated composites and the Vulkan memory model.
+                extensions.push_back(VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME);
+                replicateEn.shaderReplicatedComposites = VK_TRUE;
+                *chainTail                             = &replicateEn;
+                chainTail                              = &replicateEn.pNext;
+                // Half/int8 arithmetic needs the corresponding scalar features.
+                f12.vulkanMemoryModel = v12Sup.vulkanMemoryModel;
+                f12.shaderFloat16     = v12Sup.shaderFloat16;
+                f12.shaderInt8        = v12Sup.shaderInt8;
+                granted |= VriFeature_CooperativeVector;
+            }
+            else if (unsupported("cooperative vector inference needs VK_NV_cooperative_vector, replicated composites "
+                                 "and Vulkan memory model"))
+                return VriResult_Unsupported;
+        }
+
         if ((requested & VriFeature_LowLatency) && unsupported("low-latency not implemented"))
             return VriResult_Unsupported;
 
@@ -975,6 +1031,7 @@ namespace vri::vk
         m_desc.hasOpacityMicromap      = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery             = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasCooperativeVector    = (m_enabledFeatures & VriFeature_CooperativeVector) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasPipelineStatistics   = m_hasPipelineStats ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCalibratedTimestamps = m_hasCalibratedTimestamps ? VRI_TRUE : VRI_FALSE;
         m_desc.hasDrawIndirectCount    = m_hasDrawIndirectCount ? VRI_TRUE : VRI_FALSE;
@@ -1039,6 +1096,15 @@ namespace vri::vk
         m_ext.CmdEndRendering =
             reinterpret_cast<PFN_vkCmdEndRendering>(LoadCoreOrKhr("vkCmdEndRendering", "vkCmdEndRenderingKHR"));
         m_ext.QueueSubmit2 = reinterpret_cast<PFN_vkQueueSubmit2>(LoadCoreOrKhr("vkQueueSubmit2", "vkQueueSubmit2KHR"));
+
+        if (m_enabledFeatures & VriFeature_CooperativeVector)
+        {
+            m_ext.getCooperativeVectorProperties =
+                reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeVectorPropertiesNV>(
+                    vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceCooperativeVectorPropertiesNV"));
+            m_ext.convertCooperativeVectorMatrix = reinterpret_cast<PFN_vkConvertCooperativeVectorMatrixNV>(
+                vkGetDeviceProcAddr(m_device, "vkConvertCooperativeVectorMatrixNV"));
+        }
 
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_ext.CmdSetFragmentShadingRate = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
@@ -1151,6 +1217,10 @@ namespace vri::vk
                 VRI_INTERFACE_OMM, GetOpacityMicromapInterfaceVK(), sizeof(VriOpacityMicromapInterface));
         if (m_enabledFeatures & VriFeature_ExternalMemory)
             m_registry.Register(VRI_INTERFACE_EXTERNAL, GetExternalInterfaceVK(), sizeof(VriExternalInterface));
+        if (m_enabledFeatures & VriFeature_CooperativeVector)
+            m_registry.Register(VRI_INTERFACE_COOPERATIVE_VECTOR,
+                                GetCooperativeVectorInterfaceVK(),
+                                sizeof(VriCooperativeVectorInterface));
     }
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult)

@@ -25,7 +25,7 @@ Checks: >
   modernize-use-equals-default,
   modernize-use-equals-delete,
 
-  performance-faster-string-find,
+  performance-prefer-single-char-overloads,
   performance-for-range-copy,
   performance-implicit-conversion-in-loop,
   performance-inefficient-algorithm,
@@ -168,9 +168,13 @@ CheckOptions:
   - key: readability-identifier-naming.EnumConstantCase
     value: CamelCase
   - key: readability-identifier-naming.LocalVariableCase
-    value: camelBack, _
+    value: camelBack
+  - key: readability-identifier-naming.LocalVariableIgnoredRegexp
+    value: "^_$"
   - key: readability-identifier-naming.StaticConstantCase
-    value: CamelCase, kCamelCase
+    value: CamelCase
+  - key: readability-identifier-naming.StaticConstantIgnoredRegexp
+    value: "^k[A-Z].*"
   - key: readability-identifier-naming.MemberCase
     value: camelBack
   - key: readability-identifier-naming.ClassMemberPrefix

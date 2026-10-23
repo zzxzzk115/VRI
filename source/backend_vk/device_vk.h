@@ -9,6 +9,8 @@
 #include "core/device_base.h"
 #include "objects_vk.h"
 
+#include <vector>
+
 namespace vri::vk
 {
     class DeviceVK final : public core::DeviceBase
@@ -69,9 +71,21 @@ namespace vri::vk
             PFN_vkDestroyMicromapEXT       DestroyMicromap       = nullptr;
             PFN_vkGetMicromapBuildSizesEXT GetMicromapBuildSizes = nullptr;
             PFN_vkCmdBuildMicromapsEXT     CmdBuildMicromaps     = nullptr;
+
+            PFN_vkGetPhysicalDeviceCooperativeVectorPropertiesNV getCooperativeVectorProperties = nullptr;
+            PFN_vkConvertCooperativeVectorMatrixNV               convertCooperativeVectorMatrix = nullptr;
         };
         const ExtFunctions& Ext() const { return m_ext; }
         uint64_t            EnabledFeatures() const { return m_enabledFeatures; }
+
+        const VriCooperativeVectorDeviceProperties& CooperativeVectorDeviceProperties() const
+        {
+            return m_cooperativeVectorDeviceProperties;
+        }
+        const std::vector<VriCooperativeVectorProperties>& CooperativeVectorCombinations() const
+        {
+            return m_cooperativeVectorCombinations;
+        }
         // Sampler anisotropy: enabled only when the physical device supports it, and requests are
         // clamped to this limit (asking for more than maxSamplerAnisotropy is a validation error).
         bool            HasSamplerAnisotropy() const { return m_hasSamplerAnisotropy; }
@@ -106,6 +120,7 @@ namespace vri::vk
         void      LoadExtensionFunctions();
         void      FillDeviceDesc();
         void      FillRegistry();
+        VriResult InitializeCooperativeVectors();
 
         VkInstance               m_instance       = VK_NULL_HANDLE;
         VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
@@ -140,6 +155,9 @@ namespace vri::vk
         uint32_t        m_maxViewCount                 = 0;
         VkTimeDomainKHR m_hostTimeDomain = VK_TIME_DOMAIN_DEVICE_KHR; // the host clock to pair with DEVICE
         ExtFunctions    m_ext            = {};
+
+        VriCooperativeVectorDeviceProperties        m_cooperativeVectorDeviceProperties {};
+        std::vector<VriCooperativeVectorProperties> m_cooperativeVectorCombinations;
 
         VriDeviceDesc        m_desc     = {};
         VriCallbackInterface m_callback = {};

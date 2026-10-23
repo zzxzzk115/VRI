@@ -90,8 +90,9 @@ namespace
         for (int z = 0; z < kGrid; ++z)
             for (int x = 0; x < kGrid; ++x)
             {
-                const uint32_t h = uint32_t(x * 374761393 + z * 668265263) ^ 0x5bf03635u;
-                Instance       i {};
+                const uint32_t h =
+                    (static_cast<uint32_t>(x) * 374761393u + static_cast<uint32_t>(z) * 668265263u) ^ 0x5bf03635u;
+                Instance i {};
                 i.posScale[0]   = (float(x) + 0.5f - kGrid * 0.5f) * kSpacing;
                 i.posScale[1]   = 0.0f;
                 i.posScale[2]   = (float(z) + 0.5f - kGrid * 0.5f) * kSpacing;

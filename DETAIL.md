@@ -6,6 +6,39 @@ the native extension each path uses. For the at-a-glance support matrix, see the
 (which calls may run concurrently and where the caller must synchronize), see
 [docs/threading.md](docs/threading.md).
 
+## For NRI users
+
+VRI shares NRI's explicit programming model, not its complete API. This comparison uses
+[NRI revision `79d76a9`](https://github.com/NVIDIA-RTX/NRI/tree/79d76a9a78689ef58ee7962b1d8ed7e7a3efe18d)
+(header version 190). NRI evolves independently; matching names do not establish matching signatures or capabilities.
+
+| Area | Familiar model | VRI difference |
+| --- | --- | --- |
+| Dispatch and objects | Create a device, query a sized interface table, use opaque handles. | C declarations use `Vri*` types and pointer parameters; the C++ wrapper is optional. Function-table layout is not NRI-compatible. |
+| Command allocation | CommandAllocator owns command-recording storage. | `CreateCommandAllocator` takes a device and queue type, rather than NRI's queue. |
+| Resources and memory | Texture/Buffer descriptors, memory locations and explicit binding. | `CreateBuffer`/`CreateTexture` normally allocate and bind automatically. The explicit memory path queries a creation descriptor, closer to NRI's `Get*MemoryDesc2`; do not assume NRI's resource-query or allocation signatures. |
+| Descriptor sets | PipelineLayout contains set/range declarations; pools allocate sets. | `AllocateDescriptorSets` has no variable-descriptor-count argument. `UpdateDescriptorRanges` takes one set and consecutive range indices, rather than NRI's array of update records. |
+| Constants and binding | Bind the pipeline layout before descriptor sets and constants. | `CmdSetConstants` uses a push-constant declaration index, data and size; it is not NRI's `CmdSetRootConstants` descriptor with offset/bind point. |
+| Barriers | Explicit before/after access, stages and texture layout. | Inspect `VriBarrierGroupDesc` and its supported fields; NRI flags and numeric enum values are not interchangeable. |
+| Synchronization | Fence is a monotonic timeline used by queues and the host. | VRI submit/idle functions currently return `void`; NRI returns a result. A VRI Fence is not Vulkan's binary host fence. |
+| Optional features | Query device capabilities and extension tables. | The supported surface and table boundaries differ. Gate each path on the returned VRI capabilities, not the NRI feature list. |
+
+The normal sequence remains device -> core interface -> queue/allocator -> resources/layout/pipeline ->
+record barriers and commands -> submit with a timeline signal -> wait before reuse or destruction.
+For descriptor updates, `baseRange` indexes the declared `ranges` array. It is **not** a shader binding number:
+range index 0 can declare `baseRegister = 7`; its descriptors are updated through range index 0.
+
+Current native Vulkan rendering uses Y-up clip space through a negative-height viewport, with depth in [0, 1].
+There is no device convention selector yet. Configurable presets/overrides are planned and must update shaders,
+helpers and backend behavior together. Matrix storage and world handedness are application math policies, not
+requirements imposed by Vulkan or by the name of a preset.
+
+The OpenGL/WebGPU timeline paths currently publish requested signal values at submission, and WebGPU descriptor
+updates do not yet preserve all prior writes. These are implementation gaps to fix, not intended NRI semantics
+or evidence of completion. Existing successful image tests do not establish correctness of these untested cases.
+
+## Backend details
+
 **✅ Native** &nbsp;·&nbsp; **🟡 Emulated / Simulated** &nbsp;·&nbsp; **⬜ Planned** (the API supports it; not yet in VRI) &nbsp;·&nbsp; **❌ Unsupported by the API**
 
 - **Planned (⬜).** A few cells are things the backend's API *can* do but VRI hasn't wired yet —
@@ -110,6 +143,88 @@ the native extension each path uses. For the at-a-glance support matrix, see the
   report `Unsupported`. **`CmdClearStorageTexture`** clears a storage texture to a color the same way
   (`vkCmdClearColorImage` / `ClearUnorderedAccessView{Float,Uint}` / `glClearTexImage`, GL 4.4),
   gated by `hasClearStorageTexture`.
+
+## API migration scope
+
+VRI retains one NRI-style API. [PR #23](https://github.com/zzxzzk115/VRI/pull/23) adds the optional
+cooperative-vector interface without changing the existing coordinate contract.
+[PR #24](https://github.com/zzxzzk115/VRI/pull/24) introduces device-owned conventions and development version
+**0.2.0**; [PR #25](https://github.com/zzxzzk115/VRI/pull/25) fixes descriptor and completion semantics.
+The Vulkan-style vocabulary rewrite and alternative dual-interface proposal are cancelled. These changes are
+an open review stack, not a release announcement.
+
+## Cooperative-vector shader inference
+
+`VriFeature_CooperativeVector` enables the optional `VRI_INTERFACE_COOPERATIVE_VECTOR` table and
+`VriDeviceDesc::hasCooperativeVector`. First implementation: Vulkan; other backends do not provide the table.
+A required request (`bestEffort = false`) fails with `Unsupported` if unavailable. A best-effort request may
+create a device with the flag unset. This is not a general ML runtime and does not silently replace inference
+with scalar arithmetic.
+
+- `GetCooperativeVectorDeviceProperties()` reports supported shader stages and maximum vector length.
+- `GetCooperativeVectorProperties()` enumerates complete input/interpretation/matrix/bias/result type tuples.
+  Query the count, allocate the array, then read it. Independently supported scalar types cannot be freely combined.
+- `ConvertCooperativeVectorMatrix()` takes `VriConvertCooperativeVectorMatrixInfo`: borrowed host addresses,
+  byte capacities, component types, matrix dimensions, layouts and strides. A null destination queries its size.
+  Short source/destination buffers and overlapping ranges fail before conversion writes. Same-type layout conversion,
+  Float32/Float16 conversion and Float32/Float16 to/from supported Float8 are implemented.
+
+The inference-optimal representation is device/driver-specific. Store portable weights and convert on load;
+use the normal VRI buffer upload path afterward. Matrix offsets passed to Slang must satisfy its alignment rules;
+the test packs each matrix/bias at a 64-byte boundary. Shaders own network shape and activation functions.
+Training, GPU matrix conversion and inference on D3D12/Metal/WebGPU/GL are not implemented. Availability of a
+ray/mesh stage here does not enable that separate stage feature.
+
+The Vulkan shader baseline enables queried cooperative vectors, replicated composites and Vulkan memory model,
+which the pinned Slang CoopVec lowering requires. Available Float16/Int8 arithmetic is enabled too; component-type
+extensions are enabled when advertised. All feature checks and native conversions stay inside VRI.
+See [Khronos cooperative vectors](https://docs.vulkan.org/features/latest/features/proposals/VK_NV_cooperative_vector.html),
+[host matrix conversion](https://docs.vulkan.org/refpages/latest/refpages/source/vkConvertCooperativeVectorMatrixNV.html)
+and [Slang CoopVec](https://docs.shader-slang.org/en/stable/external/core-module-reference/types/coopvec-04/index.html).
+
+```sh
+xmake f -m release --vri_build_examples=n --vri_build_tests=y --vri_build_tools=y
+xmake build vri-tests vri-shaderc
+xmake run vri-tests --test-case='cooperative vector:*'
+
+# Regenerate only this test shader, with the required capability explicit.
+build/linux/x86_64/release/vri-shaderc shaders/tests/neural_inference.slang \
+    -o shaders/tests/neural_inference_spv.h --var g_neuralInferenceSpv \
+    --target spirv --capability spvCooperativeVectorNV
+```
+
+The offline test evaluates 65 inputs through an 8 → 16 → 4 FP16 MLP with ReLU, compares every output against
+independent CPU arithmetic, checks opt-in/unsupported behavior, count queries, conversion bounds and exact
+Float16/Float8 weight round trips. Both raw and validation-wrapped devices run the same test. Linux RTX 4060
+Laptop maximum MLP error: 0.000122070 (limit 0.002). This is not acceptance on other devices or backends.
+
+The `example-mlp` image demo uses a trained 2 -> 32 -> 32 -> 3 ReLU network. Its FP32 portable weights
+are converted once to FP16/device-optimal matrices and FP16 biases, then uploaded through ordinary VRI buffers.
+The default SDL3/ImGui window compares reference/prediction/error, with live error amplification and preview zoom.
+`--offline` runs the same compute/verification path without initializing SDL video or ImGui; automated example runs
+select it explicitly. No external model file, Python environment or inference SDK is needed for either mode.
+GPU resources are reused; command recording stays before the display pass, and the GUI cache is released only
+after GPU completion and before destroying its texture view. Both modes verify and export the three panels.
+
+On the tested RTX 4060 Laptop, 256x256 inference has maximum CPU-reference error 0.0023849 (limit 0.01),
+analytic-fit RMSE 0.0130625 (limit 0.03), and at most one UNORM byte of image error. The 137x137 case also passes.
+These are correctness checks, not inference performance measurements. OpenGL reports unsupported (exit 77);
+`xmake examples` counts such skips separately and still fails on diagnostics or other nonzero exit codes.
+
+The original procedural target, deterministic training seed, Adam implementation and generated weights are in
+`examples/mlp/`. Retraining is optional and requires NumPy; use the normal formatter after generation:
+
+```sh
+python examples/mlp/train.py
+clang-format -i examples/mlp/model_weights.h
+build/linux/x86_64/release/vri-shaderc shaders/examples/mlp_image.slang \
+    -o shaders/examples/mlp_image_spv.h --var g_mlpImageSpv \
+    --target spirv --capability spvCooperativeVectorNV
+```
+
+`VriCooperativeVectorProperties::transpose` advertises *additional* support for transposition of optimal-layout
+matrices; a true value does not prevent ordinary non-transposed multiplication.
+[Khronos property contract](https://docs.vulkan.org/refpages/latest/refpages/source/VkCooperativeVectorPropertiesNV.html).
 
 ## Software (CPU) rendering
 
