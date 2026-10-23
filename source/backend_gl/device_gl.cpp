@@ -414,6 +414,11 @@ namespace vri::gl
         m_window = glfwCreateWindow(1, 1, "vri-gl", nullptr, nullptr);
         if (!m_window)
         {
+#if defined(__EMSCRIPTEN__)
+            // Emscripten's GLFW3 port does not export glfwGetError.
+            ReportError("glfwCreateWindow: WebGL context creation failed");
+            return VriResult_Failure;
+#else
             const char* reason = nullptr;
             const int   error  = glfwGetError(&reason);
             const bool  unsupported =
@@ -425,6 +430,7 @@ namespace vri::gl
             }
             ReportError(reason ? reason : "glfwCreateWindow failed");
             return VriResult_Failure;
+#endif
         }
         glfwMakeContextCurrent(m_window);
 
