@@ -24,6 +24,7 @@
 #include "vri_command.h"
 #include "vri_sync.h"
 #include "vri_core.h"
+#include "vri_coordinates.h"
 
 #include "ext/vri_ext_cooperative_vector.h"
 #include "ext/vri_ext_external.h"

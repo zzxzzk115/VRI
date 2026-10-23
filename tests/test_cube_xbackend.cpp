@@ -52,11 +52,12 @@ namespace
             o[5]        = uint16_t(b + 3);
         }
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             MESSAGE("device unavailable - skipping");

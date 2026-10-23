@@ -14,12 +14,13 @@ namespace
 {
     void RunCompaction(VriGraphicsAPI api, const char* name)
     {
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        dc.enabledFeatures  = VriFeature_RayTracing;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        dc.enabledFeatures        = VriFeature_RayTracing;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             MESSAGE("[" << name << "] unavailable - skipping AS-compaction test");

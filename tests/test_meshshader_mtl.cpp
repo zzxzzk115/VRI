@@ -35,11 +35,12 @@ namespace
 
     bool InitMtl(Mtl& mtl)
     {
-        VriDeviceCreationDesc desc {};
-        desc.graphicsAPI      = VriGraphicsAPI_Metal;
-        desc.enableValidation = VRI_TRUE;
-        desc.bestEffort       = VRI_TRUE;
-        desc.enabledFeatures  = VriFeature_MeshShader;
+        VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+        desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        desc.graphicsAPI            = VriGraphicsAPI_Metal;
+        desc.enableValidation       = VRI_TRUE;
+        desc.bestEffort             = VRI_TRUE;
+        desc.enabledFeatures        = VriFeature_MeshShader;
         if (vriCreateDevice(&desc, &mtl.device) != VriResult_Success)
             return false;
         return vriGetInterface(mtl.device, VRI_INTERFACE_CORE, sizeof(mtl.core), &mtl.core) == VriResult_Success;

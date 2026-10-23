@@ -41,11 +41,12 @@ namespace
 
 TEST_CASE("D3D12: vertex-buffer + indexed draw -> yellow triangle (phase 2)")
 {
-    VriDeviceCreationDesc dc {};
-    dc.graphicsAPI      = VriGraphicsAPI_D3D12;
-    dc.enableValidation = VRI_TRUE;
-    dc.bestEffort       = VRI_TRUE;
-    VriDevice* dev      = nullptr;
+    VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+    dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    dc.graphicsAPI            = VriGraphicsAPI_D3D12;
+    dc.enableValidation       = VRI_TRUE;
+    dc.bestEffort             = VRI_TRUE;
+    VriDevice* dev            = nullptr;
     if (vriCreateDevice(&dc, &dev) != VriResult_Success)
     {
         MESSAGE("D3D12 unavailable - skipping");

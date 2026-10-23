@@ -216,12 +216,13 @@ int main()
     ctx.hooks.createDevice   = hookCreateDevice;
     ctx.hooks.userData       = &ctx;
 
-    VriDeviceCreationDesc dc {};
-    dc.graphicsAPI      = VriGraphicsAPI_Vulkan;
-    dc.enableValidation = VRI_TRUE;
-    dc.bestEffort       = VRI_TRUE;
-    dc.nativeCreateInfo = &ctx.hooks;
-    VriDevice* dev      = nullptr;
+    VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+    dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    dc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+    dc.enableValidation       = VRI_TRUE;
+    dc.bestEffort             = VRI_TRUE;
+    dc.nativeCreateInfo       = &ctx.hooks;
+    VriDevice* dev            = nullptr;
     if (!vriOk(vriCreateDevice(&dc, &dev), "vriCreateDevice"))
         return 1;
 

@@ -148,6 +148,7 @@ namespace vri::vk
                 return r;
         }
         FillDeviceDesc();
+        m_desc.coordinates = desc.coordinates;
         FillRegistry();
         DebugObjectsVK::Track(this, this, VK_OBJECT_TYPE_DEVICE, m_device);
         return VriResult_Success;

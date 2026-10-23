@@ -88,6 +88,7 @@ namespace vri::mtl
         }
 
         FillDeviceDesc();
+        m_desc.coordinates = desc.coordinates;
         FillRegistry();
         return VriResult_Success;
     }

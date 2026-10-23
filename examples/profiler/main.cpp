@@ -111,8 +111,9 @@ int main()
 {
     // ---- device: Auto-select, or force a backend with VRI_API=vulkan|d3d12 ----
     const char*           apiEnv = std::getenv("VRI_API");
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI = VriGraphicsAPI_Auto;
+    VriDeviceCreationDesc desc   = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY  = VriClipSpaceY_Up;
+    desc.graphicsAPI             = VriGraphicsAPI_Auto;
     if (apiEnv && std::strcmp(apiEnv, "vulkan") == 0)
         desc.graphicsAPI = VriGraphicsAPI_Vulkan;
     else if (apiEnv && (std::strcmp(apiEnv, "d3d12") == 0 || std::strcmp(apiEnv, "D3D12") == 0))

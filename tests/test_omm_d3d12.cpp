@@ -32,11 +32,12 @@ namespace
 
     bool Init(Dx& dx)
     {
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_D3D12;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        dc.enabledFeatures  = VriFeature_RayTracing | VriFeature_OpacityMicromap;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_D3D12;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        dc.enabledFeatures        = VriFeature_RayTracing | VriFeature_OpacityMicromap;
         if (vriCreateDevice(&dc, &dx.device) != VriResult_Success)
             return false;
         return vriGetInterface(dx.device, VRI_INTERFACE_CORE, sizeof(dx.core), &dx.core) == VriResult_Success;

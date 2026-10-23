@@ -24,11 +24,12 @@ namespace
 
     void Check(VriGraphicsAPI api, const char* name)
     {
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             MESSAGE("[" << std::string(name) << "] unavailable - skipped");

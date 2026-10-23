@@ -7,9 +7,10 @@
 
 TEST_CASE("D3D12: device creates and reports an adapter")
 {
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI = VriGraphicsAPI_D3D12;
-    desc.bestEffort  = VRI_TRUE;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = VriGraphicsAPI_D3D12;
+    desc.bestEffort             = VRI_TRUE;
 
     VriDevice* device = nullptr;
     if (vriCreateDevice(&desc, &device) != VriResult_Success)

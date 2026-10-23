@@ -30,11 +30,12 @@ namespace
 
     bool InitVk(Vk& vk)
     {
-        VriDeviceCreationDesc desc {};
-        desc.graphicsAPI      = VriGraphicsAPI_Vulkan;
-        desc.enableValidation = VRI_TRUE;
-        desc.bestEffort       = VRI_TRUE;
-        desc.enabledFeatures  = VriFeature_Bindless;
+        VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+        desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+        desc.enableValidation       = VRI_TRUE;
+        desc.bestEffort             = VRI_TRUE;
+        desc.enabledFeatures        = VriFeature_Bindless;
         if (vriCreateDevice(&desc, &vk.device) != VriResult_Success)
             return false;
         return vriGetInterface(vk.device, VRI_INTERFACE_CORE, sizeof(vk.core), &vk.core) == VriResult_Success;

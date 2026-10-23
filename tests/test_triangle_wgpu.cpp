@@ -17,9 +17,10 @@ namespace
 
 TEST_CASE("WebGPU: render a triangle offscreen and read back the center pixel")
 {
-    VriDeviceCreationDesc dc {};
-    dc.graphicsAPI = VriGraphicsAPI_WebGPU;
-    dc.bestEffort  = VRI_TRUE;
+    VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+    dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    dc.graphicsAPI            = VriGraphicsAPI_WebGPU;
+    dc.bestEffort             = VRI_TRUE;
 
     VriDevice* dev = nullptr;
     if (vriCreateDevice(&dc, &dev) != VriResult_Success)

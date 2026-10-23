@@ -22,12 +22,13 @@ namespace
 
     bool RunIndirect(VriGraphicsAPI api, const void* shader, size_t shaderSize, bool& ran)
     {
-        ran = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ran                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         ran = true;

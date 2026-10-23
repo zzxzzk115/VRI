@@ -26,12 +26,13 @@ namespace
 
     bool RenderAndProbe(bool& centerRed)
     {
-        centerRed = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_WebGPU;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        centerRed                 = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_WebGPU;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             std::printf("VRI_WEBGPU: device creation FAILED\n");
@@ -210,11 +211,12 @@ namespace
     // out[i] = i + 100; read back and verify every element. (WebGL2 cannot do this.)
     bool ComputeProbe()
     {
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_WebGPU;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_WebGPU;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
 

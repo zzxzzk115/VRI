@@ -449,6 +449,7 @@ namespace vri::gl
 
         m_queue.device = this;
         FillDeviceDesc(); // queries the GL version
+        m_desc.coordinates = desc.coordinates;
         DetectFeatures(); // derives the desktop-GL capability tiers from it
 
         // Coordinate system: on GL 4.5+ use the native VRI convention via glClipControl

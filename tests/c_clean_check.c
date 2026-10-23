@@ -9,7 +9,7 @@
 
 int vri_c_clean_check(void)
 {
-    VriDeviceCreationDesc deviceDesc;
+    VriDeviceCreationDesc deviceDesc = vriDefaultDeviceCreationDesc();
     VriDevice* device = NULL;
     VriResult r;
     VriCoreInterface core;

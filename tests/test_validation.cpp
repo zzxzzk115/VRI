@@ -27,12 +27,13 @@ namespace
         const VriGraphicsAPI apis[] = {VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL};
         for (VriGraphicsAPI api : apis)
         {
-            VriDeviceCreationDesc dc {};
-            dc.graphicsAPI       = api;
-            dc.enableValidation  = VRI_TRUE;
-            dc.bestEffort        = VRI_TRUE;
-            dc.callbackInterface = cb;
-            VriDevice* dev       = nullptr;
+            VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+            dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+            dc.graphicsAPI            = api;
+            dc.enableValidation       = VRI_TRUE;
+            dc.bestEffort             = VRI_TRUE;
+            dc.callbackInterface      = cb;
+            VriDevice* dev            = nullptr;
             if (vriCreateDevice(&dc, &dev) == VriResult_Success)
                 return dev;
         }
@@ -44,11 +45,12 @@ TEST_CASE("VRI Validation enumerates the real device objects")
 {
     for (const auto api : {VriGraphicsAPI_Vulkan, VriGraphicsAPI_D3D12})
     {
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             MESSAGE("backend unavailable: " << static_cast<int>(api));

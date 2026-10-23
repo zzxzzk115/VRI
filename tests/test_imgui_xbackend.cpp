@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 namespace
 {
@@ -19,14 +20,15 @@ namespace
 
     // Returns true if the quad rendered red over a black background. `ran` is set when a device
     // for `api` was actually created (so callers can skip cleanly on unavailable backends).
-    bool RunImgui(VriGraphicsAPI api, bool& ran)
+    bool RunImgui(VriGraphicsAPI api, bool& ran, VriClipSpaceY clipY = VriClipSpaceY_Up)
     {
-        ran = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ran                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = clipY;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
 
@@ -59,13 +61,13 @@ namespace
         REQUIRE(cr == VriResult_Success);
         ran = true;
 
-        // One red quad over the center [16,48]^2, UVs at the white atlas center.
+        // An off-center red quad makes vertical flips visible in the readback.
         const uint32_t       red      = 0xFF0000FFu; // bytes R,G,B,A = FF,00,00,FF
         const VriImguiVertex verts[4] = {
-            {{16, 16}, {0.5f, 0.5f}, red},
-            {{48, 16}, {0.5f, 0.5f}, red},
-            {{48, 48}, {0.5f, 0.5f}, red},
-            {{16, 48}, {0.5f, 0.5f}, red},
+            {{16, 8}, {0.5f, 0.5f}, red},
+            {{48, 8}, {0.5f, 0.5f}, red},
+            {{48, 32}, {0.5f, 0.5f}, red},
+            {{16, 32}, {0.5f, 0.5f}, red},
         };
         const uint16_t      idx[6] = {0, 1, 2, 0, 2, 3};
         VriImguiDrawCommand cmd0 {};
@@ -192,11 +194,13 @@ namespace
 
         const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rbd.size));
         REQUIRE(px != nullptr);
-        auto           at      = [&](uint32_t x, uint32_t y) { return px + (static_cast<size_t>(y) * kW + x) * 4; };
-        const uint8_t* center  = at(kW / 2, kH / 2);                                  // inside the quad -> red
-        const uint8_t* corner  = at(4, 4);                                            // outside -> black clear
-        const bool     quadRed = center[0] > 200 && center[1] < 60 && center[2] < 60; // R high, G/B low
-        const bool     bgBlack = corner[0] < 16 && corner[1] < 16 && corner[2] < 16;
+        auto           at         = [&](uint32_t x, uint32_t y) { return px + (static_cast<size_t>(y) * kW + x) * 4; };
+        const uint8_t* center     = at(kW / 2, kH / 4);                                  // inside the quad -> red
+        const uint8_t* corner     = at(4, 4);                                            // outside -> black clear
+        const bool     quadRed    = center[0] > 200 && center[1] < 60 && center[2] < 60; // R high, G/B low
+        const bool     bgBlack    = corner[0] < 16 && corner[1] < 16 && corner[2] < 16;
+        const uint8_t* below      = at(kW / 2, 3 * kH / 4);
+        const bool     belowBlack = below[0] < 16 && below[1] < 16 && below[2] < 16;
         c.UnmapBuffer(readback);
 
         c.DeviceWaitIdle(dev);
@@ -207,7 +211,7 @@ namespace
         c.DestroyTexture(color);
         gui.DestroyImgui(imgui);
         vriDestroyDevice(dev);
-        return quadRed && bgBlack;
+        return quadRed && bgBlack && belowBlack;
     }
 
     void Check(VriGraphicsAPI api, const char* name)
@@ -325,12 +329,13 @@ namespace
     // renderer must bind the right texture per command. Verifies the descriptor-set-per-view cache.
     bool RunImguiPerCmdTex(VriGraphicsAPI api, bool& ran)
     {
-        ran = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ran                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -537,12 +542,13 @@ namespace
     // both would draw the right quad (left stays black). Per-viewport buffers keep them independent.
     bool RunImguiMultiViewport(VriGraphicsAPI api, bool& ran)
     {
-        ran = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ran                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -783,4 +789,22 @@ TEST_CASE("ImGui renderer: multi-viewport keeps per-viewport geometry independen
     CheckMultiViewport(VriGraphicsAPI_WebGPU, "WebGPU");
     CheckMultiViewport(VriGraphicsAPI_OpenGL, "OpenGL");
     CheckMultiViewport(VriGraphicsAPI_Metal, "Metal");
+}
+
+TEST_CASE("ImGui renderer: Vulkan-default Y-down preserves UI pixel positions")
+{
+    for (VriGraphicsAPI api : {VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL})
+    {
+        CAPTURE(api);
+        bool       ran     = false;
+        const bool correct = RunImgui(api, ran, VriClipSpaceY_Down);
+        if (ran)
+        {
+            CHECK(correct);
+        }
+        else
+        {
+            MESSAGE("UI convention backend unavailable: ", api);
+        }
+    }
 }

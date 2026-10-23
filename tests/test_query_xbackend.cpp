@@ -25,10 +25,11 @@ namespace
 
     bool Init(Dev& d, VriGraphicsAPI api)
     {
-        VriDeviceCreationDesc desc {};
-        desc.graphicsAPI      = api;
-        desc.enableValidation = VRI_TRUE;
-        desc.bestEffort       = VRI_TRUE;
+        VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+        desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        desc.graphicsAPI            = api;
+        desc.enableValidation       = VRI_TRUE;
+        desc.bestEffort             = VRI_TRUE;
         if (vriCreateDevice(&desc, &d.device) != VriResult_Success)
             return false;
         return vriGetInterface(d.device, VRI_INTERFACE_CORE, sizeof(d.core), &d.core) == VriResult_Success;

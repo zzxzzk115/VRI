@@ -31,11 +31,12 @@ namespace
 
     bool Init(Ctx& ctx, uint64_t features, VriBool bestEffort)
     {
-        VriDeviceCreationDesc desc {};
-        desc.graphicsAPI      = VriGraphicsAPI_Vulkan;
-        desc.enableValidation = VRI_TRUE;
-        desc.enabledFeatures  = features;
-        desc.bestEffort       = bestEffort;
+        VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+        desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+        desc.enableValidation       = VRI_TRUE;
+        desc.enabledFeatures        = features;
+        desc.bestEffort             = bestEffort;
         if (vriCreateDevice(&desc, &ctx.device) != VriResult_Success)
             return false;
         return vriGetInterface(ctx.device, VRI_INTERFACE_CORE, sizeof(ctx.core), &ctx.core) == VriResult_Success;
@@ -99,11 +100,12 @@ TEST_CASE("Vulkan: fail-fast (bestEffort=false) rejects an unsupported feature")
         ++static_cast<Captured*>(userArg)->count;
     };
 
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI       = VriGraphicsAPI_Vulkan;
-    desc.enabledFeatures   = VriFeature_LowLatency; // not implemented -> must fail when not best-effort
-    desc.bestEffort        = VRI_FALSE;
-    desc.callbackInterface = &cb;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+    desc.enabledFeatures        = VriFeature_LowLatency; // not implemented -> must fail when not best-effort
+    desc.bestEffort             = VRI_FALSE;
+    desc.callbackInterface      = &cb;
 
     VriDevice* device = nullptr;
     CHECK(vriCreateDevice(&desc, &device) == VriResult_Unsupported);
@@ -205,10 +207,11 @@ TEST_CASE("Vulkan: partitioned subgroup extension is enabled when supported")
         return vkCreateDevice(gpu, &ci, nullptr, static_cast<VkDevice*>(output));
     };
     Ctx                   ctx;
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI      = VriGraphicsAPI_Vulkan;
-    desc.enableValidation = VRI_TRUE;
-    desc.nativeCreateInfo = &hooks;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+    desc.enableValidation       = VRI_TRUE;
+    desc.nativeCreateInfo       = &hooks;
     REQUIRE(vriCreateDevice(&desc, &ctx.device) == VriResult_Success);
     CHECK(probe.called);
     CHECK(probe.enabledCount == (probe.supported ? 1u : 0u));

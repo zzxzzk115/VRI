@@ -6,6 +6,7 @@
 #define VRI_STRUCTS_H
 
 #include "vri_base.h"
+#include "vri_coordinates.h"
 #include "vri_enums.h"
 
 VRI_EXTERN_C_BEGIN
@@ -14,9 +15,9 @@ VRI_EXTERN_C_BEGIN
 typedef struct VriAllocationCallbacks
 {
     void* userArg;
-    void* (VRI_CALL *Allocate)(void* userArg, size_t size, size_t alignment);
-    void* (VRI_CALL *Reallocate)(void* userArg, void* ptr, size_t size, size_t alignment);
-    void  (VRI_CALL *Free)(void* userArg, void* ptr);
+    void*(VRI_CALL* Allocate)(void* userArg, size_t size, size_t alignment);
+    void*(VRI_CALL* Reallocate)(void* userArg, void* ptr, size_t size, size_t alignment);
+    void(VRI_CALL* Free)(void* userArg, void* ptr);
 } VriAllocationCallbacks;
 
 typedef enum VriMessageSeverity
@@ -30,34 +31,35 @@ typedef enum VriMessageSeverity
 typedef struct VriCallbackInterface
 {
     void* userArg;
-    void  (VRI_CALL *MessageCallback)(void* userArg, VriMessageSeverity severity, const char* message);
+    void(VRI_CALL* MessageCallback)(void* userArg, VriMessageSeverity severity, const char* message);
 } VriCallbackInterface;
 
 /* Parameters for vriCreateDevice. */
 typedef struct VriDeviceCreationDesc
 {
-    VriGraphicsAPI                graphicsAPI;
-    uint32_t                      adapterIndex;     /* index into vriEnumerateAdapters */
-    VriBool                       enableValidation;
+    uint32_t       structSize; /* Initialize with vriDefaultDeviceCreationDesc(). */
+    VriGraphicsAPI graphicsAPI;
+    uint32_t       adapterIndex; /* index into vriEnumerateAdapters */
+    VriBool        enableValidation;
 
     /* bitset of optional features to enable at creation (see VriFeatureBits). */
-    uint64_t                      enabledFeatures;
+    uint64_t enabledFeatures;
     /* if VRI_TRUE: proceed with whatever subset is granted; else fail hard. */
-    VriBool                       bestEffort;
+    VriBool bestEffort;
 
     /* Extra native-API extensions to require at instance/device creation.
        Required by interop layers such as OpenXR, which dictate the extension
        set (xrGetVulkanInstanceExtensionsKHR / xrGetVulkanDeviceExtensionsKHR)
        and the physical device to use. Ignored by backends without extensions. */
-    const char* const*            requiredInstanceExtensions;
-    uint32_t                      requiredInstanceExtensionNum;
-    const char* const*            requiredDeviceExtensions;
-    uint32_t                      requiredDeviceExtensionNum;
+    const char* const* requiredInstanceExtensions;
+    uint32_t           requiredInstanceExtensionNum;
+    const char* const* requiredDeviceExtensions;
+    uint32_t           requiredDeviceExtensionNum;
 
     /* Optional backend-specific creation chain, e.g. importing an existing
        native instance/device/adapter for OpenXR or another host. NULL for
        normal creation; cast per backend (see ext/vri_ext_interop.h). */
-    const void*                   nativeCreateInfo;
+    const void* nativeCreateInfo;
 
     /* Optional native display connection shared between the device's GL/EGL context
        and window presentation. Required by the native OpenGL ES backend on Wayland:
@@ -65,11 +67,21 @@ typedef struct VriDeviceCreationDesc
        and the window surface. NULL (the default) -> the backend picks a default /
        headless display. Ignored by backends that don't need it (X11 window IDs, and
        Vulkan/D3D12/Metal/desktop-GL, work without it). */
-    const void*                   nativeDisplay;
+    const void* nativeDisplay;
+
+    VriCoordinateConventions coordinates; /* Copied by the device; zero selects Vulkan conventions. */
 
     const VriAllocationCallbacks* allocationCallbacks; /* optional */
     const VriCallbackInterface*   callbackInterface;   /* optional */
 } VriDeviceCreationDesc;
+
+/* NOLINTNEXTLINE(modernize-redundant-void-arg): C11 needs an explicit no-parameter prototype. */
+static inline VriDeviceCreationDesc vriDefaultDeviceCreationDesc(void)
+{
+    VriDeviceCreationDesc desc = {0};
+    desc.structSize            = (uint32_t)sizeof(desc);
+    return desc;
+}
 
 /* Optional features requestable at device creation. */
 typedef enum VriFeatureBits

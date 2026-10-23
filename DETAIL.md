@@ -28,10 +28,30 @@ record barriers and commands -> submit with a timeline signal -> wait before reu
 For descriptor updates, `baseRange` indexes the declared `ranges` array. It is **not** a shader binding number:
 range index 0 can declare `baseRegister = 7`; its descriptors are updated through range index 0.
 
-Current native Vulkan rendering uses Y-up clip space through a negative-height viewport, with depth in [0, 1].
-There is no device convention selector yet. Configurable presets/overrides are planned and must update shaders,
-helpers and backend behavior together. Matrix storage and world handedness are application math policies, not
-requirements imposed by Vulkan or by the name of a preset.
+## Coordinate conventions
+
+`vriDefaultDeviceCreationDesc()` sets the required `structSize` and Vulkan defaults. An incorrectly sized
+creation descriptor or invalid convention enum fails before backend initialization. Select a preset with
+`vriGetConventionPreset()`, then override any field before creation. `vriGetCoordinateConventions()` returns a
+copy of the immutable device configuration. Vulkan/Metal presets choose right-handed, column-major,
+column-vector math; Direct3D chooses left-handed math. These are documented helper policies, not API mandates.
+
+The authoring-to-rasterizer transform returned by `vriGetCoordinateTransform()` is explicit:
+
+- Vulkan uses positive viewport height for Y-down, negative height for Y-up. Other backends retain their portable
+  Y-up raster contract; the queried factor converts Y-down shader outputs when needed.
+- A [-1, 1] authored clip depth is converted to [0, 1] by `z = 0.5 * z + 0.5 * w`. Authored [0, 1] is unchanged.
+- Bottom-left authored UV becomes top-left through `v = 1 - v`. Upload/readback row zero always remains the top
+  row; changing UV policy never changes raw texture bytes or pixel coordinates.
+- `vriMakePerspectiveProjection()` produces an authored projection; `vriTransformProjection()` makes it ready
+  for the queried rasterizer, preserving off-center and jitter terms for row/column storage and multiplication.
+  Apply the conversion once, either in the projection or in the shader. World handedness is not converted by
+  the clip correction; it is selected when constructing the projection/view data.
+
+Raw precompiled shaders must obey their authored contract and explicitly use correction factors if needed;
+VRI does not rewrite arbitrary SPIR-V, DXIL or WGSL. The Slang helpers and shader include path support the same
+conversion without target-specific shader copies. ImGui always declares its own Y-up source convention.
+OpenGL retains its current-native-context requirement; immutable convention queries do not activate a context.
 
 The OpenGL/WebGPU timeline paths currently publish requested signal values at submission, and WebGPU descriptor
 updates do not yet preserve all prior writes. These are implementation gaps to fix, not intended NRI semantics

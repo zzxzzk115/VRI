@@ -35,11 +35,12 @@ namespace
 
     bool Init(D3D12App& app)
     {
-        VriDeviceCreationDesc desc {};
-        desc.graphicsAPI      = VriGraphicsAPI_D3D12;
-        desc.enableValidation = VRI_TRUE;
-        desc.bestEffort       = VRI_TRUE;
-        desc.enabledFeatures  = VriFeature_ExternalMemory;
+        VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+        desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        desc.graphicsAPI            = VriGraphicsAPI_D3D12;
+        desc.enableValidation       = VRI_TRUE;
+        desc.bestEffort             = VRI_TRUE;
+        desc.enabledFeatures        = VriFeature_ExternalMemory;
         if (vriCreateDevice(&desc, &app.device) != VriResult_Success)
             return false;
         return vriGetInterface(app.device, VRI_INTERFACE_CORE, sizeof(app.core), &app.core) == VriResult_Success;
