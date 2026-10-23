@@ -187,6 +187,7 @@ namespace vri::wgpu
         m_queueObj.queue  = m_queue;
 
         FillDeviceDesc();
+        m_desc.coordinates = desc.coordinates;
         FillRegistry();
         return VriResult_Success;
     }

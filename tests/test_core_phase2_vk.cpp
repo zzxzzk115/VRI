@@ -28,10 +28,11 @@ namespace
 
     bool Init(Ctx& ctx)
     {
-        VriDeviceCreationDesc desc {};
-        desc.graphicsAPI      = VriGraphicsAPI_Vulkan;
-        desc.enableValidation = VRI_TRUE;
-        desc.bestEffort       = VRI_TRUE;
+        VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+        desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+        desc.enableValidation       = VRI_TRUE;
+        desc.bestEffort             = VRI_TRUE;
         if (vriCreateDevice(&desc, &ctx.device) != VriResult_Success)
             return false;
         return vriGetInterface(ctx.device, VRI_INTERFACE_CORE, sizeof(ctx.core), &ctx.core) == VriResult_Success;

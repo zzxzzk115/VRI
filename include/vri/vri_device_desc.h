@@ -10,6 +10,7 @@
 #define VRI_DEVICE_DESC_H
 
 #include "vri_base.h"
+#include "vri_coordinates.h"
 #include "vri_enums.h"
 #include "vri_format.h"
 
@@ -147,7 +148,8 @@ typedef struct VriDeviceDesc
     uint32_t bindlessTextureMaxNum;
     uint32_t bindlessSamplerMaxNum;
 
-    VriBool hasCooperativeVector; /* enabled shader inference extension, not a general ML-runtime capability */
+    VriBool hasCooperativeVector;         /* enabled shader inference extension, not a general ML-runtime capability */
+    VriCoordinateConventions coordinates; /* Immutable authoring policy selected at creation. */
 } VriDeviceDesc;
 
 VRI_EXTERN_C_END

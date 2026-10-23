@@ -52,7 +52,8 @@ namespace vri::core
         struct ImguiState
         {
             VriCoreInterface c {}; // the device's (possibly validation-wrapped) core table
-            VriDevice*       dev = nullptr;
+            VriDevice*       dev        = nullptr;
+            float            clipYScale = 1.0f;
 
             VriPipelineLayout* layout   = nullptr;
             VriPipeline*       pipeline = nullptr;
@@ -285,6 +286,16 @@ namespace vri::core
                 delete s;
                 return VriResult_Failure;
             }
+            VriCoordinateConventions uiCoordinates {};
+            uiCoordinates.clipSpaceY = VriClipSpaceY_Up;
+            VriCoordinateTransform transform {};
+            const VriResult        conventionResult = vriGetCoordinateTransform(device, &uiCoordinates, &transform);
+            if (conventionResult != VriResult_Success)
+            {
+                delete s;
+                return conventionResult;
+            }
+            s->clipYScale       = transform.clipYScale;
             s->dev              = device;
             s->mainVp.owner     = s; // the main window's geometry buffers belong to this state
             VriCoreInterface& c = s->c;
@@ -562,6 +573,8 @@ namespace vri::core
             o.scale[1]     = -2.0f / dd->displaySize[1]; // -Y: ImGui origin is top-left
             o.translate[0] = -1.0f - dd->displayPos[0] * o.scale[0];
             o.translate[1] = 1.0f - dd->displayPos[1] * o.scale[1];
+            o.scale[1] *= s->clipYScale;
+            o.translate[1] *= s->clipYScale;
 
             c.CmdSetPipeline(cmd, s->pipeline);
             c.CmdSetPipelineLayout(cmd, s->layout);

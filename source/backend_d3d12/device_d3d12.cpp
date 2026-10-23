@@ -166,6 +166,7 @@ namespace vri::d3d12
 
         chosen.As(&m_adapter3); // IDXGIAdapter3 for QueryVideoMemoryInfo (null if unavailable)
         FillDeviceDesc(chosen.Get());
+        m_desc.coordinates = desc.coordinates;
         FillRegistry();
         return VriResult_Success;
     }

@@ -1434,16 +1434,14 @@ namespace vri::vk
 
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)
         {
-            // VRI standardizes on Y-up clip space (D3D12/WebGPU/Metal convention).
-            // Vulkan's clip Y points down, so flip it with a negative-height
-            // viewport (VK_KHR_maintenance1, core 1.1) -- no shader change needed.
+            const bool              yUp = CB(cmd)->device->Desc().coordinates.clipSpaceY == VriClipSpaceY_Up;
             std::vector<VkViewport> v(num);
             for (uint32_t i = 0; i < num; ++i)
             {
                 v[i].x        = vps[i].x;
-                v[i].y        = vps[i].y + vps[i].height;
+                v[i].y        = yUp ? vps[i].y + vps[i].height : vps[i].y;
                 v[i].width    = vps[i].width;
-                v[i].height   = -vps[i].height;
+                v[i].height   = yUp ? -vps[i].height : vps[i].height;
                 v[i].minDepth = vps[i].minDepth;
                 v[i].maxDepth = vps[i].maxDepth;
             }

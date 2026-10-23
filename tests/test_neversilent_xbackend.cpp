@@ -89,12 +89,13 @@ namespace
         cb.userArg         = &msg;
         cb.MessageCallback = OnMessage;
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI       = api;
-        dc.enableValidation  = VRI_TRUE;
-        dc.bestEffort        = VRI_TRUE;
-        dc.callbackInterface = &cb;
-        VriDevice* dev       = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        dc.callbackInterface      = &cb;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return p; // ran == false -> caller skips
         p.ran = true;
@@ -275,12 +276,13 @@ namespace
         cb.userArg         = &msg;
         cb.MessageCallback = OnMessage;
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI       = api;
-        dc.enableValidation  = VRI_TRUE;
-        dc.bestEffort        = VRI_TRUE;
-        dc.callbackInterface = &cb;
-        VriDevice* dev       = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        dc.callbackInterface      = &cb;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return p;
         p.ran = true;
@@ -534,12 +536,13 @@ namespace
 {
     void CheckInterfaceContract(VriGraphicsAPI api)
     {
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI         = api;
-        dc.enableValidation    = VRI_TRUE;
-        dc.bestEffort          = VRI_TRUE;
-        VriDevice*        dev  = nullptr;
-        const std::string name = ApiName(api);
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice*        dev     = nullptr;
+        const std::string name    = ApiName(api);
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             const std::string m = name + " unavailable - skipped";

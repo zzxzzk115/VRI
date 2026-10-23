@@ -6,9 +6,10 @@
 
 TEST_CASE("OpenGL: device creates and reports a renderer")
 {
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI = VriGraphicsAPI_OpenGL;
-    desc.bestEffort  = VRI_TRUE;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = VriGraphicsAPI_OpenGL;
+    desc.bestEffort             = VRI_TRUE;
 
     VriDevice* device = nullptr;
     if (vriCreateDevice(&desc, &device) != VriResult_Success)

@@ -93,11 +93,12 @@ int main()
     const int                   cudaHandleKind  = useD3D12 ? CUDA_INTEROP_KIND_D3D12 : CUDA_INTEROP_KIND_VULKAN;
 
     App                   app;
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI      = useD3D12 ? VriGraphicsAPI_D3D12 : VriGraphicsAPI_Vulkan;
-    desc.enableValidation = VRI_TRUE;
-    desc.bestEffort       = VRI_TRUE;
-    desc.enabledFeatures  = VriFeature_ExternalMemory;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = useD3D12 ? VriGraphicsAPI_D3D12 : VriGraphicsAPI_Vulkan;
+    desc.enableValidation       = VRI_TRUE;
+    desc.bestEffort             = VRI_TRUE;
+    desc.enabledFeatures        = VriFeature_ExternalMemory;
     if (vriCreateDevice(&desc, &app.device) != VriResult_Success)
     {
         std::printf("Failed to create a %s device.\n", useD3D12 ? "D3D12" : "Vulkan");

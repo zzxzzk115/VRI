@@ -30,6 +30,8 @@ using vri::core::DeviceBase;
 
 namespace vri::core
 {
+    bool ValidConventions(const VriCoordinateConventions& conventions);
+
     // VRI Validation layer (validation_layer.cpp). Active when the device was
     // created with enableValidation; wraps the device so it can't be confused with
     // a raw backend handle.
@@ -147,6 +149,20 @@ extern "C"
             return VriResult_InvalidArgument;
 
         *outDevice = nullptr;
+        if (desc->structSize != sizeof(VriDeviceCreationDesc))
+        {
+            return VriResult_InvalidArgument;
+        }
+        if (!vri::core::ValidConventions(desc->coordinates))
+        {
+            if (desc->callbackInterface && desc->callbackInterface->MessageCallback)
+            {
+                desc->callbackInterface->MessageCallback(desc->callbackInterface->userArg,
+                                                         VriMessageSeverity_Error,
+                                                         "vriCreateDevice: invalid coordinate conventions");
+            }
+            return VriResult_InvalidArgument;
+        }
 
         DeviceBase* device = nullptr;
         VriResult   result = VriResult_Unsupported;

@@ -414,8 +414,23 @@ namespace vri::gl
         m_window = glfwCreateWindow(1, 1, "vri-gl", nullptr, nullptr);
         if (!m_window)
         {
-            ReportError(m_es ? "glfwCreateWindow (GLES 3.1) failed" : "glfwCreateWindow (GL core) failed");
+#if defined(__EMSCRIPTEN__)
+            // Emscripten's GLFW3 port does not export glfwGetError.
+            ReportError("glfwCreateWindow: WebGL context creation failed");
             return VriResult_Failure;
+#else
+            const char* reason = nullptr;
+            const int   error  = glfwGetError(&reason);
+            const bool  unsupported =
+                error == GLFW_API_UNAVAILABLE || error == GLFW_VERSION_UNAVAILABLE || error == GLFW_FORMAT_UNAVAILABLE;
+            if (unsupported)
+            {
+                ReportWarning(reason ? reason : "The requested OpenGL context is unavailable");
+                return VriResult_Unsupported;
+            }
+            ReportError(reason ? reason : "glfwCreateWindow failed");
+            return VriResult_Failure;
+#endif
         }
         glfwMakeContextCurrent(m_window);
 
@@ -449,6 +464,7 @@ namespace vri::gl
 
         m_queue.device = this;
         FillDeviceDesc(); // queries the GL version
+        m_desc.coordinates = desc.coordinates;
         DetectFeatures(); // derives the desktop-GL capability tiers from it
 
         // Coordinate system: on GL 4.5+ use the native VRI convention via glClipControl

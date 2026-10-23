@@ -47,11 +47,12 @@ namespace
         topRed = botRed = false;
         Step("enter");
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             std::printf("VRI_WEBGL: device creation FAILED\n");
@@ -207,11 +208,12 @@ namespace
     {
         centerGreen = false;
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
 
@@ -421,11 +423,12 @@ namespace
     {
         centerBlue = false;
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
 
@@ -691,11 +694,12 @@ namespace
         };
         const uint32_t idx[] = {0, 1, 2};
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
 
@@ -893,11 +897,12 @@ namespace
         fillTri(tri[1], 0.3f, 0, 1, 0);
         fillTri(tri[2], 0.9f, 0, 0, 1);
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -1111,12 +1116,13 @@ namespace
     // Alpha blending: opaque blue then red @ alpha 0.5 -> center purple (~128,0,128).
     bool RenderBlendAndProbe(bool& centerPurple)
     {
-        centerPurple = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        centerPurple              = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -1368,11 +1374,12 @@ namespace
             0.0f,
         };
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -1557,12 +1564,13 @@ namespace
     // hold their color. Exercises GL glDrawBuffers + per-target readback on WebGL.
     bool RenderMrtAndProbe(bool& ok2)
     {
-        ok2 = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ok2                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -1719,12 +1727,13 @@ namespace
     // Instanced draw: 2 instances via SV_InstanceID -> red left, green right.
     bool RenderInstanceAndProbe(bool& ok2)
     {
-        ok2 = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ok2                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -1864,12 +1873,13 @@ namespace
     // black while a right-of-scissor pixel is red.
     bool RenderScissorAndProbe(bool& ok2)
     {
-        ok2 = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        ok2                       = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -2009,12 +2019,13 @@ namespace
     // hasComputeShader == false AND CreateComputePipeline must return Unsupported.
     bool RenderComputeUnsupportedProbe(bool& correct)
     {
-        correct = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        correct                   = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -2047,12 +2058,13 @@ namespace
     // multisample textures; the GL backend uses a multisample renderbuffer.)
     bool RenderMsaaAndProbe(bool& edgeBlend)
     {
-        edgeBlend = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        edgeBlend                 = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
@@ -2231,12 +2243,13 @@ namespace
     // back -> center red. Exercises the full GL web-swapchain API path in the browser.
     bool RenderSwapchainAndProbe(bool& centerRed)
     {
-        centerRed = false;
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = VriGraphicsAPI_OpenGLES;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        centerRed                 = false;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};

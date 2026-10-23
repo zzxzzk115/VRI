@@ -40,11 +40,12 @@ namespace
 TEST_CASE("Vulkan debug-utils Release annotations dispatch native object types without validation")
 {
     using namespace vri::vk;
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI      = VriGraphicsAPI_Vulkan;
-    desc.enableValidation = VRI_FALSE;
-    desc.bestEffort       = VRI_TRUE;
-    VriDevice* device     = nullptr;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+    desc.enableValidation       = VRI_FALSE;
+    desc.bestEffort             = VRI_TRUE;
+    VriDevice* device           = nullptr;
     if (vriCreateDevice(&desc, &device) != VriResult_Success)
     {
         MESSAGE("Vulkan unavailable - skipped");

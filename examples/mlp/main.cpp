@@ -209,12 +209,13 @@ namespace
                         level = "WARN";
                     std::fprintf(stderr, "[VRI][%s] %s\n", level, message);
                 };
-                VriDeviceCreationDesc device {};
-                device.graphicsAPI       = options.api;
-                device.enableValidation  = VRI_TRUE;
-                device.enabledFeatures   = VriFeature_CooperativeVector;
-                device.bestEffort        = VRI_TRUE;
-                device.callbackInterface = &callback;
+                VriDeviceCreationDesc device  = vriDefaultDeviceCreationDesc();
+                device.coordinates.clipSpaceY = VriClipSpaceY_Up;
+                device.graphicsAPI            = options.api;
+                device.enableValidation       = VRI_TRUE;
+                device.enabledFeatures        = VriFeature_CooperativeVector;
+                device.bestEffort             = VRI_TRUE;
+                device.callbackInterface      = &callback;
                 Check(vriCreateDevice(&device, &m_device), "Create device");
                 m_ownsDevice = true;
             }

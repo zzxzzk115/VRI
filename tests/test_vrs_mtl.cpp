@@ -10,12 +10,13 @@
 
 TEST_CASE("Metal VRS: unsupported - capability false and interface not queryable")
 {
-    VriDeviceCreationDesc dc {};
-    dc.graphicsAPI      = VriGraphicsAPI_Metal;
-    dc.enableValidation = VRI_TRUE;
-    dc.bestEffort       = VRI_TRUE;
-    dc.enabledFeatures  = VriFeature_VariableShadingRate;
-    VriDevice* dev      = nullptr;
+    VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+    dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    dc.graphicsAPI            = VriGraphicsAPI_Metal;
+    dc.enableValidation       = VRI_TRUE;
+    dc.bestEffort             = VRI_TRUE;
+    dc.enabledFeatures        = VriFeature_VariableShadingRate;
+    VriDevice* dev            = nullptr;
     if (vriCreateDevice(&dc, &dev) != VriResult_Success)
     {
         MESSAGE("Metal unavailable - skipping");

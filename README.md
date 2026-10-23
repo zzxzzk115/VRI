@@ -49,7 +49,7 @@ The example writes a 960×720 BMP after accumulating the default 128 samples.
 
 [Cooperative-vector shader inference](DETAIL.md#cooperative-vector-shader-inference) is optional and Vulkan-only;
 query it before compiling or running that path. VRI retains one NRI-style interface. Customizable
-device conventions are planned separately; neither a Vulkan-style rewrite nor a second API is planned.
+device conventions are selected at initialization; neither a Vulkan-style rewrite nor a second API is planned.
 
 ## Supported platforms & backends
 
@@ -165,6 +165,26 @@ xmake f -p wasm          # WebGPU + WebGL 2 are both enabled by default
 xmake build example-cube
 xmake run example-cube   # hosts the page in your browser
 ```
+
+## Coordinate conventions
+
+Initialize device descriptors with `vriDefaultDeviceCreationDesc()`; its size field guards C ABI drift.
+The default is Vulkan clip Y-down, depth [0, 1] and top-left UV authoring. Presets are editable values:
+
+```cpp
+VriDeviceCreationDesc desc = vriDefaultDeviceCreationDesc();
+desc.graphicsAPI = VriGraphicsAPI_Vulkan;
+vriGetConventionPreset(VriConventionPreset_Metal, &desc.coordinates);
+desc.coordinates.clipDepthRange = VriClipDepthRange_NegativeOneToOne;
+```
+
+The device copies this configuration. Use `vriGetCoordinateTransform()` to obtain the clip/UV conversion for
+its actual rasterizer; apply it once in a shader or to a projection with `vriTransformProjection()`.
+`vriMakePerspectiveProjection()` honors handedness, matrix storage, vector multiplication order and reversed depth.
+These are explicit math policies; Vulkan does not mandate them. No arbitrary shader binary or user matrix is
+rewritten. The shared `shaders/lib/coordinates.slang` helpers accept the queried factors. ImGui keeps its own
+Y-up/top-left authoring convention and converts independently. Existing examples explicitly select their Y-up
+shader contract. See [the detailed contract](DETAIL.md#coordinate-conventions).
 
 ## Examples
 

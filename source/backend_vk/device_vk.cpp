@@ -148,6 +148,7 @@ namespace vri::vk
                 return r;
         }
         FillDeviceDesc();
+        m_desc.coordinates = desc.coordinates;
         FillRegistry();
         DebugObjectsVK::Track(this, this, VK_OBJECT_TYPE_DEVICE, m_device);
         return VriResult_Success;
@@ -231,6 +232,11 @@ namespace vri::vk
         const VkResult instRes =
             m_vkHooks ? static_cast<VkResult>(m_vkHooks->createInstance(m_vkHooks->userData, &ci, &m_instance)) :
                         vkCreateInstance(&ci, nullptr, &m_instance);
+        if (instRes == VK_ERROR_INCOMPATIBLE_DRIVER)
+        {
+            ReportWarning("vkCreateInstance: no compatible Vulkan driver is available");
+            return VriResult_Unsupported;
+        }
         if (instRes != VK_SUCCESS || m_instance == VK_NULL_HANDLE)
         {
             ReportError("vkCreateInstance failed");

@@ -359,12 +359,13 @@ namespace vriex
                 nativeDisplay = wh.handle.wayland.display;
 #endif
 
-            VriDeviceCreationDesc dd {};
-            dd.graphicsAPI      = api;
-            dd.enableValidation = VRI_TRUE;
-            dd.bestEffort       = VRI_TRUE;
-            dd.enabledFeatures  = requestFeatures; // bestEffort: ungranted features just leave the matching hasX false
-            dd.nativeDisplay    = nativeDisplay;   // used by the native OpenGL ES backend on Wayland; ignored otherwise
+            VriDeviceCreationDesc dd  = vriDefaultDeviceCreationDesc();
+            dd.coordinates.clipSpaceY = VriClipSpaceY_Up;
+            dd.graphicsAPI            = api;
+            dd.enableValidation       = VRI_TRUE;
+            dd.bestEffort             = VRI_TRUE;
+            dd.enabledFeatures = requestFeatures; // bestEffort: ungranted features just leave the matching hasX false
+            dd.nativeDisplay   = nativeDisplay;   // used by the native OpenGL ES backend on Wayland; ignored otherwise
             static VriCallbackInterface cb {};
             cb.MessageCallback   = DefaultMessageCallback;
             dd.callbackInterface = &cb;

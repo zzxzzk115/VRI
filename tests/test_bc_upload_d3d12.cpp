@@ -18,10 +18,11 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
 #endif
 {
     std::atomic<unsigned> errors {0};
-    VriDeviceCreationDesc dc {};
-    dc.graphicsAPI      = VriGraphicsAPI_D3D12;
-    dc.enableValidation = VRI_TRUE;
-    dc.bestEffort       = VRI_TRUE;
+    VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+    dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    dc.graphicsAPI            = VriGraphicsAPI_D3D12;
+    dc.enableValidation       = VRI_TRUE;
+    dc.bestEffort             = VRI_TRUE;
     VriCallbackInterface callbacks {};
     callbacks.userArg         = &errors;
     callbacks.MessageCallback = [](void* user, VriMessageSeverity severity, const char* message) {

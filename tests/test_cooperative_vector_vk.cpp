@@ -41,13 +41,14 @@ namespace
                     ++static_cast<Context*>(user)->errors;
                 std::fprintf(stderr, "[cooperative vector] %s\n", message);
             };
-            VriDeviceCreationDesc desc {};
-            desc.graphicsAPI       = VriGraphicsAPI_Vulkan;
-            desc.enabledFeatures   = enabled ? VriFeature_CooperativeVector : VriFeature_None;
-            desc.enableValidation  = validation;
-            desc.bestEffort        = bestEffort;
-            desc.callbackInterface = &callback;
-            const auto result      = vriCreateDevice(&desc, &device);
+            VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+            desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+            desc.graphicsAPI            = VriGraphicsAPI_Vulkan;
+            desc.enabledFeatures        = enabled ? VriFeature_CooperativeVector : VriFeature_None;
+            desc.enableValidation       = validation;
+            desc.bestEffort             = bestEffort;
+            desc.callbackInterface      = &callback;
+            const auto result           = vriCreateDevice(&desc, &device);
             if (result == VriResult_Success)
             {
                 REQUIRE(vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core) == VriResult_Success);
@@ -498,11 +499,12 @@ TEST_CASE("cooperative vector: opt-in, queries, conversion bounds and inference"
 
 TEST_CASE("cooperative vector: unsupported backend rejects a required feature before creation")
 {
-    VriDeviceCreationDesc desc {};
-    desc.graphicsAPI     = VriGraphicsAPI_OpenGL;
-    desc.enabledFeatures = VriFeature_CooperativeVector;
-    desc.bestEffort      = VRI_FALSE;
-    VriDevice* device    = nullptr;
+    VriDeviceCreationDesc desc  = vriDefaultDeviceCreationDesc();
+    desc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+    desc.graphicsAPI            = VriGraphicsAPI_OpenGL;
+    desc.enabledFeatures        = VriFeature_CooperativeVector;
+    desc.bestEffort             = VRI_FALSE;
+    VriDevice* device           = nullptr;
     CHECK(vriCreateDevice(&desc, &device) == VriResult_Unsupported);
     CHECK(device == nullptr);
 }

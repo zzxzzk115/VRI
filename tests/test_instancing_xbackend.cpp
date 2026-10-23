@@ -56,11 +56,12 @@ namespace
                          Mul(Translate(0.45f, 0.0f, 0.5f), Scale(0.3f))};
         Mat4 viewProj = Transpose(Mat4 {}); // identity -> clip == object space (ortho-ish)
 
-        VriDeviceCreationDesc dc {};
-        dc.graphicsAPI      = api;
-        dc.enableValidation = VRI_TRUE;
-        dc.bestEffort       = VRI_TRUE;
-        VriDevice* dev      = nullptr;
+        VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
+        dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
+        dc.graphicsAPI            = api;
+        dc.enableValidation       = VRI_TRUE;
+        dc.bestEffort             = VRI_TRUE;
+        VriDevice* dev            = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
         {
             MESSAGE("device unavailable - skipping");
