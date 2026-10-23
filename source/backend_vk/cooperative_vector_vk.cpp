@@ -187,7 +187,7 @@ namespace vri::vk
                 return VriResult_InvalidArgument;
             const auto srcAddress = reinterpret_cast<uintptr_t>(pInfo->pSrcData);
             const auto dstAddress = reinterpret_cast<uintptr_t>(pInfo->pDstData);
-            const bool overlaps   = srcAddress <= dstAddress ? dstAddress - srcAddress < sourceRequired :
+            const bool overlaps   = srcAddress <= dstAddress ? dstAddress - srcAddress < pInfo->srcSize :
                                                                srcAddress - dstAddress < required;
             if (overlaps)
                 return VriResult_InvalidArgument;
