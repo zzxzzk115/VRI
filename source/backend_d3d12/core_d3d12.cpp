@@ -1,17 +1,16 @@
-// core_d3d12.cpp - the D3D12 core function table.
-//
-// Phase 1 implements the clear+readback path: resources (committed default/upload/
-// readback heaps), RTV views, command allocator/list, resource-state barriers,
-// render-pass clears, texture->buffer readback, fences and submission. Pipelines,
-// descriptor sets and draws are stubbed (Unsupported/no-op) until Phase 2.
+// D3D12 core implementation and function table.
+
 #include "core_d3d12.h"
 
 #include "conversions_d3d12.h"
 #include "device_d3d12.h"
 #include "objects_d3d12.h"
 
+#include "core/synchronization.h"
+
 #include <d3dcompiler.h> // D3DReflect (VS input-signature reflection for the input layout)
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -111,6 +110,7 @@ namespace vri::d3d12
             CmdClearStorageBuffer,
             CmdClearStorageTexture,
             EnumerateObjects,
+            WaitForFence,
         };
         return &t;
     }

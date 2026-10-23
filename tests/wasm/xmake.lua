@@ -11,6 +11,7 @@ target("vri-webgl-triangle")
     add_deps("vri")
     add_includedirs("$(projectdir)") -- shaders are included as "shaders/<owner>/X.h" from the repo root
     add_files("webgl_triangle.cpp")
+    add_files("../test_timeline_c.c", {languages = "c11"})
 
     -- Emit a .html (+ .js + .wasm) so emrun can host it; --emrun pipes the page's
     -- stdout/exit code back to the terminal for a headless grade. WebGL2 + GLFW3
@@ -38,6 +39,7 @@ target("vri-webgpu-triangle")
     add_deps("vri")
     add_includedirs("$(projectdir)") -- shaders are included as "shaders/<owner>/X.h" from the repo root
     add_files("webgpu_triangle.cpp")
+    add_files("../test_timeline_c.c", {languages = "c11"})
 
     set_extension(".html")
     -- ASYNCIFY: the backend yields with emscripten_sleep while the browser resolves

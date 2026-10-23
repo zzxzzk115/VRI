@@ -69,6 +69,8 @@ target("vri")
             -- WebGL2 + GLFW3 from Emscripten ports. The port flags are needed at
             -- compile (for the GLFW header) and link (for the final exe), and must
             -- propagate to dependents, hence {public = true}.
+            -- WebGL sync objects need a browser turn before a host wait can observe them.
+            add_ldflags("-sASYNCIFY", {public = true, force = true})
             add_cxflags("-sUSE_GLFW=3", {public = true, force = true})
             add_ldflags("-sUSE_GLFW=3", "-sFULL_ES3",
                         "-sMIN_WEBGL_VERSION=2", "-sMAX_WEBGL_VERSION=2",

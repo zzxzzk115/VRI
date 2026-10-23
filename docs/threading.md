@@ -3,8 +3,8 @@
 **Status:** contract documentation (behavior already in place; adds one opt-in validation check).
 
 VRI follows the same **externally synchronized** model as Vulkan and Direct3D 12: the library
-adds **no internal locking** around per-object operations, and the application owns all
-synchronization. This document states, per object and per backend, which calls may run
+does not serialize recording or submission for the application. The application owns
+object synchronization; small internal locks protect asynchronous completion bookkeeping. This document states, per object and per backend, which calls may run
 concurrently and where the caller must serialize. It also records the places where the current
 implementation is stricter or looser than this contract.
 
@@ -15,7 +15,7 @@ for the whole device.
 
 ## Core contract
 
-Nothing in VRI is implicitly locked. Two calls that touch the **same** object at the same time from
+Two calls that touch the **same** object at the same time from
 two threads are a data race unless this document says otherwise. Two calls that touch **different**
 objects are fine. Concretely:
 
@@ -26,14 +26,14 @@ objects are fine. Concretely:
 | `VriCommandBuffer` | **Externally synchronized, single-threaded.** A command buffer must be recorded start-to-finish (`BeginCommandBuffer` → `Cmd*` → `EndCommandBuffer`) by one thread. Different command buffers may be recorded on different threads at the same time — that is the parallel-recording path. |
 | `VriQueue` | **Externally synchronized.** `QueueSubmit` / `QueueWaitIdle` on a given queue must be serialized; never submit to the same `VriQueue` from two threads at once. Distinct queues (Graphics / Compute / Transfer) are independent and may be driven from different threads; cross-queue ordering is the caller's job via timeline fences. |
 | `VriDescriptorPool` | **Externally synchronized.** `AllocateDescriptorSets`, `ResetDescriptorPool`, and `UpdateDescriptorRanges` on the same pool/its sets must be serialized. Reuse is lock-free. Use one pool per thread for parallel descriptor allocation. |
-| `VriFence` (timeline) | `GetFenceValue` and `Wait` are safe to call from any thread concurrently (a timeline value is monotonic and only observed here). A fence is *signaled* through `QueueSubmit`, which follows the queue rule above. |
+| `VriFence` (timeline) | `GetFenceValue`, `Wait` and `WaitForFence` may run concurrently, except on context-bound GL. D3D12 creates a separate event per blocking wait. A fence is *signaled* through `QueueSubmit`, which follows the queue rule above. |
 | `VriBuffer` mapping | `MapBuffer` / `UnmapBuffer` on the same buffer must be serialized; do not map one buffer from two threads. Reading/writing the mapped pointer is ordinary CPU memory the caller must synchronize. |
 | `VriDevice` teardown | `DeviceWaitIdle` before destroying objects. Destruction (`Destroy*`, `FreeMemory`) must not race any in-flight use of the object on another thread or the GPU. |
 
-There is exactly one lock inside VRI: a process-global `std::mutex` in the validation layer
-(`source/core/validation_layer.cpp`) that guards the set of live validation devices so validation
-devices can be created/destroyed from multiple threads. It protects **bookkeeping only** — it does
-**not** make any rendering, recording, or submission call thread-safe.
+Internal locks protect validation-device bookkeeping and WebGPU's completion-record queue. WebGPU callbacks
+only mark their queue-owned records complete; host queries publish the completed submission prefix under the
+queue lock. These locks do **not** serialize rendering, recording or submission calls. Fence destruction must
+not race a host wait/query or any pending GPU signal.
 
 ## Recommended usage pattern
 
@@ -60,7 +60,7 @@ context.
 - The context is made current at device creation (`eglMakeCurrent` / `glfwMakeContextCurrent` /
   WGL / NSGL in `source/backend_gl/device_gl.cpp`) and VRI never migrates it to another thread.
 - Commands execute **immediately** when recorded — the command buffer is a thin recorder and
-  `QueueSubmit` is essentially a `glFlush` (`source/backend_gl/core_gl.cpp`). There is no deferred
+  `QueueSubmit` adds native sync objects for requested signals and flushes the context. There is no deferred
   command stream, so multi-threaded recording is not available on this backend.
 - If you must drive GL from a different thread, you have to move the context there yourself (make it
   current on the new thread, clear it on the old). That is outside VRI's scope.
@@ -98,8 +98,12 @@ This is the one backend where the model is *stricter* than the general contract 
 
 ### WebGPU — serialize per the WebGPU model
 
-- Native `wgpu` queues and command encoders are not reentrant; serialize submission per queue and
-  record one command buffer on one thread. There is no command-pool / descriptor-pool object.
+- All logical queue types alias the device's single native queue. Serialize their submissions together,
+  including host dependency waits. Separate queue-type handles do not provide parallel GPU queues.
+- Record one command buffer on one thread. Queue completion callbacks are asynchronous; queue-owned records
+  keep callback storage alive, and host queries/waits publish fence values only after actual completion.
+- Browser waits require Asyncify and yield the browser event loop. A timeout may exceed its requested duration
+  by the browser's scheduling granularity; it never manufactures a completed value.
 
 ## Validation aid (opt-in)
 

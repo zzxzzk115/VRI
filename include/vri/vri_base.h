@@ -20,31 +20,33 @@
 
 /* ---- ABI / calling-convention macros ---------------------------------- */
 #if defined(_WIN32)
-#    define VRI_CALL __cdecl
-#    if defined(VRI_SHARED_LIBRARY)
-#        if defined(VRI_BUILD)
-#            define VRI_API __declspec(dllexport)
-#        else
-#            define VRI_API __declspec(dllimport)
-#        endif
-#    else
-#        define VRI_API
-#    endif
+#define VRI_CALL __cdecl
+#if defined(VRI_SHARED_LIBRARY)
+#if defined(VRI_BUILD)
+#define VRI_API __declspec(dllexport)
 #else
-#    define VRI_CALL
-#    if defined(VRI_SHARED_LIBRARY) && defined(VRI_BUILD)
-#        define VRI_API __attribute__((visibility("default")))
-#    else
-#        define VRI_API
-#    endif
+#define VRI_API __declspec(dllimport)
+#endif
+#else
+#define VRI_API
+#endif
+#else
+#define VRI_CALL
+#if defined(VRI_SHARED_LIBRARY) && defined(VRI_BUILD)
+#define VRI_API __attribute__((visibility("default")))
+#else
+#define VRI_API
+#endif
 #endif
 
 #if defined(__cplusplus)
-#    define VRI_EXTERN_C_BEGIN extern "C" {
-#    define VRI_EXTERN_C_END }
+#define VRI_EXTERN_C_BEGIN \
+    extern "C" \
+    {
+#define VRI_EXTERN_C_END }
 #else
-#    define VRI_EXTERN_C_BEGIN
-#    define VRI_EXTERN_C_END
+#define VRI_EXTERN_C_BEGIN
+#define VRI_EXTERN_C_END
 #endif
 
 VRI_EXTERN_C_BEGIN
@@ -58,13 +60,14 @@ typedef enum VriResult
     VriResult_OutOfMemory,
     VriResult_Unsupported,
     VriResult_DeviceLost,
-    VriResult_OutOfDate,      /* swapchain out of date */
+    VriResult_OutOfDate, /* swapchain out of date */
+    VriResult_Timeout,   /* bounded host wait expired; completion value is unchanged */
     VriResult_MaxEnum = 0x7fffffff
 } VriResult;
 
 /* 32-bit boolean for stable ABI across compilers. */
 typedef uint32_t VriBool;
-#define VRI_TRUE  1u
+#define VRI_TRUE 1u
 #define VRI_FALSE 0u
 
 VRI_EXTERN_C_END

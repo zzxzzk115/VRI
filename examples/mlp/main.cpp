@@ -279,8 +279,8 @@ namespace
                 submit.commandBufferNum = 1;
                 submit.signalFences     = &signal;
                 submit.signalFenceNum   = 1;
-                m_core.QueueSubmit(m_queue, &submit);
-                m_core.Wait(m_fence, signal.value);
+                Check(m_core.QueueSubmit(m_queue, &submit), "Submit inference");
+                Check(m_core.WaitForFence(m_fence, signal.value, UINT64_MAX), "Wait for inference");
             }
         }
 

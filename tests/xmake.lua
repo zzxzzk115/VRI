@@ -21,6 +21,8 @@ target("vri-tests")
     add_files("test_coordinates.cpp")
     add_files("test_coordinate_rendering.cpp")
     add_files("test_coordinates_c.c", {languages = "c11"})
+    add_files("test_timeline_xbackend.cpp")
+    add_files("test_timeline_c.c", {languages = "c11"})
     add_files("test_conversion_map.cpp")      -- shared enum/flag conversion skeleton (backend-neutral)
     add_files("test_formatsupport_xbackend.cpp") -- GetFormatSupport answers per format, not from a constant
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse

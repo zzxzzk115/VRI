@@ -18,6 +18,7 @@ namespace vri::mtl
         VriResult Init(const VriDeviceCreationDesc& desc);
 
         id<MTLDevice>       Device() const { return m_device; }
+        MTLSharedEventListener* EventListener() const { return m_eventListener; }
         id<MTLCommandQueue> Queue() const { return m_queue; }
         QueueMTL*           GetQueue(VriQueueType type) { return &m_queueObjs[type]; }
         const VriDeviceDesc& Desc() const { return m_desc; }
@@ -31,6 +32,7 @@ namespace vri::mtl
         bool HasTimestampCounterSet() const;
         bool SupportsArgumentBufferBindless() const;
 
+        MTLSharedEventListener* m_eventListener = nil;
         id<MTLDevice>        m_device = nil;
         id<MTLCommandQueue>  m_queue = nil;
         QueueMTL             m_queueObjs[VriQueueType_Count] = {};

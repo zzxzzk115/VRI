@@ -259,17 +259,18 @@ namespace vri::core
             sig.fence = f;
             sig.value = 1;
             VriQueueSubmitDesc sub {};
-            sub.commandBuffers   = &cmd;
-            sub.commandBufferNum = 1;
-            sub.signalFences     = &sig;
-            sub.signalFenceNum   = 1;
-            c.QueueSubmit(queue, &sub);
-            c.Wait(f, 1);
-
+            sub.commandBuffers        = &cmd;
+            sub.commandBufferNum      = 1;
+            sub.signalFences          = &sig;
+            sub.signalFenceNum        = 1;
+            const VriResult submitted = c.QueueSubmit(queue, &sub);
+            const VriResult completed = submitted == VriResult_Success ? c.WaitForFence(f, 1, UINT64_MAX) : submitted;
+            if (completed != VriResult_Success)
+                c.DeviceWaitIdle(s->dev);
             c.DestroyFence(f);
             c.DestroyCommandAllocator(a);
             c.DestroyBuffer(fstg);
-            return true;
+            return completed == VriResult_Success;
         }
 
         VriResult VRI_CALL CreateImgui(VriDevice* device, const VriImguiDesc* desc, VriImgui** outImgui)

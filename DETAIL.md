@@ -20,7 +20,7 @@ VRI shares NRI's explicit programming model, not its complete API. This comparis
 | Descriptor sets | PipelineLayout contains set/range declarations; pools allocate sets. | `AllocateDescriptorSets` has no variable-descriptor-count argument. `UpdateDescriptorRanges` takes one set and consecutive range indices, rather than NRI's array of update records. |
 | Constants and binding | Bind the pipeline layout before descriptor sets and constants. | `CmdSetConstants` uses a push-constant declaration index, data and size; it is not NRI's `CmdSetRootConstants` descriptor with offset/bind point. |
 | Barriers | Explicit before/after access, stages and texture layout. | Inspect `VriBarrierGroupDesc` and its supported fields; NRI flags and numeric enum values are not interchangeable. |
-| Synchronization | Fence is a monotonic timeline used by queues and the host. | VRI submit/idle functions currently return `void`; NRI returns a result. A VRI Fence is not Vulkan's binary host fence. |
+| Synchronization | Fence is a monotonic timeline used by queues and the host. | Submit/idle return `VriResult`. `WaitForFence` adds a bounded host wait beside the existing infinite `Wait`. A VRI Fence is not Vulkan's binary host fence. |
 | Optional features | Query device capabilities and extension tables. | The supported surface and table boundaries differ. Gate each path on the returned VRI capabilities, not the NRI feature list. |
 
 The normal sequence remains device -> core interface -> queue/allocator -> resources/layout/pipeline ->
@@ -53,9 +53,28 @@ VRI does not rewrite arbitrary SPIR-V, DXIL or WGSL. The Slang helpers and shade
 conversion without target-specific shader copies. ImGui always declares its own Y-up source convention.
 OpenGL retains its current-native-context requirement; immutable convention queries do not activate a context.
 
-The OpenGL/WebGPU timeline paths currently publish requested signal values at submission, and WebGPU descriptor
-updates do not yet preserve all prior writes. These are implementation gaps to fix, not intended NRI semantics
-or evidence of completion. Existing successful image tests do not establish correctness of these untested cases.
+## Submission, completion and descriptors
+
+`QueueSubmit`, `QueueWaitIdle` and `DeviceWaitIdle` return `VriResult`; check the result before reusing resources.
+`WaitForFence(fence, value, timeoutNanoseconds)` polls when the timeout is zero and waits indefinitely for
+`UINT64_MAX`. `VriResult_Timeout` leaves the completed value unchanged. `Wait()` remains the infinite-wait
+convenience entry and reports errors through the device callback. A successful submit accepts work; it does
+not establish completion. Keep command storage, descriptors, resources and signaled fences alive until their
+last GPU use has completed. Host waits, object destruction and new submissions must follow the
+[threading contract](docs/threading.md).
+
+Vulkan/D3D12/Metal use native timeline primitives. GL tracks `GLsync` objects instead of publishing requested
+values at submission. It still records immediately on the current context; submission waits cannot reorder
+commands already recorded. WebGPU publishes completed values from queue completion callbacks, in submission
+order. Its logical queue types share one native queue; dependency waits are host waits, not independent GPU
+queues. WebGL/WebGPU host waits yield to the browser through Emscripten Asyncify.
+
+`UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
+are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during
+layout creation instead of silently binding only the first element. WebGPU also rejects partially-bound and
+variable-sized ranges because its bind-group layout does not express those contracts. A WebGPU set must have
+all required ranges initialized before binding. GL descriptor pools own their allocated CPU sets and release
+them on reset or destruction.
 
 ## Backend details
 

@@ -19,6 +19,8 @@
 #include <emscripten/emscripten.h>
 #endif
 
+extern "C" int vriTestTimelineC(VriDevice* device, size_t coreSize);
+
 namespace
 {
     constexpr uint32_t kW = 64;
@@ -46,6 +48,13 @@ namespace
             return false;
         VriQueue* queue = nullptr;
         c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
+        const int timelineFailure = vriTestTimelineC(dev, sizeof(c));
+        if (timelineFailure)
+        {
+            std::printf("Timeline C ABI regression failed at line %d\n", timelineFailure);
+            vriDestroyDevice(dev);
+            return false;
+        }
 
         VriTextureDesc td {};
         td.type           = VriTextureType_2D;
@@ -233,7 +242,7 @@ namespace
 
         constexpr uint32_t kCount = 64;
         VriBufferDesc      sbd {};
-        sbd.size           = kCount * 4;
+        sbd.size           = kCount * 4 * 2;
         sbd.usage          = VriBufferUsage_StorageBuffer | VriBufferUsage_TransferSrc;
         sbd.memoryLocation = VriMemoryLocation_Device;
         VriBuffer* storage = nullptr;
@@ -245,14 +254,18 @@ namespace
         VriBuffer* readback = nullptr;
         c.CreateBuffer(dev, &rbd, &readback);
 
-        VriDescriptorRangeDesc range {};
-        range.baseRegister   = 0;
-        range.descriptorNum  = 1;
-        range.descriptorType = VriDescriptorType_StorageBuffer;
-        range.shaderStages   = VriShaderStage_Compute;
+        VriDescriptorRangeDesc ranges[2] {};
+        for (auto& range : ranges)
+        {
+            range.descriptorNum  = 1;
+            range.descriptorType = VriDescriptorType_StorageBuffer;
+            range.shaderStages   = VriShaderStage_Compute;
+        }
+        ranges[0].baseRegister = 7;
+        ranges[1].baseRegister = 0;
         VriDescriptorSetDesc setDesc {};
-        setDesc.ranges   = &range;
-        setDesc.rangeNum = 1;
+        setDesc.ranges   = ranges;
+        setDesc.rangeNum = 2;
         VriPipelineLayoutDesc ld {};
         ld.descriptorSets         = &setDesc;
         ld.descriptorSetNum       = 1;
@@ -274,7 +287,7 @@ namespace
 
         VriDescriptorPoolDesc pdsc {};
         pdsc.descriptorSetMaxNum = 1;
-        pdsc.storageBufferMaxNum = 1;
+        pdsc.storageBufferMaxNum = 2;
         VriDescriptorPool* pool  = nullptr;
         c.CreateDescriptorPool(dev, &pdsc, &pool);
         VriDescriptorSet* set = nullptr;
@@ -283,15 +296,24 @@ namespace
         bv.buffer             = storage;
         bv.viewType           = VriDescriptorType_StorageBuffer;
         bv.offset             = 0;
-        bv.size               = sbd.size;
+        bv.size               = kCount * 4;
         VriDescriptor* sbView = nullptr;
         c.CreateBufferView(dev, &bv, &sbView);
-        const VriDescriptor*         descs[1] = {sbView};
+        bv.offset                = kCount * 4;
+        VriDescriptor* spareView = nullptr;
+        c.CreateBufferView(dev, &bv, &spareView);
+        const VriDescriptor*         spareDescriptors[1] = {spareView};
+        const VriDescriptor*         descs[1]            = {sbView};
         VriDescriptorRangeUpdateDesc upd {};
         upd.descriptors    = descs;
         upd.descriptorNum  = 1;
         upd.baseDescriptor = 0;
+        // The second write must preserve the first range, regardless of binding order.
+        c.UpdateDescriptorRanges(set, 1, 1, &upd);
+        upd.descriptors = spareDescriptors;
         c.UpdateDescriptorRanges(set, 0, 1, &upd);
+        upd.descriptors = descs;
+        c.UpdateDescriptorRanges(set, 1, 1, &upd);
 
         VriCommandAllocator* alloc = nullptr;
         c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
@@ -310,7 +332,7 @@ namespace
         disp.z = 1;
         c.CmdDispatch(cmd, &disp);
         VriBufferCopyDesc copy {};
-        copy.size = sbd.size;
+        copy.size = rbd.size;
         c.CmdCopyBuffer(cmd, readback, storage, &copy);
         c.EndCommandBuffer(cmd);
 
@@ -342,6 +364,7 @@ namespace
         c.DestroyFence(fence);
         c.DestroyCommandAllocator(alloc);
         c.DestroyDescriptor(sbView);
+        c.DestroyDescriptor(spareView);
         c.DestroyDescriptorPool(pool);
         c.DestroyPipeline(pipeline);
         c.DestroyPipelineLayout(layout);

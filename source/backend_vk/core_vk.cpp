@@ -1,14 +1,11 @@
-// core_vk.cpp - the Vulkan implementation of VriCoreInterface.
-//
-// Phase 1 (triangle vertical slice): resources, views/samplers, pipeline
-// layout, graphics/compute pipelines, timeline fences, command recording, and
-// submission are implemented. The explicit memory path and descriptor
-// pools/sets are stubbed (clearly marked) and land in Phase 2.
+// Vulkan core resources, recording, descriptors and timeline synchronization.
 
 #include "core_vk.h"
 #include "conversions_vk.h"
 #include "device_vk.h"
 #include "objects_vk.h"
+
+#include "core/synchronization.h"
 
 #include <algorithm>
 #include <cstring>
@@ -1345,14 +1342,27 @@ namespace vri::vk
             return value;
         }
 
+        VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)
+        {
+            if (!fence)
+                return VriResult_InvalidArgument;
+            FenceVK*            f = Fen(fence);
+            VkSemaphoreWaitInfo info {VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+            info.semaphoreCount   = 1;
+            info.pSemaphores      = &f->timeline;
+            info.pValues          = &value;
+            const VkResult status = vkWaitSemaphores(f->device->Device(), &info, timeoutNs);
+            if (status == VK_SUCCESS)
+                return VriResult_Success;
+            if (status == VK_TIMEOUT)
+                return VriResult_Timeout;
+            return status == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
+        }
+
         void VRI_CALL Wait(VriFence* fence, uint64_t value)
         {
-            FenceVK*            f  = Fen(fence);
-            VkSemaphoreWaitInfo wi = {VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
-            wi.semaphoreCount      = 1;
-            wi.pSemaphores         = &f->timeline;
-            wi.pValues             = &value;
-            vkWaitSemaphores(f->device->Device(), &wi, UINT64_MAX);
+            if (WaitForFence(fence, value, UINT64_MAX) != VriResult_Success && fence)
+                Fen(fence)->device->ReportError("Wait: Vulkan timeline synchronization failed");
         }
 
         // ---- command recording ---------------------------------------------
@@ -1733,9 +1743,20 @@ namespace vri::vk
         }
 
         // ---- submission ----------------------------------------------------
-        void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
+        VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
         {
+            if (!queue || !core::ValidSubmitPointers(submit))
+                return VriResult_InvalidArgument;
             QueueVK* q = Q(queue);
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+                if (CB(submit->commandBuffers[i])->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+                if (Fen(submit->waitFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+                if (Fen(submit->signalFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
 
             std::vector<VkSemaphoreSubmitInfo> waits(submit->waitFenceNum);
             for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
@@ -1772,11 +1793,30 @@ namespace vri::vk
             si.signalSemaphoreInfoCount = static_cast<uint32_t>(signals.size());
             si.pSignalSemaphoreInfos    = signals.data();
 
-            q->device->Ext().QueueSubmit2(q->queue, 1, &si, VK_NULL_HANDLE);
+            const VkResult result = q->device->Ext().QueueSubmit2(q->queue, 1, &si, VK_NULL_HANDLE);
+            if (result == VK_SUCCESS)
+                return VriResult_Success;
+            return result == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
         }
 
-        void VRI_CALL QueueWaitIdle(VriQueue* queue) { vkQueueWaitIdle(Q(queue)->queue); }
-        void VRI_CALL DeviceWaitIdle(VriDevice* device) { vkDeviceWaitIdle(Dev(device)->Device()); }
+        VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
+        {
+            if (!queue)
+                return VriResult_InvalidArgument;
+            const VkResult result = vkQueueWaitIdle(Q(queue)->queue);
+            if (result == VK_SUCCESS)
+                return VriResult_Success;
+            return result == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
+        }
+        VriResult VRI_CALL DeviceWaitIdle(VriDevice* device)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            const VkResult result = vkDeviceWaitIdle(Dev(device)->Device());
+            if (result == VK_SUCCESS)
+                return VriResult_Success;
+            return result == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
+        }
         void VRI_CALL SetDebugName(void* object, const char* name)
         {
             const auto native = DebugObjectsVK::SetName(object, name);
@@ -1865,6 +1905,7 @@ namespace vri::vk
             CmdClearStorageBuffer,
             CmdClearStorageTexture,
             EnumerateObjects,
+            WaitForFence,
         };
     } // namespace
 

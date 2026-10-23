@@ -14,6 +14,8 @@
 #include "conversions_mtl.h"
 #include "device_mtl.h"
 #include "objects_mtl.h"
+
+#include "core/synchronization.h"
 #include "rt_mtl.h" // AccelerationStructureMTL (TLAS -> its referenced BLASes, for residency)
 
 #import <Metal/Metal.h>
@@ -22,6 +24,7 @@
 
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -59,11 +62,6 @@ namespace vri::mtl
 
         // Shared listener for CPU-side timeline waits (MTLSharedEvent has no direct
         // blocking wait); created once, lives for the process.
-        MTLSharedEventListener* Listener()
-        {
-            static MTLSharedEventListener* l = [[MTLSharedEventListener alloc] init];
-            return l;
-        }
 
         spv::ExecutionModel ToSpvModel(VriShaderStageBits stage)
         {
@@ -1195,11 +1193,32 @@ namespace vri::mtl
             if ([f->event signaledValue] >= value)
                 return;
             dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-            [f->event notifyListener:Listener()
+            [f->event notifyListener:f->device->EventListener()
                              atValue:value
-                               block:^(id<MTLSharedEvent>, uint64_t) { dispatch_semaphore_signal(sem); }];
+                               block:^(id<MTLSharedEvent>, uint64_t) {
+                                 dispatch_semaphore_signal(sem);
+                               }];
             dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
             dispatch_release(sem);
+        }
+
+        VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)
+        {
+            if (!fence)
+                return VriResult_InvalidArgument;
+            if (timeoutNs == UINT64_MAX)
+            {
+                Wait(fence, value);
+                return VriResult_Success;
+            }
+            core::WaitDeadline deadline(timeoutNs);
+            while (GetFenceValue(fence) < value)
+            {
+                if (!deadline.Remaining())
+                    return VriResult_Timeout;
+                std::this_thread::yield();
+            }
+            return VriResult_Success;
         }
 
         // ---- render pass / draw --------------------------------------------
@@ -1720,9 +1739,20 @@ namespace vri::mtl
         }
 
         // ---- submission ----------------------------------------------------
-        void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
+        VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
         {
+            if (!queue || !core::ValidSubmitPointers(submit))
+                return VriResult_InvalidArgument;
             QueueMTL* q = Q(queue);
+            for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+                if (Fen(submit->waitFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+                if (Fen(submit->signalFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+                if (CB(submit->commandBuffers[i])->device != q->device || !CB(submit->commandBuffers[i])->cmd)
+                    return VriResult_InvalidArgument;
             // Wait fences must gate the queue BEFORE the work runs. Encoders are already
             // closed by submit time, so a wait can't be prepended onto the work command
             // buffers; commit a tiny wait-only buffer first (queue executes in commit order).
@@ -1794,19 +1824,37 @@ namespace vri::mtl
                     [sb encodeSignalEvent:Fen(submit->signalFences[f].fence)->event value:submit->signalFences[f].value];
                 [sb commit];
             }
+            return VriResult_Success;
         }
 
-        void VRI_CALL QueueWaitIdle(VriQueue* queue)
+        VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
         {
-            id<MTLCommandBuffer> c = [Q(queue)->queue commandBuffer];
-            [c commit];
-            [c waitUntilCompleted];
+            if (!queue)
+                return VriResult_InvalidArgument;
+            id<MTLCommandBuffer> command = [Q(queue)->queue commandBuffer];
+            if (!command)
+                return VriResult_Failure;
+            [command commit];
+            [command waitUntilCompleted];
+            if (command.status == MTLCommandBufferStatusError)
+            {
+                Q(queue)->device->ReportError([[command.error localizedDescription] UTF8String]);
+                return VriResult_Failure;
+            }
+            return VriResult_Success;
         }
-        void VRI_CALL DeviceWaitIdle(VriDevice* device)
+        VriResult VRI_CALL DeviceWaitIdle(VriDevice* device)
         {
-            id<MTLCommandBuffer> c = [Dev(device)->Queue() commandBuffer];
-            [c commit];
-            [c waitUntilCompleted];
+            if (!device)
+                return VriResult_InvalidArgument;
+            for (uint32_t type = 0; type < VriQueueType_Count; ++type)
+            {
+                const VriResult status =
+                    QueueWaitIdle(ToHandle(Dev(device)->GetQueue(static_cast<VriQueueType>(type))));
+                if (status != VriResult_Success)
+                    return status;
+            }
+            return VriResult_Success;
         }
         // Was a no-op. It records the label against the tracked object, which is what makes an
         // EnumerateObjects listing readable - without it every row is a pointer and a size. Every
@@ -1872,6 +1920,7 @@ namespace vri::mtl
             t.DestroyFence = DestroyFence;
             t.GetFenceValue = GetFenceValue;
             t.Wait = Wait;
+            t.WaitForFence                = WaitForFence;
             t.CmdBeginRendering = CmdBeginRendering;
             t.CmdEndRendering = CmdEndRendering;
             t.CmdSetViewports = CmdSetViewports;

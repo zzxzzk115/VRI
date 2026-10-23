@@ -5,7 +5,24 @@
                                                 const VriPipelineLayoutDesc* desc,
                                                 VriPipelineLayout**          out)
         {
+            if (!device || !desc || !out || (desc->descriptorSetNum && !desc->descriptorSets))
+                return VriResult_InvalidArgument;
+            *out = nullptr;
+            for (uint32_t set = 0; set < desc->descriptorSetNum; ++set)
+            {
+                const auto& layout = desc->descriptorSets[set];
+                if (layout.rangeNum && !layout.ranges)
+                    return VriResult_InvalidArgument;
+                for (uint32_t range = 0; range < layout.rangeNum; ++range)
+                {
+                    if (layout.ranges[range].descriptorNum == 0)
+                        return VriResult_InvalidArgument;
+                    if (layout.ranges[range].descriptorNum > 1)
+                        return VriResult_Unsupported;
+                }
+            }
             PipelineLayoutGL* l = new PipelineLayoutGL {Dev(device), {}};
+            l->setCount         = desc->descriptorSetNum;
             // Flatten (set, binding) -> per-type GL unit. GL has independent binding
             // namespaces for uniform buffers, shader-storage buffers and texture
             // units, so each type gets its own running counter.
@@ -490,16 +507,27 @@
         // GL has no descriptor objects: a set is a CPU record of (binding -> view)
         // that CmdSetDescriptorSet replays as glBindBufferRange / texture binds via
         // the pipeline layout's (set,binding) -> GL-unit map.
-        VriResult VRI_CALL CreateDescriptorPool(VriDevice* device,
-                                                const VriDescriptorPoolDesc*,
-                                                VriDescriptorPool** out)
+        VriResult VRI_CALL CreateDescriptorPool(VriDevice*                   device,
+                                                const VriDescriptorPoolDesc* desc,
+                                                VriDescriptorPool**          out)
         {
-            *out = ToHandle(new DescriptorPoolGL {Dev(device)});
+            if (!device || !desc || !out)
+                return VriResult_InvalidArgument;
+            *out = ToHandle(new DescriptorPoolGL {Dev(device), desc->descriptorSetMaxNum, {}});
             return VriResult_Success;
         }
-        void VRI_CALL ResetDescriptorPool(VriDescriptorPool*) {}
+        void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool)
+        {
+            auto* p = reinterpret_cast<DescriptorPoolGL*>(pool);
+            for (auto* set : p->sets)
+                delete set;
+            p->sets.clear();
+        }
         void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool)
         {
+            if (!pool)
+                return;
+            ResetDescriptorPool(pool);
             delete reinterpret_cast<DescriptorPoolGL*>(pool);
         }
         VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
@@ -508,10 +536,22 @@
                                                   VriDescriptorSet**       outSets,
                                                   uint32_t                 setNum)
         {
-            DescriptorPoolGL*       p = reinterpret_cast<DescriptorPoolGL*>(pool);
-            const PipelineLayoutGL* l = reinterpret_cast<const PipelineLayoutGL*>(layout);
+            if (!pool || !layout || (setNum && !outSets))
+                return VriResult_InvalidArgument;
+            auto*       p = reinterpret_cast<DescriptorPoolGL*>(pool);
+            const auto* l = reinterpret_cast<const PipelineLayoutGL*>(layout);
+            if (p->device != l->device)
+                return VriResult_InvalidArgument;
+            if (setNum > p->capacity - p->sets.size())
+                return VriResult_OutOfMemory;
+            if (setIndex >= l->setCount)
+                return VriResult_InvalidArgument;
             for (uint32_t i = 0; i < setNum; ++i)
-                outSets[i] = ToHandle(new DescriptorSetGL {p->device, l, setIndex, {}});
+            {
+                auto* set = new DescriptorSetGL {p->device, l, setIndex, {}};
+                p->sets.push_back(set);
+                outSets[i] = ToHandle(set);
+            }
             return VriResult_Success;
         }
         void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
@@ -519,35 +559,121 @@
                                              uint32_t                            rangeNum,
                                              const VriDescriptorRangeUpdateDesc* updates)
         {
-            DescriptorSetGL* s = reinterpret_cast<DescriptorSetGL*>(set);
-            // The layout's bindings for this set, in declaration order, line up with
-            // the ranges; range r writes the view at that range's binding.
-            std::vector<const LayoutBindingGL*> setBindings;
-            for (const LayoutBindingGL& b : s->layout->bindings)
-                if (b.set == s->setIndex)
-                    setBindings.push_back(&b);
-            for (uint32_t r = 0; r < rangeNum; ++r)
+            if (!set)
+                return;
+            auto*                               s = reinterpret_cast<DescriptorSetGL*>(set);
+            std::vector<const LayoutBindingGL*> ranges;
+            for (const auto& binding : s->layout->bindings)
+                if (binding.set == s->setIndex)
+                    ranges.push_back(&binding);
+            if (baseRange > ranges.size() || rangeNum > ranges.size() - baseRange || (rangeNum && !updates))
             {
-                const uint32_t idx = baseRange + r;
-                if (idx >= setBindings.size() || updates[r].descriptorNum == 0)
+                s->device->ReportError("UpdateDescriptorRanges: range index is outside the set layout");
+                return;
+            }
+            for (uint32_t i = 0; i < rangeNum; ++i)
+            {
+                const auto& update = updates[i];
+                if (update.descriptorNum == 0)
                     continue;
-                s->bound[setBindings[idx]->binding] = reinterpret_cast<const DescriptorGL*>(updates[r].descriptors[0]);
+                if (update.baseDescriptor != 0 || update.descriptorNum != 1 || !update.descriptors ||
+                    !update.descriptors[0])
+                {
+                    s->device->ReportError("UpdateDescriptorRanges: fixed descriptor arrays are not supported");
+                    return;
+                }
+                const auto* descriptor = reinterpret_cast<const DescriptorGL*>(update.descriptors[0]);
+                if (descriptor->device != s->device)
+                {
+                    s->device->ReportError("UpdateDescriptorRanges: descriptor belongs to another device");
+                    return;
+                }
+            }
+            for (uint32_t i = 0; i < rangeNum; ++i)
+            {
+                if (updates[i].descriptorNum)
+                    s->bound[ranges[baseRange + i]->binding] =
+                        reinterpret_cast<const DescriptorGL*>(updates[i].descriptors[0]);
             }
         }
 
         // ---- synchronization (coarse; GL is ordered on one context) --------
         VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
         {
-            *out = ToHandle(new FenceGL {Dev(device), initialValue});
+            if (!device || !out)
+                return VriResult_InvalidArgument;
+            *out = ToHandle(new FenceGL {Dev(device), initialValue, initialValue, {}});
             return VriResult_Success;
         }
-        void VRI_CALL     DestroyFence(VriFence* fence) { delete Fen(fence); }
-        uint64_t VRI_CALL GetFenceValue(VriFence* fence) { return Fen(fence)->value; }
-        void VRI_CALL     Wait(VriFence* fence, uint64_t value)
+        void VRI_CALL DestroyFence(VriFence* fence)
         {
-            glFinish();
+            if (!fence)
+                return;
             FenceGL* f = Fen(fence);
-            if (value > f->value)
-                f->value = value;
+            for (const auto& signal : f->pending)
+                glDeleteSync(signal.sync);
+            delete f;
+        }
+        uint64_t VRI_CALL GetFenceValue(VriFence* fence)
+        {
+            FenceGL* f = Fen(fence);
+            while (!f->pending.empty())
+            {
+                const auto&  signal = f->pending.front();
+                const GLenum result = glClientWaitSync(signal.sync, 0, 0);
+                if (result == GL_WAIT_FAILED)
+                {
+                    f->failed = true;
+                    break;
+                }
+                if (result != GL_ALREADY_SIGNALED && result != GL_CONDITION_SATISFIED)
+                    break;
+                f->value = signal.value;
+                glDeleteSync(signal.sync);
+                f->pending.pop_front();
+            }
+            return f->value;
+        }
+        VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)
+        {
+            if (!fence)
+                return VriResult_InvalidArgument;
+            FenceGL*           f = Fen(fence);
+            core::WaitDeadline deadline(timeoutNs);
+            while (GetFenceValue(fence) < value)
+            {
+                if (f->failed)
+                    return VriResult_Failure;
+                const uint64_t remaining = deadline.Remaining();
+                if (!remaining)
+                    return VriResult_Timeout;
+                if (f->pending.empty())
+                {
+                    // One immediate GL context cannot enqueue a future signal while
+                    // its owner is blocked here. Never manufacture completion.
+                    if (timeoutNs == UINT64_MAX)
+                        return VriResult_InvalidArgument;
+                    std::this_thread::yield();
+                    continue;
+                }
+#if defined(__EMSCRIPTEN__)
+                // WebGL permits only a zero native timeout; yield for GPU progress.
+                emscripten_sleep(1);
+#else
+                const GLenum status = glClientWaitSync(
+                    f->pending.front().sync, GL_SYNC_FLUSH_COMMANDS_BIT, std::min<uint64_t>(remaining, 1000000));
+                if (status == GL_WAIT_FAILED)
+                    return VriResult_Failure;
+#endif
+            }
+            return VriResult_Success;
         }
 
+        void VRI_CALL Wait(VriFence* fence, uint64_t value)
+        {
+            if (WaitForFence(fence, value, UINT64_MAX) != VriResult_Success && fence)
+            {
+                Fen(fence)->device->ReportError(
+                    "Wait: GL timeline value has not been submitted or synchronization failed");
+            }
+        }

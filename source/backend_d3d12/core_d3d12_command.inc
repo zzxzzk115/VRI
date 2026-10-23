@@ -198,37 +198,72 @@
         }
 
         // ---- submission / fences --------------------------------------
-        void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
+        VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
         {
+            if (!queue || !core::ValidSubmitPointers(submit))
+                return VriResult_InvalidArgument;
             QueueD3D12* q = Q(queue);
             for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
-                q->queue->Wait(Fen(submit->waitFences[i].fence)->fence.Get(), submit->waitFences[i].value);
+                if (Fen(submit->waitFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+                if (Fen(submit->signalFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+                if (CB(submit->commandBuffers[i])->device != q->device)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+            {
+                const auto& wait = submit->waitFences[i];
+                if (FAILED(q->queue->Wait(Fen(wait.fence)->fence.Get(), wait.value)))
+                    return VriResult_DeviceLost;
+            }
             std::vector<ID3D12CommandList*> lists(submit->commandBufferNum);
             for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
                 lists[i] = CB(submit->commandBuffers[i])->list.Get();
             if (!lists.empty())
                 q->queue->ExecuteCommandLists(static_cast<UINT>(lists.size()), lists.data());
             for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
-                q->queue->Signal(Fen(submit->signalFences[i].fence)->fence.Get(), submit->signalFences[i].value);
+            {
+                const auto& signal = submit->signalFences[i];
+                if (FAILED(q->queue->Signal(Fen(signal.fence)->fence.Get(), signal.value)))
+                    return VriResult_DeviceLost;
+            }
+            return FAILED(q->device->Device()->GetDeviceRemovedReason()) ? VriResult_DeviceLost : VriResult_Success;
         }
-        void WaitQueueIdle(QueueD3D12* q)
+        VriResult WaitQueueIdle(QueueD3D12* q)
         {
             if (!q->idleFence)
-                return;
-            const uint64_t v = ++q->idleValue;
-            q->queue->Signal(q->idleFence.Get(), v);
-            if (q->idleFence->GetCompletedValue() < v)
+                return VriResult_Failure;
+            const uint64_t value = ++q->idleValue;
+            if (FAILED(q->queue->Signal(q->idleFence.Get(), value)))
+                return VriResult_DeviceLost;
+            if (q->idleFence->GetCompletedValue() == UINT64_MAX)
+                return VriResult_DeviceLost;
+            if (q->idleFence->GetCompletedValue() < value)
             {
-                q->idleFence->SetEventOnCompletion(v, q->idleEvent);
-                WaitForSingleObject(q->idleEvent, INFINITE);
+                if (FAILED(q->idleFence->SetEventOnCompletion(value, q->idleEvent)))
+                    return VriResult_Failure;
+                if (WaitForSingleObject(q->idleEvent, INFINITE) != WAIT_OBJECT_0)
+                    return VriResult_Failure;
             }
+            return q->idleFence->GetCompletedValue() == UINT64_MAX ? VriResult_DeviceLost : VriResult_Success;
         }
-        void VRI_CALL QueueWaitIdle(VriQueue* queue) { WaitQueueIdle(Q(queue)); }
-        void VRI_CALL DeviceWaitIdle(VriDevice* device)
+        VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
         {
-            DeviceD3D12* d = Dev(device);
-            for (int t = 0; t < VriQueueType_Count; ++t)
-                WaitQueueIdle(d->GetQueue(static_cast<VriQueueType>(t)));
+            return queue ? WaitQueueIdle(Q(queue)) : VriResult_InvalidArgument;
+        }
+        VriResult VRI_CALL DeviceWaitIdle(VriDevice* device)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            for (uint32_t type = 0; type < VriQueueType_Count; ++type)
+            {
+                const auto status = WaitQueueIdle(Dev(device)->GetQueue(static_cast<VriQueueType>(type)));
+                if (status != VriResult_Success)
+                    return status;
+            }
+            return VriResult_Success;
         }
 
         VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
@@ -242,7 +277,6 @@
                 d->ReportError("CreateFence failed");
                 return VriResult_Failure;
             }
-            f->event = CreateEventA(nullptr, FALSE, FALSE, nullptr);
             *out     = ToHandle(f);
             return VriResult_Success;
         }
@@ -251,17 +285,55 @@
             if (!fence)
                 return;
             FenceD3D12* f = Fen(fence);
-            if (f->event)
-                CloseHandle(f->event);
             delete f;
         }
         uint64_t VRI_CALL GetFenceValue(VriFence* fence) { return Fen(fence)->fence->GetCompletedValue(); }
-        void VRI_CALL     Wait(VriFence* fence, uint64_t value)
+        VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)
         {
+            if (!fence)
+                return VriResult_InvalidArgument;
             FenceD3D12* f = Fen(fence);
-            if (f->fence->GetCompletedValue() >= value)
-                return;
-            f->fence->SetEventOnCompletion(value, f->event);
-            WaitForSingleObject(f->event, INFINITE);
+            uint64_t    completed = f->fence->GetCompletedValue();
+            if (completed == UINT64_MAX)
+                return VriResult_DeviceLost;
+            if (completed >= value)
+                return VriResult_Success;
+            if (!timeoutNs)
+                return VriResult_Timeout;
+            struct WaitEvent
+            {
+                HANDLE handle = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+                ~WaitEvent()
+                {
+                    if (handle)
+                        CloseHandle(handle);
+                }
+            } event;
+            if (!event.handle || FAILED(f->fence->SetEventOnCompletion(value, event.handle)))
+                return VriResult_Failure;
+            core::WaitDeadline deadline(timeoutNs);
+            while (true)
+            {
+                const uint64_t remaining = deadline.Remaining();
+                if (!remaining)
+                    return VriResult_Timeout;
+                const uint64_t milliseconds = remaining / 1000000 + (remaining % 1000000 != 0 ? 1 : 0);
+                const DWORD    waitMs       = remaining == UINT64_MAX ?
+                                                  INFINITE :
+                                                  static_cast<DWORD>(std::min<uint64_t>(milliseconds, INFINITE - 1));
+                const DWORD    result       = WaitForSingleObject(event.handle, waitMs);
+                if (result != WAIT_OBJECT_0 && result != WAIT_TIMEOUT)
+                    return VriResult_Failure;
+                completed = f->fence->GetCompletedValue();
+                if (completed == UINT64_MAX)
+                    return VriResult_DeviceLost;
+                if (completed >= value)
+                    return VriResult_Success;
+            }
         }
 
+        void VRI_CALL Wait(VriFence* fence, uint64_t value)
+        {
+            if (WaitForFence(fence, value, UINT64_MAX) != VriResult_Success && fence)
+                Fen(fence)->device->ReportError("Wait: D3D12 timeline synchronization failed");
+        }
