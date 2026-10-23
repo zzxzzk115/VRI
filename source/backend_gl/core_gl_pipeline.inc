@@ -22,7 +22,7 @@
                 }
             }
             PipelineLayoutGL* l = new PipelineLayoutGL {Dev(device), {}};
-            l->setCount         = desc->descriptorSetNum;
+            l->setSpaces.reserve(desc->descriptorSetNum);
             // Flatten (set, binding) -> per-type GL unit. GL has independent binding
             // namespaces for uniform buffers, shader-storage buffers and texture
             // units, so each type gets its own running counter.
@@ -30,6 +30,7 @@
             for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
             {
                 const VriDescriptorSetDesc& sd = desc->descriptorSets[s];
+                l->setSpaces.push_back(sd.registerSpace);
                 for (uint32_t r = 0; r < sd.rangeNum; ++r)
                 {
                     const VriDescriptorRangeDesc& rd = sd.ranges[r];
@@ -544,7 +545,7 @@
                 return VriResult_InvalidArgument;
             if (setNum > p->capacity - p->sets.size())
                 return VriResult_OutOfMemory;
-            if (setIndex >= l->setCount)
+            if (std::find(l->setSpaces.begin(), l->setSpaces.end(), setIndex) == l->setSpaces.end())
                 return VriResult_InvalidArgument;
             for (uint32_t i = 0; i < setNum; ++i)
             {

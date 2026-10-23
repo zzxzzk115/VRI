@@ -146,7 +146,7 @@ namespace vri::gl
     {
         DeviceGL*                    device;
         std::vector<LayoutBindingGL> bindings;
-        uint32_t                     setCount = 0;
+        std::vector<uint32_t>        setSpaces;
         // Stable hash of the binding layout, folded into the pipeline-cache key (the layout drives
         // SPIRV-Cross's binding remap, so it changes the linked program / its binary).
         uint64_t hash = 0;
