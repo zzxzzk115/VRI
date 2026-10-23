@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -129,6 +130,56 @@ namespace
             for (size_t col = 0; col < 8; ++col)
                 CHECK(restored[col * 16 + row] == source[row * 8 + col]);
         }
+    }
+
+    void CheckConversionRanges(Context& ctx)
+    {
+        constexpr size_t                      matrixElements = 16 * 8;
+        std::array<float, matrixElements * 5> storage {};
+        float*                                source = storage.data() + matrixElements;
+        for (size_t i = 0; i < matrixElements; ++i)
+        {
+            source[i] = static_cast<float>(i);
+        }
+        auto info             = MatrixDesc(16, 8);
+        info.srcComponentType = VriComponentType_Float32;
+        info.dstComponentType = VriComponentType_Float32;
+        info.srcStride        = 8 * sizeof(float);
+        info.dstLayout        = VriCooperativeVectorMatrixLayout_ColumnMajor;
+        info.dstStride        = 16 * sizeof(float);
+        size_t size           = 0;
+        info.pDstSize         = &size;
+        REQUIRE(ctx.neural.ConvertCooperativeVectorMatrix(ctx.device, &info) == VriResult_Success);
+        REQUIRE(size == matrixElements * sizeof(float));
+        info.pSrcData = source;
+        // The declared range includes padding beyond the matrix's minimum byte size.
+        info.srcSize         = 2 * matrixElements * sizeof(float);
+        const auto unchanged = storage;
+        for (const std::ptrdiff_t offset : {-1, 0, 128, 255})
+        {
+            CAPTURE(offset);
+            info.pDstData = source + offset;
+            size          = matrixElements * sizeof(float);
+            CHECK(ctx.neural.ConvertCooperativeVectorMatrix(ctx.device, &info) == VriResult_InvalidArgument);
+            CHECK(storage == unchanged);
+        }
+        for (const std::ptrdiff_t offset : {-128, 256, 257})
+        {
+            CAPTURE(offset);
+            float* destination = source + offset;
+            info.pDstData      = destination;
+            size               = matrixElements * sizeof(float);
+            REQUIRE(ctx.neural.ConvertCooperativeVectorMatrix(ctx.device, &info) == VriResult_Success);
+            CHECK(size == matrixElements * sizeof(float));
+            for (size_t row = 0; row < 16; ++row)
+            {
+                for (size_t column = 0; column < 8; ++column)
+                {
+                    CHECK(destination[column * 16 + row] == source[row * 8 + column]);
+                }
+            }
+        }
+        CHECK(ctx.errors == 0);
     }
 
     struct Inference
@@ -400,6 +451,7 @@ TEST_CASE("cooperative vector: opt-in, queries, conversion bounds and inference"
               VriResult_InvalidArgument);
         CHECK(shortCount == combinations.size());
         CHECK(sentinel.transpose == 123);
+        CheckConversionRanges(ctx);
         const bool half = std::any_of(combinations.begin(), combinations.end(), [](const auto& c) {
             return c.inputType == VriComponentType_Float16 && c.inputInterpretation == VriComponentType_Float16 &&
                    c.matrixInterpretation == VriComponentType_Float16 &&
