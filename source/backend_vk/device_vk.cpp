@@ -232,6 +232,11 @@ namespace vri::vk
         const VkResult instRes =
             m_vkHooks ? static_cast<VkResult>(m_vkHooks->createInstance(m_vkHooks->userData, &ci, &m_instance)) :
                         vkCreateInstance(&ci, nullptr, &m_instance);
+        if (instRes == VK_ERROR_INCOMPATIBLE_DRIVER)
+        {
+            ReportWarning("vkCreateInstance: no compatible Vulkan driver is available");
+            return VriResult_Unsupported;
+        }
         if (instRes != VK_SUCCESS || m_instance == VK_NULL_HANDLE)
         {
             ReportError("vkCreateInstance failed");

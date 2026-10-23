@@ -228,3 +228,22 @@ TEST_CASE("Vulkan: partitioned subgroup extension is enabled when supported")
         CHECK(probe.enabledCount == 1u);
     }
 }
+
+TEST_CASE("Vulkan creation hooks distinguish an unavailable driver from initialization failure")
+{
+    VriVulkanCreateHooks hooks {};
+    hooks.api            = VriGraphicsAPI_Vulkan;
+    hooks.createInstance = [](void* user, const void*, void*) -> int32_t { return *static_cast<int32_t*>(user); };
+    hooks.createDevice   = [](void*, void*, const void*, void*) -> int32_t { return VK_ERROR_INITIALIZATION_FAILED; };
+    int32_t nativeResult = VK_ERROR_INCOMPATIBLE_DRIVER;
+    hooks.userData       = &nativeResult;
+    VriDeviceCreationDesc creation = vriDefaultDeviceCreationDesc();
+    creation.graphicsAPI           = VriGraphicsAPI_Vulkan;
+    creation.nativeCreateInfo      = &hooks;
+    VriDevice* device              = nullptr;
+    CHECK(vriCreateDevice(&creation, &device) == VriResult_Unsupported);
+    CHECK(device == nullptr);
+    nativeResult = VK_ERROR_INITIALIZATION_FAILED;
+    CHECK(vriCreateDevice(&creation, &device) == VriResult_Failure);
+    CHECK(device == nullptr);
+}

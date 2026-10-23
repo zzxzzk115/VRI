@@ -414,7 +414,16 @@ namespace vri::gl
         m_window = glfwCreateWindow(1, 1, "vri-gl", nullptr, nullptr);
         if (!m_window)
         {
-            ReportError(m_es ? "glfwCreateWindow (GLES 3.1) failed" : "glfwCreateWindow (GL core) failed");
+            const char* reason = nullptr;
+            const int   error  = glfwGetError(&reason);
+            const bool  unsupported =
+                error == GLFW_API_UNAVAILABLE || error == GLFW_VERSION_UNAVAILABLE || error == GLFW_FORMAT_UNAVAILABLE;
+            if (unsupported)
+            {
+                ReportWarning(reason ? reason : "The requested OpenGL context is unavailable");
+                return VriResult_Unsupported;
+            }
+            ReportError(reason ? reason : "glfwCreateWindow failed");
             return VriResult_Failure;
         }
         glfwMakeContextCurrent(m_window);
