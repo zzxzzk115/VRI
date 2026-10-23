@@ -31,7 +31,7 @@ objects are fine. Concretely:
 | `VriDevice` teardown | `DeviceWaitIdle` before destroying objects. Destruction (`Destroy*`, `FreeMemory`) must not race any in-flight use of the object on another thread or the GPU. |
 
 Internal locks protect validation-device bookkeeping and WebGPU's completion-record queue. WebGPU callbacks
-only mark their queue-owned records complete; host queries publish the completed submission prefix under the
+only mark their queue-owned records complete; host queries and submissions publish the completed submission prefix under the
 queue lock. These locks do **not** serialize rendering, recording or submission calls. Fence destruction must
 not race a host wait/query or any pending GPU signal.
 
@@ -101,7 +101,9 @@ This is the one backend where the model is *stricter* than the general contract 
 - All logical queue types alias the device's single native queue. Serialize their submissions together,
   including host dependency waits. Separate queue-type handles do not provide parallel GPU queues.
 - Record one command buffer on one thread. Queue completion callbacks are asynchronous; queue-owned records
-  keep callback storage alive, and host queries/waits publish fence values only after actual completion.
+  keep callback storage alive, and host queries, waits and submissions publish fence values only after actual completion.
+- Submissions retire the completed prefix even in submit-only loops. Native submissions poll without blocking;
+  browser callbacks progress when the application yields to the event loop.
 - Browser waits require Asyncify and yield the browser event loop. A timeout may exceed its requested duration
   by the browser's scheduling granularity; it never manufactures a completed value.
 

@@ -7,6 +7,8 @@
 // Build: xmake f -p wasm --vri_backend_wgpu=y; xmake build vri-webgpu-triangle
 // Run:   emrun (headless Chrome with --enable-unsafe-webgpu) over the .html
 
+#include "tests/wgpu_completion_probe.h"
+
 #include <vri/vri.h>
 
 #include <cstdint>
@@ -25,6 +27,27 @@ namespace
 {
     constexpr uint32_t kW = 64;
     constexpr uint32_t kH = 64;
+
+    bool CompletionProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+        {
+            return false;
+        }
+        VriCoreInterface core {};
+        const auto       result = vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core);
+        const int        failure =
+            result == VriResult_Success ? vri::test::CheckWebGPUCompletionRetirement(device, core) : __LINE__;
+        if (failure)
+        {
+            std::printf("WebGPU completion retirement failed at line %d\n", failure);
+        }
+        vriDestroyDevice(device);
+        return failure == 0;
+    }
 
     bool RenderAndProbe(bool& centerRed)
     {
@@ -386,12 +409,14 @@ int main()
     const bool compute = ComputeProbe();
     std::printf("VRI_WEBGPU_STEP: compute done\n");
     std::fflush(stdout);
-    const bool pass = ran && centerRed && compute;
-    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d)\n",
+    const bool completion = CompletionProbe();
+    const bool pass       = ran && centerRed && compute && completion;
+    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
-                compute ? 1 : 0);
+                compute ? 1 : 0,
+                completion ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);

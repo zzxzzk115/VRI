@@ -1489,6 +1489,11 @@ namespace vri::wgpu
                 if (Fen(signal.fence)->device != q->device || signal.value <= Fen(signal.fence)->submittedValue)
                     return VriResult_InvalidArgument;
             }
+            // Submit-only loops must retire completed signals without introducing a GPU wait.
+#if !defined(__EMSCRIPTEN__)
+            wgpuDevicePoll(q->device->Device(), false, nullptr);
+#endif
+            DrainCompletions(q);
             for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
             {
                 const auto&     wait   = submit->waitFences[i];

@@ -38,6 +38,8 @@ target("vri-webgpu-triangle")
 
     add_deps("vri")
     add_includedirs("$(projectdir)") -- shaders are included as "shaders/<owner>/X.h" from the repo root
+    add_includedirs("$(projectdir)/source") -- internal completion lifetime regression
+    add_cxxflags("--use-port=emdawnwebgpu", {force = true}) -- probe includes native WebGPU declarations
     add_files("webgpu_triangle.cpp")
     add_files("../test_timeline_c.c", {languages = "c11"})
 
