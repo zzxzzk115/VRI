@@ -3,6 +3,10 @@
 #include <vri/vri.h>
 
 #include <chrono>
+#if !defined(__EMSCRIPTEN__)
+#include <algorithm>
+#include <thread>
+#endif
 
 namespace vri::core
 {
@@ -59,6 +63,18 @@ namespace vri::core
             const auto elapsedNs = static_cast<uint64_t>(elapsed);
             return elapsedNs >= m_timeoutNs ? 0 : m_timeoutNs - elapsedNs;
         }
+
+#if !defined(__EMSCRIPTEN__)
+        // Sleep between native polls, capped by the remaining deadline.
+        void Pause() const
+        {
+            const uint64_t remaining = Remaining();
+            if (remaining)
+            {
+                std::this_thread::sleep_for(std::chrono::nanoseconds(std::min<uint64_t>(remaining, 1000000)));
+            }
+        }
+#endif
 
     private:
         std::chrono::steady_clock::time_point m_start = std::chrono::steady_clock::now();

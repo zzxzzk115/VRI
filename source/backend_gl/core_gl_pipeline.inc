@@ -654,7 +654,11 @@
                     // its owner is blocked here. Never manufacture completion.
                     if (timeoutNs == UINT64_MAX)
                         return VriResult_InvalidArgument;
-                    std::this_thread::yield();
+#if defined(__EMSCRIPTEN__)
+                    emscripten_sleep(1);
+#else
+                    deadline.Pause();
+#endif
                     continue;
                 }
 #if defined(__EMSCRIPTEN__)

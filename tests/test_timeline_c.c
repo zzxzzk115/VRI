@@ -34,6 +34,14 @@ int vriTestTimelineC(VriDevice* device, size_t coreSize)
     VERIFY(core.WaitForFence(fence, 8, 0) == VriResult_Timeout);
     VERIFY(core.WaitForFence(fence, 8, 1000000) == VriResult_Timeout);
     VERIFY(core.GetFenceValue(fence) == 7);
+    {
+        unsigned int attempt;
+        for (attempt = 0; attempt < 16; ++attempt)
+        {
+            VERIFY(core.WaitForFence(fence, 8, 10000) == VriResult_Timeout);
+            VERIFY(core.GetFenceValue(fence) == 7);
+        }
+    }
     VERIFY(core.WaitForFence(NULL, 8, 0) == VriResult_InvalidArgument);
     VERIFY(core.QueueSubmit(queue, NULL) == VriResult_InvalidArgument);
     submit.commandBufferNum = 1;

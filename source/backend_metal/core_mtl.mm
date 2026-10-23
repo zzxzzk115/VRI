@@ -24,7 +24,6 @@
 
 #include <cstring>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1216,7 +1215,7 @@ namespace vri::mtl
             {
                 if (!deadline.Remaining())
                     return VriResult_Timeout;
-                std::this_thread::yield();
+                deadline.Pause();
             }
             return VriResult_Success;
         }

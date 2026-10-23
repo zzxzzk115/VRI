@@ -12,7 +12,6 @@
 #include <cstring>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace vri::wgpu
@@ -1074,7 +1073,7 @@ namespace vri::wgpu
                 if (timeoutNs == UINT64_MAX)
                     wgpuDevicePoll(f->device->Device(), true, nullptr);
                 else
-                    std::this_thread::yield();
+                    deadline.Pause();
 #endif
             }
             return VriResult_Success;

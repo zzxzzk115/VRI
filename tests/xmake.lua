@@ -95,6 +95,9 @@ target("vri-tests")
     end
     if has_config("vri_backend_d3d12") then
         add_files("test_device_d3d12.cpp")
+        if is_plat("windows") then
+            add_files("test_timed_wait_d3d12.cpp") -- host wait policy, no GPU required
+        end
         add_files("test_clear_d3d12.cpp")
         add_files("test_triangle_d3d12.cpp")
         add_files("test_vertex_d3d12.cpp")

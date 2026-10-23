@@ -300,6 +300,22 @@
                 return VriResult_Success;
             if (!timeoutNs)
                 return VriResult_Timeout;
+            if (timeoutNs != UINT64_MAX)
+            {
+                // D3D12 cannot cancel a timed-out event registration. Finite waits
+                // poll instead of retaining a kernel registration until a future signal.
+                core::WaitDeadline deadline(timeoutNs);
+                while (deadline.Remaining())
+                {
+                    deadline.Pause();
+                    completed = f->fence->GetCompletedValue();
+                    if (completed == UINT64_MAX)
+                        return VriResult_DeviceLost;
+                    if (completed >= value)
+                        return VriResult_Success;
+                }
+                return VriResult_Timeout;
+            }
             struct WaitEvent
             {
                 HANDLE handle = CreateEventA(nullptr, FALSE, FALSE, nullptr);
@@ -311,25 +327,12 @@
             } event;
             if (!event.handle || FAILED(f->fence->SetEventOnCompletion(value, event.handle)))
                 return VriResult_Failure;
-            core::WaitDeadline deadline(timeoutNs);
-            while (true)
-            {
-                const uint64_t remaining = deadline.Remaining();
-                if (!remaining)
-                    return VriResult_Timeout;
-                const uint64_t milliseconds = remaining / 1000000 + (remaining % 1000000 != 0 ? 1 : 0);
-                const DWORD    waitMs       = remaining == UINT64_MAX ?
-                                                  INFINITE :
-                                                  static_cast<DWORD>(std::min<uint64_t>(milliseconds, INFINITE - 1));
-                const DWORD    result       = WaitForSingleObject(event.handle, waitMs);
-                if (result != WAIT_OBJECT_0 && result != WAIT_TIMEOUT)
-                    return VriResult_Failure;
-                completed = f->fence->GetCompletedValue();
-                if (completed == UINT64_MAX)
-                    return VriResult_DeviceLost;
-                if (completed >= value)
-                    return VriResult_Success;
-            }
+            if (WaitForSingleObject(event.handle, INFINITE) != WAIT_OBJECT_0)
+                return VriResult_Failure;
+            completed = f->fence->GetCompletedValue();
+            if (completed == UINT64_MAX)
+                return VriResult_DeviceLost;
+            return completed >= value ? VriResult_Success : VriResult_Failure;
         }
 
         void VRI_CALL Wait(VriFence* fence, uint64_t value)

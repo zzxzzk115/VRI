@@ -26,7 +26,7 @@ objects are fine. Concretely:
 | `VriCommandBuffer` | **Externally synchronized, single-threaded.** A command buffer must be recorded start-to-finish (`BeginCommandBuffer` → `Cmd*` → `EndCommandBuffer`) by one thread. Different command buffers may be recorded on different threads at the same time — that is the parallel-recording path. |
 | `VriQueue` | **Externally synchronized.** `QueueSubmit` / `QueueWaitIdle` on a given queue must be serialized; never submit to the same `VriQueue` from two threads at once. Distinct queues (Graphics / Compute / Transfer) are independent and may be driven from different threads; cross-queue ordering is the caller's job via timeline fences. |
 | `VriDescriptorPool` | **Externally synchronized.** `AllocateDescriptorSets`, `ResetDescriptorPool`, and `UpdateDescriptorRanges` on the same pool/its sets must be serialized. Reuse is lock-free. Use one pool per thread for parallel descriptor allocation. |
-| `VriFence` (timeline) | `GetFenceValue`, `Wait` and `WaitForFence` may run concurrently, except on context-bound GL. D3D12 creates a separate event per blocking wait. A fence is *signaled* through `QueueSubmit`, which follows the queue rule above. |
+| `VriFence` (timeline) | `GetFenceValue`, `Wait` and `WaitForFence` may run concurrently, except on context-bound GL. D3D12 creates a separate event per infinite wait. A fence is *signaled* through `QueueSubmit`, which follows the queue rule above. |
 | `VriBuffer` mapping | `MapBuffer` / `UnmapBuffer` on the same buffer must be serialized; do not map one buffer from two threads. Reading/writing the mapped pointer is ordinary CPU memory the caller must synchronize. |
 | `VriDevice` teardown | `DeviceWaitIdle` before destroying objects. Destruction (`Destroy*`, `FreeMemory`) must not race any in-flight use of the object on another thread or the GPU. |
 
@@ -104,6 +104,9 @@ This is the one backend where the model is *stricter* than the general contract 
   keep callback storage alive, and host queries, waits and submissions publish fence values only after actual completion.
 - Submissions retire the completed prefix even in submit-only loops. Native submissions poll without blocking;
   browser callbacks progress when the application yields to the event loop.
+- Finite native polling waits sleep between checks, requesting at most one millisecond or the remaining
+  deadline. D3D12 registers events only for infinite waits: a timeout cannot cancel a native event registration.
+  Timeout precision follows OS scheduling; a zero timeout remains an immediate poll.
 - Browser waits require Asyncify and yield the browser event loop. A timeout may exceed its requested duration
   by the browser's scheduling granularity; it never manufactures a completed value.
 
