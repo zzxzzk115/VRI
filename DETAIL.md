@@ -185,9 +185,12 @@ them on reset or destruction.
 
 ## API migration scope
 
-The comprehensive Vulkan-style API redesign, configurable coordinate conventions and **0.2.0** version bump
-belong to the separate PR #24 task. The cooperative-vector work in PR #23 adds an optional interface to the
-current API; it does not change existing coordinate conventions or complete the broader migration.
+VRI retains one NRI-style API. [PR #23](https://github.com/zzxzzk115/VRI/pull/23) adds the optional
+cooperative-vector interface without changing the existing coordinate contract.
+[PR #24](https://github.com/zzxzzk115/VRI/pull/24) introduces device-owned conventions and development version
+**0.2.0**; [PR #25](https://github.com/zzxzzk115/VRI/pull/25) fixes descriptor and completion semantics.
+The Vulkan-style vocabulary rewrite and alternative dual-interface proposal are cancelled. These changes are
+an open review stack, not a release announcement.
 
 ## Cooperative-vector shader inference
 
