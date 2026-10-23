@@ -782,8 +782,10 @@ namespace vriex
             sub.commandBufferNum = 1;
             sub.signalFences     = &sig;
             sub.signalFenceNum   = 1;
-            app->c.QueueSubmit(app->queue, &sub);
-            app->c.Wait(rd->fence, rd->frameValue);
+            if (app->c.QueueSubmit(app->queue, &sub) != VriResult_Success)
+                app->Fail("Viewport QueueSubmit failed");
+            if (app->c.WaitForFence(rd->fence, rd->frameValue, UINT64_MAX) != VriResult_Success)
+                app->Fail("Viewport GPU completion failed");
             app->c.DestroyDescriptor(bbView);
         }
 
@@ -913,8 +915,10 @@ namespace vriex
             sub.commandBufferNum = 1;
             sub.signalFences     = &sig;
             sub.signalFenceNum   = 1;
-            c.QueueSubmit(queue, &sub);
-            c.Wait(uploadFence, uploadValue);
+            if (c.QueueSubmit(queue, &sub) != VriResult_Success)
+                Fail("Upload QueueSubmit failed");
+            if (c.WaitForFence(uploadFence, uploadValue, UINT64_MAX) != VriResult_Success)
+                Fail("Upload GPU completion failed");
             for (VriBuffer* stg : uploadStaging)
                 c.DestroyBuffer(stg);
             uploadStaging.clear();
@@ -1214,8 +1218,10 @@ namespace vriex
             sub.commandBufferNum = 1;
             sub.signalFences     = &sig;
             sub.signalFenceNum   = 1;
-            c.QueueSubmit(queue, &sub);
-            c.Wait(fence, frameValue);
+            if (c.QueueSubmit(queue, &sub) != VriResult_Success)
+                Fail("Frame QueueSubmit failed");
+            if (c.WaitForFence(fence, frameValue, UINT64_MAX) != VriResult_Success)
+                Fail("Frame GPU completion failed");
             swap.Present(swapchain, nullptr, 0);
             c.DestroyDescriptor(bbView);
 

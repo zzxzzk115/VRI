@@ -5,6 +5,7 @@
 
 #include <vri/vri.h>
 
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -145,6 +146,7 @@ namespace vri::gl
     {
         DeviceGL*                    device;
         std::vector<LayoutBindingGL> bindings;
+        std::vector<uint32_t>        setSpaces;
         // Stable hash of the binding layout, folded into the pipeline-cache key (the layout drives
         // SPIRV-Cross's binding remap, so it changes the linked program / its binary).
         uint64_t hash = 0;
@@ -184,9 +186,12 @@ namespace vri::gl
     inline VriPipelineCache* ToHandle(PipelineCacheGL* p) { return reinterpret_cast<VriPipelineCache*>(p); }
     inline PipelineCacheGL*  PipeCacheGL(VriPipelineCache* h) { return reinterpret_cast<PipelineCacheGL*>(h); }
 
+    struct DescriptorSetGL;
     struct DescriptorPoolGL
     {
-        DeviceGL* device;
+        DeviceGL*                     device;
+        uint32_t                      capacity;
+        std::vector<DescriptorSetGL*> sets;
     };
 
     // CPU-side descriptor set: records which view sits at each binding; bound to
@@ -281,6 +286,14 @@ namespace vri::gl
     {
         DeviceGL* device;
         uint64_t  value;
+        uint64_t  submittedValue;
+        struct Signal
+        {
+            uint64_t value;
+            GLsync   sync;
+        };
+        std::deque<Signal> pending;
+        bool               failed = false;
     };
 
     struct QueryPoolGL

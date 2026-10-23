@@ -22,6 +22,8 @@ namespace vri::mtl
         for (int t = 0; t < VriQueueType_Count; ++t)
             if (m_queueObjs[t].queue && m_queueObjs[t].queue != m_queue) [m_queueObjs[t].queue release];
         if (m_queue) [m_queue release];
+        if (m_eventListener)
+            [m_eventListener release];
         if (m_device) [m_device release];
     }
 
@@ -87,6 +89,9 @@ namespace vri::mtl
             }
         }
 
+        m_eventListener = [[MTLSharedEventListener alloc] init];
+        if (!m_eventListener)
+            return VriResult_Failure;
         FillDeviceDesc();
         m_desc.coordinates = desc.coordinates;
         FillRegistry();

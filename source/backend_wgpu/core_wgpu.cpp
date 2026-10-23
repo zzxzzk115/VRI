@@ -1,19 +1,16 @@
-// core_wgpu.cpp - WebGPU (wgpu-native) implementation of VriCoreInterface.
-//
-// Triangle vertical slice: resources, texture views, render pipeline from WGSL,
-// command recording (render pass), copy/readback, queue submit, and emulated
-// timeline fences. WebGPU auto-synchronizes, so CmdBarrier is a no-op and there
-// are no resource layouts. Explicit memory and descriptor pools/sets are stubbed
-// (WebGPU has no memory objects; descriptor sets = bind groups, landing later).
+// WebGPU core implementation and native completion tracking.
 
 #include "core_wgpu.h"
 #include "conversions_wgpu.h"
 #include "device_wgpu.h"
 #include "objects_wgpu.h"
 
-#include "wgpu_native.h" // webgpu.h + native-only poll helpers / callback mode
+#include "wgpu_native.h" // native-only polling and browser callback mode
+
+#include "core/synchronization.h"
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -561,6 +558,21 @@ namespace vri::wgpu
                                                 const VriPipelineLayoutDesc* desc,
                                                 VriPipelineLayout**          out)
         {
+            if (!device || !desc || !out || (desc->descriptorSetNum && !desc->descriptorSets))
+                return VriResult_InvalidArgument;
+            *out = nullptr;
+            for (uint32_t s = 0; s < desc->descriptorSetNum; ++s)
+            {
+                const auto& set = desc->descriptorSets[s];
+                if (set.rangeNum && !set.ranges)
+                    return VriResult_InvalidArgument;
+                for (uint32_t r = 0; r < set.rangeNum; ++r)
+                {
+                    if (set.ranges[r].descriptorNum != 1 ||
+                        (set.ranges[r].flags & (VriDescriptorRange_PartiallyBound | VriDescriptorRange_VariableSized)))
+                        return VriResult_Unsupported;
+                }
+            }
             DeviceWGPU*         d      = Dev(device);
             PipelineLayoutWGPU* layout = new PipelineLayoutWGPU {};
             layout->device             = d;
@@ -911,6 +923,7 @@ namespace vri::wgpu
             for (uint32_t i = 0; i < setNum; ++i)
             {
                 DescriptorSetWGPU* s = new DescriptorSetWGPU {p->device, l, setIndex, nullptr};
+                s->bound.resize(l->setRanges[setIndex].size(), nullptr);
                 p->sets.push_back(s);
                 outSets[i] = ToHandle(s);
             }
@@ -922,72 +935,154 @@ namespace vri::wgpu
                                              uint32_t                            rangeNum,
                                              const VriDescriptorRangeUpdateDesc* updates)
         {
-            DescriptorSetWGPU*                s      = DSet(set);
-            const std::vector<RangeInfoWGPU>& ranges = s->layout->setRanges[s->setIndex];
-
-            std::vector<WGPUBindGroupEntry> entries;
-            for (uint32_t r = 0; r < rangeNum; ++r)
+            if (!set)
+                return;
+            DescriptorSetWGPU* s      = DSet(set);
+            const auto&        ranges = s->layout->setRanges[s->setIndex];
+            if (baseRange > ranges.size() || rangeNum > ranges.size() - baseRange || (rangeNum && !updates))
             {
-                const VriDescriptorRangeUpdateDesc& u        = updates[r];
-                const RangeInfoWGPU&                info     = ranges[baseRange + r];
-                const bool                          isBuffer = info.type == VriDescriptorType_ConstantBuffer ||
-                                      info.type == VriDescriptorType_StorageBuffer ||
-                                      info.type == VriDescriptorType_StructuredBuffer;
-                for (uint32_t k = 0; k < u.descriptorNum; ++k)
+                s->device->ReportError("UpdateDescriptorRanges: range index is outside the set layout");
+                return;
+            }
+            for (uint32_t i = 0; i < rangeNum; ++i)
+            {
+                const auto& update = updates[i];
+                if (update.descriptorNum == 0)
+                    continue;
+                if (update.baseDescriptor != 0 || update.descriptorNum != 1 || !update.descriptors ||
+                    !update.descriptors[0])
                 {
-                    const DescriptorWGPU* d = Desc(const_cast<VriDescriptor*>(u.descriptors[k]));
-                    WGPUBindGroupEntry    e = {};
-                    e.binding               = info.binding + k;
-                    if (isBuffer)
-                    {
-                        e.buffer = d->buffer ? d->buffer->buffer : nullptr;
-                        e.offset = d->bufferOffset;
-                        e.size   = d->bufferRange ? d->bufferRange : WGPU_WHOLE_SIZE;
-                    }
-                    else if (info.type == VriDescriptorType_Sampler)
-                    {
-                        e.sampler = d->sampler;
-                    }
-                    else
-                    {
-                        e.textureView = d->view;
-                    }
-                    entries.push_back(e);
+                    s->device->ReportError("UpdateDescriptorRanges: invalid descriptor array range");
+                    return;
+                }
+                const auto* descriptor = Desc(const_cast<VriDescriptor*>(update.descriptors[0]));
+                if (descriptor->device != s->device)
+                {
+                    s->device->ReportError("UpdateDescriptorRanges: descriptor belongs to another device");
+                    return;
                 }
             }
+            for (uint32_t i = 0; i < rangeNum; ++i)
+            {
+                if (updates[i].descriptorNum)
+                {
+                    s->bound[baseRange + i] = Desc(const_cast<VriDescriptor*>(updates[i].descriptors[0]));
+                    s->dirty                = true;
+                }
+            }
+        }
 
-            WGPUBindGroupDescriptor bd = {};
-            bd.layout                  = s->layout->bindGroupLayouts[s->setIndex];
-            bd.entryCount              = static_cast<uint32_t>(entries.size());
-            bd.entries                 = entries.data();
-            if (s->bindGroup)
-                wgpuBindGroupRelease(s->bindGroup);
-            s->bindGroup = wgpuDeviceCreateBindGroup(s->device->Device(), &bd);
+        bool UpdateBindGroup(DescriptorSetWGPU* set)
+        {
+            if (!set->dirty)
+                return set->bindGroup != nullptr;
+            const auto&                     ranges = set->layout->setRanges[set->setIndex];
+            std::vector<WGPUBindGroupEntry> entries;
+            entries.reserve(ranges.size());
+            for (size_t i = 0; i < ranges.size(); ++i)
+            {
+                const DescriptorWGPU* descriptor = set->bound[i];
+                if (!descriptor)
+                {
+                    set->device->ReportError("CmdSetDescriptorSet: a required descriptor range is not initialized");
+                    return false;
+                }
+                const auto&        range = ranges[i];
+                WGPUBindGroupEntry entry {};
+                entry.binding = range.binding;
+                if (range.type == VriDescriptorType_ConstantBuffer || range.type == VriDescriptorType_StorageBuffer ||
+                    range.type == VriDescriptorType_StructuredBuffer)
+                {
+                    entry.buffer = descriptor->buffer ? descriptor->buffer->buffer : nullptr;
+                    entry.offset = descriptor->bufferOffset;
+                    entry.size   = descriptor->bufferRange ? descriptor->bufferRange : WGPU_WHOLE_SIZE;
+                }
+                else if (range.type == VriDescriptorType_Sampler)
+                    entry.sampler = descriptor->sampler;
+                else
+                    entry.textureView = descriptor->view;
+                entries.push_back(entry);
+            }
+            WGPUBindGroupDescriptor desc {};
+            desc.layout         = set->layout->bindGroupLayouts[set->setIndex];
+            desc.entryCount     = entries.size();
+            desc.entries        = entries.data();
+            WGPUBindGroup group = wgpuDeviceCreateBindGroup(set->device->Device(), &desc);
+            if (!group)
+                return false;
+            if (set->bindGroup)
+                wgpuBindGroupRelease(set->bindGroup);
+            set->bindGroup = group;
+            set->dirty     = false;
+            return true;
         }
 
         // ---- synchronization (emulated timeline) ---------------------------
         VriResult VRI_CALL CreateFence(VriDevice* device, uint64_t initialValue, VriFence** out)
         {
-            *out = ToHandle(new FenceWGPU {Dev(device), initialValue});
+            if (!device || !out)
+                return VriResult_InvalidArgument;
+            *out = ToHandle(new FenceWGPU {Dev(device), initialValue, initialValue});
             return VriResult_Success;
         }
-        void VRI_CALL     DestroyFence(VriFence* fence) { delete Fen(fence); }
-        uint64_t VRI_CALL GetFenceValue(VriFence* fence) { return Fen(fence)->value; }
-        void VRI_CALL     Wait(VriFence* fence, uint64_t value)
+        void VRI_CALL DestroyFence(VriFence* fence) { delete Fen(fence); }
+        bool          DrainCompletions(QueueWGPU* queue)
+        {
+            std::lock_guard lock(queue->completionMutex);
+            // Native callbacks can arrive out of order. Publish only the completed
+            // submission prefix, so a later value cannot hide an earlier callback.
+            while (!queue->completions.empty() && queue->completions.front()->done.load(std::memory_order_acquire))
+            {
+                const auto& completion = *queue->completions.front();
+                for (const auto& [fence, value] : completion.signals)
+                {
+                    if (completion.status == WGPUQueueWorkDoneStatus_Success)
+                        fence->value.store(value, std::memory_order_release);
+                    else
+                        fence->failed.store(true, std::memory_order_release);
+                }
+                queue->completions.pop_front();
+            }
+            return queue->completions.empty();
+        }
+
+        uint64_t VRI_CALL GetFenceValue(VriFence* fence)
         {
             FenceWGPU* f = Fen(fence);
 #if !defined(__EMSCRIPTEN__)
-            // Native has no rAF pacing: poll the device so the CPU can't race far ahead of the GPU
-            // (backpressure). It's a cheap blocking poll, not a stack-unwinding yield.
-            wgpuDevicePoll(f->device->Device(), /*wait*/ true, nullptr);
+            wgpuDevicePoll(f->device->Device(), false, nullptr);
 #endif
-            // Browser: do NOT emscripten_sleep here. requestAnimationFrame already paces frames, and
-            // WebGPU's serial queue orders this frame's work before the next frame's writes/submits,
-            // so the per-frame fence wait protects nothing the queue doesn't already guarantee.
-            // Skipping it removes the last per-frame ASYNCIFY yield. Real readback still syncs at the
-            // capture buffer's mapAsync, and resources used by in-flight submits stay alive until done.
-            if (value > f->value)
-                f->value = value;
+            DrainCompletions(f->device->GetQueue(VriQueueType_Graphics));
+            return f->value.load(std::memory_order_acquire);
+        }
+        VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)
+        {
+            if (!fence)
+                return VriResult_InvalidArgument;
+            FenceWGPU*         f = Fen(fence);
+            core::WaitDeadline deadline(timeoutNs);
+            while (GetFenceValue(fence) < value)
+            {
+                if (f->failed.load(std::memory_order_acquire))
+                    return VriResult_DeviceLost;
+                if (!deadline.Remaining())
+                    return VriResult_Timeout;
+#if defined(__EMSCRIPTEN__)
+                emscripten_sleep(1);
+#else
+                if (timeoutNs == UINT64_MAX)
+                    wgpuDevicePoll(f->device->Device(), true, nullptr);
+                else
+                    deadline.Pause();
+#endif
+            }
+            return VriResult_Success;
+        }
+
+        void VRI_CALL Wait(VriFence* fence, uint64_t value)
+        {
+            if (WaitForFence(fence, value, UINT64_MAX) != VriResult_Success && fence)
+                Fen(fence)->device->ReportError("Wait: WebGPU timeline synchronization failed");
         }
 
         // ---- command recording ---------------------------------------------
@@ -1117,8 +1212,8 @@ namespace vri::wgpu
             CommandBufferWGPU* c = CB(cmd);
             if (!set)
                 return;
-            const DescriptorSetWGPU* s = reinterpret_cast<const DescriptorSetWGPU*>(set);
-            if (!s->bindGroup)
+            DescriptorSetWGPU* s = const_cast<DescriptorSetWGPU*>(reinterpret_cast<const DescriptorSetWGPU*>(set));
+            if (!UpdateBindGroup(s))
                 return;
             if (c->computePass)
                 wgpuComputePassEncoderSetBindGroup(c->computePass, setIndex, s->bindGroup, 0, nullptr);
@@ -1373,34 +1468,128 @@ namespace vri::wgpu
         void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
 
         // ---- submission ----------------------------------------------------
-        void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
+        VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
         {
-            QueueWGPU*                     q = Q(queue);
-            std::vector<WGPUCommandBuffer> cbs;
-            cbs.reserve(submit->commandBufferNum);
+            if (!queue || !core::ValidSubmitPointers(submit))
+                return VriResult_InvalidArgument;
+            QueueWGPU* q = Q(queue);
+            for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+                if (Fen(submit->waitFences[i].fence)->device != q->device)
+                    return VriResult_InvalidArgument;
             for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
             {
-                CommandBufferWGPU* c = CB(submit->commandBuffers[i]);
-                if (c->finished)
-                    cbs.push_back(c->finished);
+                const CommandBufferWGPU* command = CB(submit->commandBuffers[i]);
+                if (command->device != q->device || !command->finished)
+                    return VriResult_InvalidArgument;
             }
-            wgpuQueueSubmit(q->queue, cbs.size(), cbs.data());
-            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
-            {
-                CommandBufferWGPU* c = CB(submit->commandBuffers[i]);
-                if (c->finished)
-                {
-                    wgpuCommandBufferRelease(c->finished);
-                    c->finished = nullptr;
-                }
-            }
-            // record intended signal values (completion guaranteed by Wait's poll)
             for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
-                Fen(submit->signalFences[i].fence)->value = submit->signalFences[i].value;
+            {
+                const auto& signal = submit->signalFences[i];
+                if (Fen(signal.fence)->device != q->device || signal.value <= Fen(signal.fence)->submittedValue)
+                    return VriResult_InvalidArgument;
+            }
+            // Submit-only loops must retire completed signals without introducing a GPU wait.
+#if !defined(__EMSCRIPTEN__)
+            wgpuDevicePoll(q->device->Device(), false, nullptr);
+#endif
+            DrainCompletions(q);
+            for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+            {
+                const auto&     wait   = submit->waitFences[i];
+                const VriResult status = WaitForFence(wait.fence, wait.value, UINT64_MAX);
+                if (status != VriResult_Success)
+                    return status;
+            }
+
+            std::vector<WGPUCommandBuffer> commands;
+            commands.reserve(submit->commandBufferNum);
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+                commands.push_back(CB(submit->commandBuffers[i])->finished);
+            SubmissionCompletionWGPU* completion = nullptr;
+            if (submit->signalFenceNum)
+            {
+                auto pending = std::make_unique<SubmissionCompletionWGPU>();
+                pending->signals.reserve(submit->signalFenceNum);
+                for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+                {
+                    const auto& signal = submit->signalFences[i];
+                    pending->signals.emplace_back(Fen(signal.fence), signal.value);
+                }
+                completion = pending.get();
+                std::lock_guard lock(q->completionMutex);
+                q->completions.push_back(std::move(pending));
+            }
+            wgpuQueueSubmit(q->queue, commands.size(), commands.data());
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+            {
+                auto* command = CB(submit->commandBuffers[i]);
+                wgpuCommandBufferRelease(command->finished);
+                command->finished = nullptr;
+            }
+            if (completion)
+            {
+                for (const auto& [fence, value] : completion->signals)
+                    fence->submittedValue = value;
+                WGPUQueueWorkDoneCallbackInfo callback {};
+                callback.mode      = kCallbackMode;
+                callback.userdata1 = completion;
+                callback.callback  = [](WGPUQueueWorkDoneStatus status,
+#if defined(__EMSCRIPTEN__)
+                                       WGPUStringView, // Dawn includes a diagnostic message; wgpu-native does not.
+#endif
+                                       void* user,
+                                       void*) {
+                    // The queue owns this record until the host observes done. The
+                    // callback never dereferences borrowed fence handles.
+                    auto* result   = static_cast<SubmissionCompletionWGPU*>(user);
+                    result->status = status;
+                    result->done.store(true, std::memory_order_release);
+                };
+                wgpuQueueOnSubmittedWorkDone(q->queue, callback);
+            }
+            return VriResult_Success;
         }
 
-        void VRI_CALL QueueWaitIdle(VriQueue* queue) { PollDevice(Q(queue)->device->Device()); }
-        void VRI_CALL DeviceWaitIdle(VriDevice* device) { PollDevice(Dev(device)->Device()); }
+        VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
+        {
+            if (!queue)
+                return VriResult_InvalidArgument;
+            struct Completion
+            {
+                std::atomic<bool>       done {false};
+                WGPUQueueWorkDoneStatus status = WGPUQueueWorkDoneStatus_Error;
+            } completion;
+            WGPUQueueWorkDoneCallbackInfo callback {};
+            callback.mode      = kCallbackMode;
+            callback.userdata1 = &completion;
+            callback.callback  = [](WGPUQueueWorkDoneStatus status,
+#if defined(__EMSCRIPTEN__)
+                                   WGPUStringView, // Dawn includes a diagnostic message; wgpu-native does not.
+#endif
+                                   void* user,
+                                   void*) {
+                auto* result   = static_cast<Completion*>(user);
+                result->status = status;
+                result->done.store(true, std::memory_order_release);
+            };
+            QueueWGPU* q = Q(queue);
+            wgpuQueueOnSubmittedWorkDone(q->queue, callback);
+            while (!completion.done.load(std::memory_order_acquire) || !DrainCompletions(q))
+            {
+#if defined(__EMSCRIPTEN__)
+                emscripten_sleep(1);
+#else
+                wgpuDevicePoll(q->device->Device(), true, nullptr);
+#endif
+            }
+            return completion.status == WGPUQueueWorkDoneStatus_Success ? VriResult_Success : VriResult_DeviceLost;
+        }
+        VriResult VRI_CALL DeviceWaitIdle(VriDevice* device)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            return QueueWaitIdle(ToHandle(Dev(device)->GetQueue(VriQueueType_Graphics)));
+        }
         // Was a no-op. It records the label against the tracked object, which is what makes an
         // EnumerateObjects listing readable - without it every row is a pointer and a size. Every
         // backend object struct begins with its owning device, which is what lets one entry point
@@ -1464,6 +1653,7 @@ namespace vri::wgpu
             t.DestroyFence                = DestroyFence;
             t.GetFenceValue               = GetFenceValue;
             t.Wait                        = Wait;
+            t.WaitForFence                = WaitForFence;
             t.CmdBeginRendering           = CmdBeginRendering;
             t.CmdEndRendering             = CmdEndRendering;
             t.CmdSetViewports             = CmdSetViewports;

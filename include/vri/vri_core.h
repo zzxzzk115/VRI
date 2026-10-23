@@ -212,9 +212,9 @@ typedef struct VriCoreInterface
     void(VRI_CALL* CmdEndDebugGroup)(VriCommandBuffer* cmd);
 
     /* submission */
-    void(VRI_CALL* QueueSubmit)(VriQueue* queue, const VriQueueSubmitDesc* submit);
-    void(VRI_CALL* QueueWaitIdle)(VriQueue* queue);
-    void(VRI_CALL* DeviceWaitIdle)(VriDevice* device);
+    VriResult(VRI_CALL* QueueSubmit)(VriQueue* queue, const VriQueueSubmitDesc* submit);
+    VriResult(VRI_CALL* QueueWaitIdle)(VriQueue* queue);
+    VriResult(VRI_CALL* DeviceWaitIdle)(VriDevice* device);
     void(VRI_CALL* SetDebugName)(void* object, const char* name);
 
     /* Live video-memory budget/usage for a memory location (Device = VRAM, others = system).
@@ -250,6 +250,9 @@ typedef struct VriCoreInterface
      * is a plain copy, so it stays valid afterwards. Returns VriResult_Unsupported on backends
      * that do not track objects. */
     VriResult(VRI_CALL* EnumerateObjects)(const VriDevice* device, uint32_t* count, VriObjectInfo* out);
+    /* Bounded host wait on the same timeline as Wait(). Zero polls; UINT64_MAX
+     * waits indefinitely. Timeout never changes the fence's completion value. */
+    VriResult(VRI_CALL* WaitForFence)(VriFence* fence, uint64_t value, uint64_t timeoutNanoseconds);
 } VriCoreInterface;
 
 VRI_EXTERN_C_END

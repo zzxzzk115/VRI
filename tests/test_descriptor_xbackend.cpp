@@ -7,6 +7,8 @@
 #include <vri/vri.h>
 
 #include <cstdint>
+#include <initializer_list>
+#include <memory>
 
 #include "shaders/tests/triangle_ubo_spv.h"  // g_triangleUboSpv  (Vulkan + OpenGL via SPIRV-Cross)
 #include "shaders/tests/triangle_ubo_wgsl.h" // g_triangleUboWgsl (WebGPU)
@@ -94,15 +96,13 @@ namespace
         REQUIRE(c.CreateBuffer(dev, &ub, &ubo) == VriResult_Success);
 
         // pipeline layout: set 0 binding 0 = constant buffer (fragment)
-        VriDescriptorRangeDesc range {};
-        range.baseRegister   = 0;
-        range.descriptorNum  = 1;
-        range.descriptorType = VriDescriptorType_ConstantBuffer;
-        range.shaderStages   = VriShaderStage_Fragment;
+        VriDescriptorRangeDesc ranges[2] {};
+        ranges[0] = {7, 1, VriDescriptorType_ConstantBuffer, VriShaderStage_Fragment, 0, VriTextureViewType_2D};
+        ranges[1] = {0, 1, VriDescriptorType_ConstantBuffer, VriShaderStage_Fragment, 0, VriTextureViewType_2D};
         VriDescriptorSetDesc setDesc {};
         setDesc.registerSpace = 0;
-        setDesc.ranges        = &range;
-        setDesc.rangeNum      = 1;
+        setDesc.ranges        = ranges;
+        setDesc.rangeNum      = 2;
         VriPipelineLayoutDesc ld {};
         ld.descriptorSets         = &setDesc;
         ld.descriptorSetNum       = 1;
@@ -138,7 +138,7 @@ namespace
         // descriptor pool + set + update (bind buffer view of the ubo)
         VriDescriptorPoolDesc pdsc {};
         pdsc.descriptorSetMaxNum  = 1;
-        pdsc.constantBufferMaxNum = 1;
+        pdsc.constantBufferMaxNum = 2;
         VriDescriptorPool* pool   = nullptr;
         REQUIRE(c.CreateDescriptorPool(dev, &pdsc, &pool) == VriResult_Success);
         VriDescriptorSet* set = nullptr;
@@ -157,7 +157,10 @@ namespace
         update.descriptors                    = descs;
         update.descriptorNum                  = 1;
         update.baseDescriptor                 = 0;
+        // Range 1 is shader binding 0; range 0 is shader binding 7.
+        c.UpdateDescriptorRanges(set, 1, 1, &update);
         c.UpdateDescriptorRanges(set, 0, 1, &update);
+        c.UpdateDescriptorRanges(set, 1, 1, &update);
 
         // record
         VriCommandAllocator* alloc = nullptr;
@@ -318,5 +321,59 @@ TEST_CASE("descriptor set parity: UBO tints the triangle green on each backend")
     else
     {
         MESSAGE("OpenGL unavailable - skipped");
+    }
+}
+
+TEST_CASE("OpenGL descriptor allocation uses declared register spaces including empty sets")
+{
+    for (const VriBool validation : {VRI_FALSE, VRI_TRUE})
+    {
+        CAPTURE(validation);
+        auto creation             = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI      = VriGraphicsAPI_OpenGL;
+        creation.enableValidation = validation;
+        VriDevice* device         = nullptr;
+        const auto result         = vriCreateDevice(&creation, &device);
+        if (result == VriResult_Unsupported)
+        {
+            MESSAGE("OpenGL unavailable - skipping descriptor allocation");
+            continue;
+        }
+        REQUIRE(result == VriResult_Success);
+        const std::unique_ptr<VriDevice, decltype(&vriDestroyDevice)> deviceOwner(device, &vriDestroyDevice);
+        VriCoreInterface                                              core {};
+        REQUIRE(vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core) == VriResult_Success);
+        VriDescriptorRangeDesc range {};
+        range.descriptorNum               = 1;
+        range.descriptorType              = VriDescriptorType_ConstantBuffer;
+        range.shaderStages                = VriShaderStage_Fragment;
+        const VriDescriptorSetDesc sets[] = {{2, &range, 1}, {7, nullptr, 0}};
+        VriPipelineLayoutDesc      layoutDesc {};
+        layoutDesc.descriptorSets   = sets;
+        layoutDesc.descriptorSetNum = 2;
+        VriPipelineLayout* layout   = nullptr;
+        REQUIRE(core.CreatePipelineLayout(device, &layoutDesc, &layout) == VriResult_Success);
+        const std::unique_ptr<VriPipelineLayout, decltype(core.DestroyPipelineLayout)> layoutOwner(
+            layout, core.DestroyPipelineLayout);
+        VriDescriptorPoolDesc poolDesc {};
+        poolDesc.descriptorSetMaxNum  = 3;
+        poolDesc.constantBufferMaxNum = 1;
+        VriDescriptorPool* pool       = nullptr;
+        REQUIRE(core.CreateDescriptorPool(device, &poolDesc, &pool) == VriResult_Success);
+        const std::unique_ptr<VriDescriptorPool, decltype(core.DestroyDescriptorPool)> poolOwner(
+            pool, core.DestroyDescriptorPool);
+        VriDescriptorSet* populated = nullptr;
+        REQUIRE(core.AllocateDescriptorSets(pool, layout, 2, &populated, 1) == VriResult_Success);
+        CHECK(populated != nullptr);
+        VriDescriptorSet* empty = nullptr;
+        REQUIRE(core.AllocateDescriptorSets(pool, layout, 7, &empty, 1) == VriResult_Success);
+        CHECK(empty != nullptr);
+        VriDescriptorSet* invalid = nullptr;
+        CHECK(core.AllocateDescriptorSets(pool, layout, 0, &invalid, 1) == VriResult_InvalidArgument);
+        CHECK(core.AllocateDescriptorSets(pool, layout, 3, &invalid, 1) == VriResult_InvalidArgument);
+        CHECK(invalid == nullptr);
+        core.ResetDescriptorPool(pool);
+        REQUIRE(core.AllocateDescriptorSets(pool, layout, 7, &empty, 1) == VriResult_Success);
+        CHECK(empty != nullptr);
     }
 }

@@ -28,6 +28,8 @@
 #include <emscripten/emscripten.h>
 #endif
 
+extern "C" int vriTestTimelineC(VriDevice* device, size_t coreSize);
+
 namespace
 {
     constexpr uint32_t kW = 64;
@@ -65,6 +67,13 @@ namespace
             return false;
         VriQueue* queue = nullptr;
         c.GetQueue(dev, VriQueueType_Graphics, 0, &queue);
+        const int timelineFailure = vriTestTimelineC(dev, sizeof(c));
+        if (timelineFailure)
+        {
+            std::printf("Timeline C ABI regression failed at line %d\n", timelineFailure);
+            vriDestroyDevice(dev);
+            return false;
+        }
 
         VriTextureDesc td {};
         td.type           = VriTextureType_2D;

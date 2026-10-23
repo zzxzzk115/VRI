@@ -1,6 +1,8 @@
 // WebGPU device-creation smoke test (de-risks the package, the async
 // adapter/device request, and the wgpu_native runtime DLL). Skips gracefully if
 // no WebGPU adapter is available.
+#include "wgpu_completion_probe.h"
+
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -29,6 +31,8 @@ TEST_CASE("WebGPU: device creates and reports an adapter")
 
     VriQueue* queue = nullptr;
     CHECK(core.GetQueue(device, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
+
+    CHECK(vri::test::CheckWebGPUCompletionRetirement(device, core) == 0);
 
     core.DeviceWaitIdle(device);
     vriDestroyDevice(device);

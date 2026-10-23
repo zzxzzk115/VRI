@@ -188,7 +188,6 @@ namespace vri::d3d12
     {
         DeviceD3D12*        device = nullptr;
         ComPtr<ID3D12Fence> fence;
-        void*               event = nullptr; // HANDLE for blocking waits
     };
 
     struct QueryPoolD3D12

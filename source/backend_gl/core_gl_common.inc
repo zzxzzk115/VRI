@@ -8,6 +8,7 @@
         inline TextureGL*       Tex(VriTexture* h) { return reinterpret_cast<TextureGL*>(h); }
         inline DescriptorGL*    Desc(VriDescriptor* h) { return reinterpret_cast<DescriptorGL*>(h); }
         inline PipelineGL*      Pipe(VriPipeline* h) { return reinterpret_cast<PipelineGL*>(h); }
+        inline QueueGL*         Q(VriQueue* handle) { return reinterpret_cast<QueueGL*>(handle); }
         inline FenceGL*         Fen(VriFence* h) { return reinterpret_cast<FenceGL*>(h); }
 
         // Read a range of a buffer (bound to `target`) into host memory. glGetBufferSubData
@@ -363,4 +364,3 @@
             }
             return s;
         }
-

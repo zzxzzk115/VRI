@@ -1,28 +1,17 @@
-// core_gl.cpp - OpenGL / OpenGL ES / WebGL implementation of VriCoreInterface.
-//
-// This uses the GLES3 / WebGL2-compatible NON-DSA subset (bind-then-modify) so a
-// single command path serves desktop GL, desktop GLES, and WebGL (Emscripten).
-// Commands execute immediately on the (single, thread-bound) GL context, so the
-// VRI command buffer is a thin recorder and QueueSubmit just flushes; a deferred
-// stream for multi-threaded recording is a later enhancement.
-//
-// Coordinate system: GLES/WebGL lack glClipControl, so the VRI Y-up convention is
-// honored by flipping clip-space Y in-shader (SPIRV-Cross flip_vert_y). That makes
-// GL's bottom-left framebuffer read back top-left, matching Vulkan/WebGPU. Shaders
-// are transpiled SPIR-V -> GLSL/ESSL via SPIRV-Cross at pipeline creation.
-//
-// Explicit memory and descriptor sets are stubbed for now (descriptor flattening
-// lands next).
+// OpenGL/GLES/WebGL core implementation.
 
 #include "core_gl.h"
 #include "conversions_gl.h"
 #include "device_gl.h"
 #include "objects_gl.h"
 
+#include "core/synchronization.h"
+
 #include "gl_loader.h"
 
 #include <spirv_cross/spirv_glsl.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <cstdlib>
 #include <cstring>
@@ -30,6 +19,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 
 namespace vri::gl
 {
@@ -89,6 +81,7 @@ namespace vri::gl
             t.DestroyFence                = DestroyFence;
             t.GetFenceValue               = GetFenceValue;
             t.Wait                        = Wait;
+            t.WaitForFence                = WaitForFence;
             t.CmdBeginRendering           = CmdBeginRendering;
             t.CmdEndRendering             = CmdEndRendering;
             t.CmdSetViewports             = CmdSetViewports;

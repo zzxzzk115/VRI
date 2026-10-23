@@ -981,14 +981,62 @@ void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
 void VRI_CALL CmdEndDebugGroup(VriCommandBuffer*) {}
 
 // ---- submission ----------------------------------------------------
-void VRI_CALL QueueSubmit(VriQueue*, const VriQueueSubmitDesc* submit)
+VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
 {
-    glFlush();
+    if (!queue || !core::ValidSubmitPointers(submit))
+        return VriResult_InvalidArgument;
+    QueueGL* q = Q(queue);
+    for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+    {
+        const auto& wait = submit->waitFences[i];
+        if (Fen(wait.fence)->device != q->device)
+            return VriResult_InvalidArgument;
+    }
+    for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+    {
+        if (CB(submit->commandBuffers[i])->device != q->device)
+            return VriResult_InvalidArgument;
+    }
     for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
-        Fen(submit->signalFences[i].fence)->value = submit->signalFences[i].value;
+    {
+        const auto& signal = submit->signalFences[i];
+        if (Fen(signal.fence)->device != q->device || signal.value <= Fen(signal.fence)->submittedValue)
+            return VriResult_InvalidArgument;
+    }
+    for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+    {
+        const auto&     wait   = submit->waitFences[i];
+        const VriResult status = WaitForFence(wait.fence, wait.value, UINT64_MAX);
+        if (status != VriResult_Success)
+            return status;
+    }
+    for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+    {
+        const auto& signal = submit->signalFences[i];
+        GLsync      sync   = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (!sync)
+            return VriResult_Failure;
+        FenceGL* f = Fen(signal.fence);
+        f->pending.push_back({signal.value, sync});
+        f->submittedValue = signal.value;
+    }
+    glFlush();
+    return VriResult_Success;
 }
-void VRI_CALL QueueWaitIdle(VriQueue*) { glFinish(); }
-void VRI_CALL DeviceWaitIdle(VriDevice*) { glFinish(); }
+VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
+{
+    if (!queue)
+        return VriResult_InvalidArgument;
+    glFinish();
+    return VriResult_Success;
+}
+VriResult VRI_CALL DeviceWaitIdle(VriDevice* device)
+{
+    if (!device)
+        return VriResult_InvalidArgument;
+    glFinish();
+    return VriResult_Success;
+}
 // Was a no-op. It records the label against the tracked object, which is what makes an
 // EnumerateObjects listing readable - without it every row is a pointer and a size. Every
 // backend object struct begins with its owning device, which is what lets one entry point

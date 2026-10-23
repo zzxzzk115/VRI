@@ -21,6 +21,8 @@ target("vri-tests")
     add_files("test_coordinates.cpp")
     add_files("test_coordinate_rendering.cpp")
     add_files("test_coordinates_c.c", {languages = "c11"})
+    add_files("test_timeline_xbackend.cpp")
+    add_files("test_timeline_c.c", {languages = "c11"})
     add_files("test_conversion_map.cpp")      -- shared enum/flag conversion skeleton (backend-neutral)
     add_files("test_formatsupport_xbackend.cpp") -- GetFormatSupport answers per format, not from a constant
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse
@@ -93,6 +95,9 @@ target("vri-tests")
     end
     if has_config("vri_backend_d3d12") then
         add_files("test_device_d3d12.cpp")
+        if is_plat("windows") then
+            add_files("test_timed_wait_d3d12.cpp") -- host wait policy, no GPU required
+        end
         add_files("test_clear_d3d12.cpp")
         add_files("test_triangle_d3d12.cpp")
         add_files("test_vertex_d3d12.cpp")

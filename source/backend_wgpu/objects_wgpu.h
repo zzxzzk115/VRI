@@ -1,6 +1,11 @@
 // objects_wgpu.h - concrete WebGPU objects behind the opaque VRI handles.
 #pragma once
 
+#include <atomic>
+#include <deque>
+#include <memory>
+#include <mutex>
+#include <utility>
 #include <vector>
 
 #include <webgpu/webgpu.h>
@@ -11,10 +16,20 @@ namespace vri::wgpu
 {
     class DeviceWGPU;
 
+    struct FenceWGPU;
+    struct SubmissionCompletionWGPU
+    {
+        std::vector<std::pair<FenceWGPU*, uint64_t>> signals;
+        WGPUQueueWorkDoneStatus                      status = WGPUQueueWorkDoneStatus_Error;
+        std::atomic<bool>                            done {false};
+    };
+
     struct QueueWGPU
     {
-        DeviceWGPU* device;
-        WGPUQueue   queue;
+        DeviceWGPU*                                           device;
+        WGPUQueue                                             queue;
+        std::mutex                                            completionMutex;
+        std::deque<std::unique_ptr<SubmissionCompletionWGPU>> completions;
     };
 
     struct CommandAllocatorWGPU
@@ -111,10 +126,12 @@ namespace vri::wgpu
 
     struct DescriptorSetWGPU
     {
-        DeviceWGPU*               device;
-        const PipelineLayoutWGPU* layout;
-        uint32_t                  setIndex;
-        WGPUBindGroup             bindGroup; // (re)created on UpdateDescriptorRanges
+        DeviceWGPU*                        device;
+        const PipelineLayoutWGPU*          layout;
+        uint32_t                           setIndex;
+        WGPUBindGroup                      bindGroup;
+        std::vector<const DescriptorWGPU*> bound;
+        bool                               dirty = true;
     };
 
     struct DescriptorPoolWGPU
@@ -135,8 +152,10 @@ namespace vri::wgpu
 
     struct FenceWGPU
     {
-        DeviceWGPU* device;
-        uint64_t    value; // emulated timeline
+        DeviceWGPU*           device;
+        std::atomic<uint64_t> value;
+        uint64_t              submittedValue;
+        std::atomic<bool>     failed {false};
     };
 
     struct QueryPoolWGPU

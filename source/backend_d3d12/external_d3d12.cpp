@@ -190,8 +190,7 @@ namespace vri::d3d12
                 d->ReportError("CreateFence (shared) failed");
                 return VriResult_Failure;
             }
-            f->event = CreateEventA(nullptr, FALSE, FALSE, nullptr); // for host Wait, mirrors core CreateFence
-            *out     = ToHandle(f);
+            *out = ToHandle(f);
             return VriResult_Success;
         }
 

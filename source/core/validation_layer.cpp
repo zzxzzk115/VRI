@@ -24,6 +24,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "synchronization.h"
+
 namespace vri::core
 {
     namespace
@@ -369,7 +371,20 @@ namespace vri::core
         }
         uint64_t VRI_CALL GetFenceValue(VriFence* fence) { return FV(fence)->dev->core.GetFenceValue(FV(fence)->real); }
         void VRI_CALL     Wait(VriFence* fence, uint64_t value) { FV(fence)->dev->core.Wait(FV(fence)->real, value); }
-        void VRI_CALL     DeviceWaitIdle(VriDevice* device) { DV(device)->core.DeviceWaitIdle(DV(device)->real); }
+        VriResult VRI_CALL DeviceWaitIdle(VriDevice* device)
+        {
+            if (!device)
+                return VriResult_InvalidArgument;
+            return DV(device)->core.DeviceWaitIdle(DV(device)->real);
+        }
+
+        VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)
+        {
+            if (!fence)
+                return VriResult_InvalidArgument;
+            FenceVal* f = FV(fence);
+            return f->dev->core.WaitForFence(f->real, value, timeoutNs);
+        }
 
         // ---- command recording (scope-checked, forward to real) ------------
         void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc* a)
@@ -609,13 +624,28 @@ namespace vri::core
         }
 
         // ---- submission (unwrap command buffers + fences) ------------------
-        void VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
+        VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit)
         {
-            QueueVal*                      q = QV(queue);
-            DeviceVal*                     d = q->dev;
-            std::vector<VriCommandBuffer*> cmds(submit->commandBufferNum);
+            if (!queue || !ValidSubmitPointers(submit))
+                return VriResult_InvalidArgument;
+            QueueVal*  q = QV(queue);
+            DeviceVal* d = q->dev;
             for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
-                cmds[i] = CV(submit->commandBuffers[i])->real;
+            {
+                const CmdBufVal* command = CV(submit->commandBuffers[i]);
+                if (command->dev != d || command->recording)
+                    return VriResult_InvalidArgument;
+            }
+            for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
+                if (FV(submit->waitFences[i].fence)->dev != d)
+                    return VriResult_InvalidArgument;
+            for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
+                if (FV(submit->signalFences[i].fence)->dev != d)
+                    return VriResult_InvalidArgument;
+
+            std::vector<VriCommandBuffer*> commands(submit->commandBufferNum);
+            for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
+                commands[i] = CV(submit->commandBuffers[i])->real;
             std::vector<VriFenceSubmitDesc> waits(submit->waitFenceNum);
             for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
             {
@@ -628,14 +658,18 @@ namespace vri::core
                 signals[i]       = submit->signalFences[i];
                 signals[i].fence = FV(submit->signalFences[i].fence)->real;
             }
-
             VriQueueSubmitDesc real = *submit;
-            real.commandBuffers     = cmds.data();
-            real.waitFences         = waits.empty() ? nullptr : waits.data();
-            real.signalFences       = signals.empty() ? nullptr : signals.data();
-            d->core.QueueSubmit(q->real, &real);
+            real.commandBuffers     = commands.data();
+            real.waitFences         = waits.data();
+            real.signalFences       = signals.data();
+            return d->core.QueueSubmit(q->real, &real);
         }
-        void VRI_CALL QueueWaitIdle(VriQueue* queue) { QV(queue)->dev->core.QueueWaitIdle(QV(queue)->real); }
+        VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
+        {
+            if (!queue)
+                return VriResult_InvalidArgument;
+            return QV(queue)->dev->core.QueueWaitIdle(QV(queue)->real);
+        }
 
         // ---- swapchain (unwrap device/queue/fences; wrap the swapchain handle) ----
         // The backbuffer textures returned by GetSwapChainTextures are real backend
@@ -971,6 +1005,7 @@ namespace vri::core
             t.DestroyFence                = DestroyFence;
             t.GetFenceValue               = GetFenceValue;
             t.Wait                        = Wait;
+            t.WaitForFence                = WaitForFence;
             t.CmdBeginRendering           = CmdBeginRendering;
             t.CmdEndRendering             = CmdEndRendering;
             t.CmdSetViewports             = CmdSetViewports;
