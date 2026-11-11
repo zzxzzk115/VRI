@@ -147,6 +147,7 @@ namespace vri::vk
         bool            m_hasSamplerAnisotropy         = false;
         float           m_maxSamplerAnisotropy         = 1.0f;
         bool            m_hasCalibratedTimestamps      = false;
+        bool            m_hasKhrCalibratedTimestamps   = false;
         bool            m_hasDrawIndirectCount         = false;
         bool            m_hasMemoryBudget              = false;
         bool            m_hasMemoryPriority            = false;
