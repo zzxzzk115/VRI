@@ -116,6 +116,127 @@ namespace vri::gl
             s->textures.clear();
         }
 
+#if defined(__EMSCRIPTEN__)
+        bool CreateSrgbPresent(SwapChainGL* swapchain)
+        {
+            if (swapchain->format != VriFormat_RGBA8_SRGB && swapchain->format != VriFormat_BGRA8_SRGB)
+            {
+                return true;
+            }
+            const char* sources[] = {
+                R"(#version 300 es
+void main()
+{
+    vec2 position = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+    gl_Position = vec4(position * 2.0 - 1.0, 0.0, 1.0);
+}
+)",
+                R"(#version 300 es
+precision highp float;
+uniform sampler2D image;
+out vec4 color;
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    pixel.y = textureSize(image, 0).y - 1 - pixel.y;
+    vec4 sampleColor = texelFetch(image, pixel, 0);
+    vec3 linear = max(sampleColor.rgb, vec3(0.0));
+    vec3 srgb = mix(1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055,
+                    12.92 * linear,
+                    lessThanEqual(linear, vec3(0.0031308)));
+    color = vec4(srgb, sampleColor.a);
+}
+)"
+            };
+            const GLenum types[] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
+            swapchain->presentProgram = glCreateProgram();
+            for (int index = 0; index < 2; ++index)
+            {
+                const GLuint shader = glCreateShader(types[index]);
+                glShaderSource(shader, 1, &sources[index], nullptr);
+                glCompileShader(shader);
+                GLint compiled = 0;
+                glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+                if (!compiled)
+                {
+                    char log[1024] = {};
+                    glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+                    swapchain->device->ReportError(log);
+                    glDeleteShader(shader);
+                    return false;
+                }
+                glAttachShader(swapchain->presentProgram, shader);
+                glDeleteShader(shader);
+            }
+            glLinkProgram(swapchain->presentProgram);
+            GLint linked = 0;
+            glGetProgramiv(swapchain->presentProgram, GL_LINK_STATUS, &linked);
+            if (!linked)
+            {
+                char log[1024] = {};
+                glGetProgramInfoLog(swapchain->presentProgram, sizeof(log), nullptr, log);
+                swapchain->device->ReportError(log);
+                return false;
+            }
+            glGenVertexArrays(1, &swapchain->presentVao);
+            return true;
+        }
+
+        void PresentSrgb(SwapChainGL* s, const TextureGL* image)
+        {
+            // WebGL's default framebuffer stores display-encoded bytes. A blit from an sRGB
+            // attachment decodes them, so explicitly encode the sampled linear color once.
+            GLint program = 0;
+            GLint vao = 0;
+            GLint active = 0;
+            GLint texture = 0;
+            GLint sampler = 0;
+            GLint viewport[4] = {};
+            GLboolean mask[4] = {};
+            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+            glGetIntegerv(GL_VIEWPORT, viewport);
+            glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+            const GLboolean blend = glIsEnabled(GL_BLEND);
+            const GLboolean depth = glIsEnabled(GL_DEPTH_TEST);
+            const GLboolean cull = glIsEnabled(GL_CULL_FACE);
+            glActiveTexture(GL_TEXTURE0);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+            glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
+            glBindTexture(GL_TEXTURE_2D, image->id);
+            glBindSampler(0, 0);
+            glUseProgram(s->presentProgram);
+            glBindVertexArray(s->presentVao);
+            glDisable(GL_BLEND);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_CULL_FACE);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glViewport(0, 0, s->width, s->height);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+            glColorMask(mask[0], mask[1], mask[2], mask[3]);
+            if (blend)
+            {
+                glEnable(GL_BLEND);
+            }
+            if (depth)
+            {
+                glEnable(GL_DEPTH_TEST);
+            }
+            if (cull)
+            {
+                glEnable(GL_CULL_FACE);
+            }
+            glUseProgram(program);
+            glBindVertexArray(vao);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glBindSampler(0, sampler);
+            glActiveTexture(active);
+        }
+#endif
+
         VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
         {
             DeviceGL*      d = Dev(device);
@@ -287,6 +408,12 @@ namespace vri::gl
             // The GL device's WebGL2 context comes from a 1x1 GLFW window, so the canvas
             // drawing buffer starts at 1x1. Size it to the swapchain or the present blit
             // (640x480 -> canvas) lands on a single pixel and nothing is visible.
+            if (!CreateSrgbPresent(s))
+            {
+                glDeleteProgram(s->presentProgram);
+                delete s;
+                return VriResult_Failure;
+            }
             emscripten_set_canvas_element_size(s->canvasSelector.c_str(), static_cast<int>(w), static_cast<int>(h));
             for (uint32_t i = 0; i < n; ++i)
                 s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
@@ -331,6 +458,16 @@ namespace vri::gl
                 return;
             SwapChainGL* s = Swap(swapChain);
             DestroyBackbuffers(s);
+#if defined(__EMSCRIPTEN__)
+            if (s->presentProgram)
+            {
+                glDeleteProgram(s->presentProgram);
+            }
+            if (s->presentVao)
+            {
+                glDeleteVertexArrays(1, &s->presentVao);
+            }
+#endif
             if (s->blitFbo)
                 glDeleteFramebuffers(1, &s->blitFbo);
 #if defined(VRI_GL_EGL)
@@ -501,7 +638,14 @@ namespace vri::gl
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
+            if (s->presentProgram)
+            {
+                PresentSrgb(s, bb);
+            }
+            else
+            {
+                glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
+            }
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             return VriResult_Success;
 #elif defined(__APPLE__)
