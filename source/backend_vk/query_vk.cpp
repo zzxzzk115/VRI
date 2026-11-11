@@ -75,8 +75,8 @@ namespace vri::vk
 
         void VRI_CALL CmdWriteTimestamp(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
         {
-            // BOTTOM_OF_PIPE: the timestamp lands once all prior work has finished reaching here.
-            vkCmdWriteTimestamp(Cmd(cmd)->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QP(pool)->pool, index);
+            // Include preceding query operations as well as graphics, compute and transfer work.
+            vkCmdWriteTimestamp2(Cmd(cmd)->cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, QP(pool)->pool, index);
         }
 
         void VRI_CALL CmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
