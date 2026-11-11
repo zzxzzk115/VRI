@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "shaders/tests/rayquery_attributes_spv.h"
 #include "shaders/tests/rayquery_dxil.h" // g_rayqueryDxilCS  (D3D12)
 #include "shaders/tests/rayquery_spv.h"  // g_rayquerySpv     (Vulkan)
 
@@ -26,7 +27,7 @@ namespace
         uint64_t blasReference;
     };
 
-    void RunRayQuery(VriGraphicsAPI api, const void* cs, size_t csSize)
+    void RunRayQuery(VriGraphicsAPI api, const void* cs, size_t csSize, bool attributes = false)
     {
         VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
         dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
@@ -83,7 +84,7 @@ namespace
 
         VriAsGeometryDesc blasGeom {};
         blasGeom.type                   = VriAsGeometryType_Triangles;
-        blasGeom.flags                  = VriAsGeometry_Opaque;
+        blasGeom.flags                  = attributes ? 0 : VriAsGeometry_Opaque;
         blasGeom.triangles.vertexBuffer = vbuf;
         blasGeom.triangles.vertexCount  = 3;
         blasGeom.triangles.vertexStride = 3 * sizeof(float);
@@ -100,9 +101,15 @@ namespace
         inst.transform[0]      = 1.0f;
         inst.transform[5]      = 1.0f;
         inst.transform[10]     = 1.0f;
-        inst.instanceIdAndMask = 0xFFu << 24;
+        inst.instanceIdAndMask = (attributes ? 173u : 0u) | (0xFFu << 24);
         inst.sbtOffsetAndFlags = 0x1u << 24; // cull-disable
         inst.blasReference     = rt.GetAccelerationStructureDeviceAddress(blas);
+        if (attributes)
+        {
+            inst.transform[3]  = 0.125f;
+            inst.transform[7]  = -0.125f;
+            inst.transform[11] = 0.25f;
+        }
         std::memcpy(c.MapBuffer(ibuf, 0, sizeof(inst)), &inst, sizeof(inst));
         c.UnmapBuffer(ibuf);
 
@@ -272,9 +279,21 @@ namespace
         const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, rbDesc.size));
         REQUIRE(px != nullptr);
         const uint32_t center = ((kH / 2) * kW + (kW / 2)) * 4;
-        CHECK(px[center + 0] == 255); // ray query hit the triangle
-        CHECK(px[center + 1] == 0);
-        CHECK(px[center + 2] == 0);
+        if (attributes)
+        {
+            // At (1/64, 1/64), subtract the instance translation before solving
+            // p = a * (1-u-v) + b * u + c * v for the original triangle.
+            CHECK(px[center + 0] == 173);
+            CHECK(px[center + 1] == doctest::Approx(0.2109375 * 255).epsilon(0.01));
+            CHECK(px[center + 2] == doctest::Approx(0.4296875 * 255).epsilon(0.01));
+            CHECK(px[center + 3] == 255);
+        }
+        else
+        {
+            CHECK(px[center + 0] == 255); // ray query hit the triangle
+            CHECK(px[center + 1] == 0);
+            CHECK(px[center + 2] == 0);
+        }
         const uint32_t corner = 0;
         CHECK(px[corner + 0] == 0); // corner misses -> black
         CHECK(px[corner + 1] == 0);
@@ -312,4 +331,14 @@ TEST_CASE("D3D12 ray query: inline trace in a compute shader")
 TEST_CASE("Metal ray query: inline trace in a compute shader")
 {
     RunRayQuery(VriGraphicsAPI_Metal, g_rayquerySpv, sizeof(g_rayquerySpv));
+}
+
+TEST_CASE("Metal ray query: custom instance identity and transformed barycentrics")
+{
+    RunRayQuery(VriGraphicsAPI_Metal, g_rayqueryAttributesSpv, sizeof(g_rayqueryAttributesSpv), true);
+}
+
+TEST_CASE("Vulkan ray query: custom instance identity and transformed barycentrics")
+{
+    RunRayQuery(VriGraphicsAPI_Vulkan, g_rayqueryAttributesSpv, sizeof(g_rayqueryAttributesSpv), true);
 }
