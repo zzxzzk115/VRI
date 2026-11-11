@@ -196,6 +196,8 @@ namespace vri::wgpu
     {
         m_desc             = {};
         m_desc.graphicsAPI = VriGraphicsAPI_WebGPU;
+        // Buffer/texture copy layouts require aligned rows in both transfer directions.
+        m_desc.uploadBufferTextureRowAlignment = 256;
 
         WGPUAdapterInfo info = {};
         wgpuAdapterGetInfo(m_adapter, &info);
