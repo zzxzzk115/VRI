@@ -263,7 +263,7 @@ add_rules("clangd.config")
 add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")
 -- local package overrides (prebuilt Slang 2026.11 for vri-shaderc; see the package).
 -- Anchored to os.scriptdir() so it still resolves when VRI is included as a subproject.
-add_repositories("vri-local-repo " .. path.join(os.scriptdir(), "xmake", "xmake-repo"))
+add_repositories("vri-local-repo xmake/xmake-repo", {rootdir = os.scriptdir()})
 
 -- vri-shaderc links a prebuilt Slang that can emit tessellation SPIR-V (the Vulkan
 -- SDK's 2025.11 crashes on hull shaders). Local-developer tool only (tools are off
