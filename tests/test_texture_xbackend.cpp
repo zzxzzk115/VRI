@@ -6,8 +6,8 @@
 
 #include <vri/vri.h>
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <cstring>
 
 #include "shaders/tests/triangle_tex_spv.h"  // g_triangleTexSpv  (Vulkan + OpenGL via SPIRV-Cross)
@@ -18,7 +18,8 @@ namespace
     constexpr uint32_t kW = 64;
     constexpr uint32_t kH = 64;
 
-    bool RunTexSample(VriGraphicsAPI api, const void* shader, size_t shaderSize, bool& ran, bool beforeRendering = false)
+    bool
+    RunTexSample(VriGraphicsAPI api, const void* shader, size_t shaderSize, bool& ran, bool beforeRendering = false)
     {
         ran                       = false;
         VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
@@ -375,18 +376,20 @@ TEST_CASE("sampled-texture parity: a solid texture tints the triangle on each ba
 
 TEST_CASE("Metal descriptors: bindings recorded before rendering survive encoder creation")
 {
-    bool ran = false;
+    bool       ran  = false;
     const bool blue = RunTexSample(VriGraphicsAPI_Metal, g_triangleTexSpv, sizeof(g_triangleTexSpv), ran, true);
-    if (ran) CHECK(blue);
-    else MESSAGE("Metal unavailable - skipped");
+    if (ran)
+        CHECK(blue);
+    else
+        MESSAGE("Metal unavailable - skipped");
 }
 
 TEST_CASE("Metal BC textures: padded block rows and mip offsets round-trip unchanged")
 {
     VriDeviceCreationDesc dc {};
-    dc.graphicsAPI = VriGraphicsAPI_Metal;
+    dc.graphicsAPI      = VriGraphicsAPI_Metal;
     dc.enableValidation = VRI_TRUE;
-    VriDevice* dev = nullptr;
+    VriDevice* dev      = nullptr;
     if (vriCreateDevice(&dc, &dev) != VriResult_Success)
     {
         MESSAGE("Metal unavailable - skipped");
@@ -397,47 +400,47 @@ TEST_CASE("Metal BC textures: padded block rows and mip offsets round-trip uncha
     VriQueue* queue = nullptr;
     REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
     VriTextureDesc td {};
-    td.type = VriTextureType_2D;
+    td.type   = VriTextureType_2D;
     td.format = VriFormat_BC1_UNORM;
     td.width = td.height = 8;
     td.depth = td.layerNum = td.sampleNum = 1;
-    td.mipNum = 2;
-    td.usage = VriTextureUsage_ShaderResource | VriTextureUsage_TransferSrc | VriTextureUsage_TransferDst;
-    td.memoryLocation = VriMemoryLocation_Device;
+    td.mipNum                             = 2;
+    td.usage            = VriTextureUsage_ShaderResource | VriTextureUsage_TransferSrc | VriTextureUsage_TransferDst;
+    td.memoryLocation   = VriMemoryLocation_Device;
     VriTexture* texture = nullptr;
     REQUIRE(c.CreateTexture(dev, &td, &texture) == VriResult_Success);
     const std::array<uint32_t, 5> offsets {0, 8, 256, 264, 512};
-    std::array<uint8_t, 768> bytes {};
+    std::array<uint8_t, 768>      bytes {};
     for (uint32_t i = 0; i < offsets.size(); ++i)
     {
         // A valid BC1 solid-color block; each block differs to detect row/mip aliasing.
-        bytes[offsets[i]] = uint8_t(i + 1);
+        bytes[offsets[i]]     = uint8_t(i + 1);
         bytes[offsets[i] + 1] = 0xf8;
     }
     VriBufferDesc bd {};
-    bd.size = bytes.size();
-    bd.usage = VriBufferUsage_TransferSrc;
+    bd.size           = bytes.size();
+    bd.usage          = VriBufferUsage_TransferSrc;
     bd.memoryLocation = VriMemoryLocation_HostUpload;
     VriBuffer* upload = nullptr;
     REQUIRE(c.CreateBuffer(dev, &bd, &upload) == VriResult_Success);
     std::memcpy(c.MapBuffer(upload, 0, bytes.size()), bytes.data(), bytes.size());
     c.UnmapBuffer(upload);
-    bd.usage = VriBufferUsage_TransferDst;
-    bd.memoryLocation = VriMemoryLocation_HostReadback;
+    bd.usage            = VriBufferUsage_TransferDst;
+    bd.memoryLocation   = VriMemoryLocation_HostReadback;
     VriBuffer* readback = nullptr;
     REQUIRE(c.CreateBuffer(dev, &bd, &readback) == VriResult_Success);
     VriCommandAllocator* allocator = nullptr;
-    VriCommandBuffer* command = nullptr;
+    VriCommandBuffer*    command   = nullptr;
     REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &allocator) == VriResult_Success);
     REQUIRE(c.CreateCommandBuffer(allocator, &command) == VriResult_Success);
     REQUIRE(c.BeginCommandBuffer(command) == VriResult_Success);
     for (uint32_t mip = 0; mip < 2; ++mip)
     {
         VriBufferTextureCopyDesc copy {};
-        copy.bufferOffset = mip ? 512 : 0;
-        copy.bufferRowLength = 128; // Texels: 32 BC1 blocks * 8 bytes = 256 bytes per row.
+        copy.bufferOffset      = mip ? 512 : 0;
+        copy.bufferRowLength   = 128; // Texels: 32 BC1 blocks * 8 bytes = 256 bytes per row.
         copy.bufferImageHeight = 8 >> mip;
-        copy.texture = {mip, 0, 1, VriImageAspect_Color, 0, 0, 0, 8u >> mip, 8u >> mip, 1};
+        copy.texture           = {mip, 0, 1, VriImageAspect_Color, 0, 0, 0, 8u >> mip, 8u >> mip, 1};
         c.CmdUploadBufferToTexture(command, texture, upload, &copy);
         c.CmdReadbackTextureToBuffer(command, readback, texture, &copy);
     }
@@ -445,16 +448,17 @@ TEST_CASE("Metal BC textures: padded block rows and mip offsets round-trip uncha
     VriFence* fence = nullptr;
     REQUIRE(c.CreateFence(dev, 0, &fence) == VriResult_Success);
     const VriFenceSubmitDesc signal {fence, 1};
-    VriQueueSubmitDesc submit {};
-    submit.commandBuffers = &command;
+    VriQueueSubmitDesc       submit {};
+    submit.commandBuffers   = &command;
     submit.commandBufferNum = 1;
-    submit.signalFences = &signal;
-    submit.signalFenceNum = 1;
+    submit.signalFences     = &signal;
+    submit.signalFenceNum   = 1;
     c.QueueSubmit(queue, &submit);
     c.Wait(fence, 1);
     const auto* actual = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, bytes.size()));
     REQUIRE(actual != nullptr);
-    for (auto offset : offsets) CHECK(std::memcmp(actual + offset, bytes.data() + offset, 8) == 0);
+    for (auto offset : offsets)
+        CHECK(std::memcmp(actual + offset, bytes.data() + offset, 8) == 0);
     c.UnmapBuffer(readback);
     c.DeviceWaitIdle(dev);
     c.DestroyFence(fence);

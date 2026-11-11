@@ -578,7 +578,8 @@ namespace
         {
             VriRayTracingInterface rt {};
             const bool q = vriGetInterface(dev, VRI_INTERFACE_RAYTRACING, sizeof(rt), &rt) == VriResult_Success;
-            INFO(name << " RayTracing: hasRayTracing=" << d->hasRayTracing << " hasRayQuery=" << d->hasRayQuery << " queryable=" << q);
+            INFO(name << " RayTracing: hasRayTracing=" << d->hasRayTracing << " hasRayQuery=" << d->hasRayQuery
+                      << " queryable=" << q);
             // Ray-query-only devices use this interface to build BLAS/TLAS;
             // their ray-pipeline and SBT entry points remain unsupported.
             if (d->hasRayTracing == VRI_FALSE && d->hasRayQuery == VRI_FALSE)
