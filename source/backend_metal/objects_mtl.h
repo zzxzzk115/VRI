@@ -9,6 +9,7 @@
 #import <Metal/Metal.h>
 
 #include <vector>
+#include <utility>
 
 #include <vri/vri.h>
 
@@ -66,6 +67,8 @@ namespace vri::mtl
         const struct PipelineMTL*       boundPipeline;
         bool                        renderPipelineDeferred; // graphics pipeline set before an encoder existed
         std::vector<const VriDescriptorSet*> boundSets;
+        // Borrowed TLAS identities/stages already declared in the current native encoder.
+        std::vector<std::pair<struct AccelerationStructureMTL*, MTLRenderStages>> residentTlas;
         std::vector<uint8_t>        constants;
         id<MTLBuffer>               indexBuffer;
         uint64_t                    indexOffset;

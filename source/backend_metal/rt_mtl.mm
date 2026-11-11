@@ -215,6 +215,9 @@ namespace vri::mtl
             if (a->instancedAS) [a->instancedAS release];
             a->instanceBuffer = dst;       // keep alive for the GPU build
             a->instancedAS = asArray;      // ditto
+            a->residentBlas.resize([asArray count]);
+            if (!a->residentBlas.empty())
+                [asArray getObjects:a->residentBlas.data() range:NSMakeRange(0, a->residentBlas.size())];
             tlasDesc.instanceDescriptorBuffer = dst;
             tlasDesc.instanceDescriptorBufferOffset = 0;
             tlasDesc.instanceCount = in.instanceCount;
