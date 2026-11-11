@@ -52,83 +52,89 @@ namespace vri::mtl
         // are filled at build time (TranslateInstances).
         MTLAccelerationStructureDescriptor* MakeDescriptor(const VriAccelerationStructureDesc* desc)
         {
-            if (desc->type == VriAccelerationStructureType_TopLevel)
+            @autoreleasepool
             {
-                MTLInstanceAccelerationStructureDescriptor* d = [MTLInstanceAccelerationStructureDescriptor descriptor];
-                d.usage = ToAsUsage(desc->flags);
-                // RayQuery InstanceID is the app's custom ID, not the TLAS array index.
-                d.instanceDescriptorType = MTLAccelerationStructureInstanceDescriptorTypeUserID;
-                d.instanceDescriptorStride = sizeof(MTLAccelerationStructureUserIDInstanceDescriptor);
-                uint32_t instances = 0;
+                if (desc->type == VriAccelerationStructureType_TopLevel)
+                {
+                    MTLInstanceAccelerationStructureDescriptor* d = [MTLInstanceAccelerationStructureDescriptor descriptor];
+                    d.usage = ToAsUsage(desc->flags);
+                    // RayQuery InstanceID is the app's custom ID, not the TLAS array index.
+                    d.instanceDescriptorType = MTLAccelerationStructureInstanceDescriptorTypeUserID;
+                    d.instanceDescriptorStride = sizeof(MTLAccelerationStructureUserIDInstanceDescriptor);
+                    uint32_t instances = 0;
+                    for (uint32_t i = 0; i < desc->geometryCount; ++i)
+                        if (desc->geometries[i].type == VriAsGeometryType_Instances)
+                            instances += desc->geometries[i].instances.instanceCount;
+                    d.instanceCount = instances;
+                    return [d retain];
+                }
+
+                NSMutableArray* geoms = [NSMutableArray array];
                 for (uint32_t i = 0; i < desc->geometryCount; ++i)
-                    if (desc->geometries[i].type == VriAsGeometryType_Instances)
-                        instances += desc->geometries[i].instances.instanceCount;
-                d.instanceCount = instances;
+                {
+                    const VriAsGeometryDesc& g = desc->geometries[i];
+                    if (g.type == VriAsGeometryType_Aabbs)
+                    {
+                        // Procedural primitives: Metal bounding-box geometry (custom
+                        // intersection runs in the ray-query / intersection function).
+                        const VriAsAabbsDesc& a = g.aabbs;
+                        MTLAccelerationStructureBoundingBoxGeometryDescriptor* box =
+                            [MTLAccelerationStructureBoundingBoxGeometryDescriptor descriptor];
+                        box.boundingBoxBuffer = Buf(a.buffer)->buffer;
+                        box.boundingBoxBufferOffset = a.offset;
+                        box.boundingBoxStride = a.stride ? a.stride : 24; // 6 floats
+                        box.boundingBoxCount = a.count;
+                        box.opaque = (g.flags & VriAsGeometry_Opaque) ? YES : NO;
+                        [geoms addObject:box];
+                        continue;
+                    }
+                    if (g.type != VriAsGeometryType_Triangles)
+                        continue;
+                    const VriAsTrianglesDesc& t = g.triangles;
+                    MTLAccelerationStructureTriangleGeometryDescriptor* tri = [MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
+                    tri.vertexBuffer = Buf(t.vertexBuffer)->buffer;
+                    tri.vertexBufferOffset = t.vertexOffset;
+                    tri.vertexStride = t.vertexStride;
+                    tri.vertexFormat = ToAttrFormat(t.vertexFormat);
+                    tri.triangleCount = t.indexBuffer ? (t.indexCount / 3) : (t.vertexCount / 3);
+                    if (t.indexBuffer)
+                    {
+                        tri.indexBuffer = Buf(t.indexBuffer)->buffer;
+                        tri.indexBufferOffset = t.indexOffset;
+                        tri.indexType = t.indexType == VriIndexType_UInt16 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32;
+                    }
+                    tri.opaque = (g.flags & VriAsGeometry_Opaque) ? YES : NO;
+                    [geoms addObject:tri];
+                }
+                MTLPrimitiveAccelerationStructureDescriptor* d = [MTLPrimitiveAccelerationStructureDescriptor descriptor];
+                d.usage = ToAsUsage(desc->flags);
+                d.geometryDescriptors = geoms;
                 return [d retain];
             }
-
-            NSMutableArray* geoms = [NSMutableArray array];
-            for (uint32_t i = 0; i < desc->geometryCount; ++i)
-            {
-                const VriAsGeometryDesc& g = desc->geometries[i];
-                if (g.type == VriAsGeometryType_Aabbs)
-                {
-                    // Procedural primitives: Metal bounding-box geometry (custom
-                    // intersection runs in the ray-query / intersection function).
-                    const VriAsAabbsDesc& a = g.aabbs;
-                    MTLAccelerationStructureBoundingBoxGeometryDescriptor* box =
-                        [MTLAccelerationStructureBoundingBoxGeometryDescriptor descriptor];
-                    box.boundingBoxBuffer = Buf(a.buffer)->buffer;
-                    box.boundingBoxBufferOffset = a.offset;
-                    box.boundingBoxStride = a.stride ? a.stride : 24; // 6 floats
-                    box.boundingBoxCount = a.count;
-                    box.opaque = (g.flags & VriAsGeometry_Opaque) ? YES : NO;
-                    [geoms addObject:box];
-                    continue;
-                }
-                if (g.type != VriAsGeometryType_Triangles)
-                    continue;
-                const VriAsTrianglesDesc& t = g.triangles;
-                MTLAccelerationStructureTriangleGeometryDescriptor* tri = [MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
-                tri.vertexBuffer = Buf(t.vertexBuffer)->buffer;
-                tri.vertexBufferOffset = t.vertexOffset;
-                tri.vertexStride = t.vertexStride;
-                tri.vertexFormat = ToAttrFormat(t.vertexFormat);
-                tri.triangleCount = t.indexBuffer ? (t.indexCount / 3) : (t.vertexCount / 3);
-                if (t.indexBuffer)
-                {
-                    tri.indexBuffer = Buf(t.indexBuffer)->buffer;
-                    tri.indexBufferOffset = t.indexOffset;
-                    tri.indexType = t.indexType == VriIndexType_UInt16 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32;
-                }
-                tri.opaque = (g.flags & VriAsGeometry_Opaque) ? YES : NO;
-                [geoms addObject:tri];
-            }
-            MTLPrimitiveAccelerationStructureDescriptor* d = [MTLPrimitiveAccelerationStructureDescriptor descriptor];
-            d.usage = ToAsUsage(desc->flags);
-            d.geometryDescriptors = geoms;
-            return [d retain];
         }
 
         VriResult VRI_CALL CreateAccelerationStructure(VriDevice* device, const VriAccelerationStructureDesc* desc, VriAccelerationStructure** out)
         {
-            DeviceMTL* d = Dev(device);
-            MTLAccelerationStructureDescriptor* mdesc = MakeDescriptor(desc);
-            MTLAccelerationStructureSizes sizes = [d->Device() accelerationStructureSizesWithDescriptor:mdesc];
+            @autoreleasepool
+            {
+                DeviceMTL* d = Dev(device);
+                MTLAccelerationStructureDescriptor* mdesc = MakeDescriptor(desc);
+                MTLAccelerationStructureSizes sizes = [d->Device() accelerationStructureSizesWithDescriptor:mdesc];
 
-            id<MTLAccelerationStructure> as = [d->Device() newAccelerationStructureWithSize:sizes.accelerationStructureSize];
-            if (!as) { [mdesc release]; return VriResult_OutOfMemory; }
-            id<MTLBuffer> scratch = [d->Device() newBufferWithLength:(sizes.buildScratchBufferSize ? sizes.buildScratchBufferSize : 1)
-                                                            options:MTLResourceStorageModePrivate];
+                id<MTLAccelerationStructure> as = [d->Device() newAccelerationStructureWithSize:sizes.accelerationStructureSize];
+                if (!as) { [mdesc release]; return VriResult_OutOfMemory; }
+                id<MTLBuffer> scratch = [d->Device() newBufferWithLength:(sizes.buildScratchBufferSize ? sizes.buildScratchBufferSize : 1)
+                                                                options:MTLResourceStorageModePrivate];
 
-            AccelerationStructureMTL* a = new AccelerationStructureMTL{};
-            a->device = d;
-            a->as = as;
-            a->scratch = scratch;
-            a->descriptor = mdesc; // owned
-            a->type = desc->type;
-            *out = ToHandle(a);
-            return VriResult_Success;
+                AccelerationStructureMTL* a = new AccelerationStructureMTL{};
+                a->device = d;
+                a->as = as;
+                a->scratch = scratch;
+                a->descriptor = mdesc; // owned
+                a->type = desc->type;
+                *out = ToHandle(a);
+                return VriResult_Success;
+            }
         }
 
         void VRI_CALL DestroyAccelerationStructure(VriAccelerationStructure* as)
@@ -226,24 +232,27 @@ namespace vri::mtl
 
         void VRI_CALL CmdBuildAccelerationStructure(VriCommandBuffer* cmd, const VriBuildAccelerationStructureDesc* desc)
         {
-            CommandBufferMTL* c = CB(cmd);
-            AccelerationStructureMTL* a = AS(desc->dst);
-
-            // Close any open blit/compute encoder before the AS-build encoder (one at a time).
-            if (c->blitEnc)    { [c->blitEnc endEncoding];    [c->blitEnc release];    c->blitEnc = nil; }
-            if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
-
-            if (a->type == VriAccelerationStructureType_TopLevel)
+            @autoreleasepool
             {
-                auto* tlasDesc = (MTLInstanceAccelerationStructureDescriptor*)a->descriptor;
-                for (uint32_t i = 0; i < desc->geometry->geometryCount; ++i)
-                    if (desc->geometry->geometries[i].type == VriAsGeometryType_Instances)
-                    { TranslateInstances(c->device, a, desc->geometry->geometries[i].instances, tlasDesc); break; }
-            }
+                CommandBufferMTL* c = CB(cmd);
+                AccelerationStructureMTL* a = AS(desc->dst);
 
-            id<MTLAccelerationStructureCommandEncoder> enc = [c->cmd accelerationStructureCommandEncoder];
-            [enc buildAccelerationStructure:a->as descriptor:a->descriptor scratchBuffer:a->scratch scratchBufferOffset:0];
-            [enc endEncoding];
+                // Close any open blit/compute encoder before the AS-build encoder (one at a time).
+                if (c->blitEnc)    { [c->blitEnc endEncoding];    [c->blitEnc release];    c->blitEnc = nil; }
+                if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
+
+                if (a->type == VriAccelerationStructureType_TopLevel)
+                {
+                    auto* tlasDesc = (MTLInstanceAccelerationStructureDescriptor*)a->descriptor;
+                    for (uint32_t i = 0; i < desc->geometry->geometryCount; ++i)
+                        if (desc->geometry->geometries[i].type == VriAsGeometryType_Instances)
+                        { TranslateInstances(c->device, a, desc->geometry->geometries[i].instances, tlasDesc); break; }
+                }
+
+                id<MTLAccelerationStructureCommandEncoder> enc = [c->cmd accelerationStructureCommandEncoder];
+                [enc buildAccelerationStructure:a->as descriptor:a->descriptor scratchBuffer:a->scratch scratchBufferOffset:0];
+                [enc endEncoding];
+            }
         }
 
         void VRI_CALL CmdTraceRays(VriCommandBuffer*, const VriDispatchRaysDesc*) {} // no RT pipeline on Metal

@@ -106,32 +106,35 @@ namespace vri::mtl
 
         void VRI_CALL CmdWriteTimestamp(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
         {
-            CommandBufferMTL* c = CB(cmd);
-            QueryPoolMTL*     q = QP(pool);
-            if (!q->sampleBuf)
-                return;
-            if (c->renderEnc)
+            @autoreleasepool
             {
-                c->device->ReportError("CmdWriteTimestamp inside a render pass is unsupported on Metal");
-                return;
-            }
-            // Close any open aux encoder, then sample the GPU clock at the start boundary of a fresh
-            // (empty) blit encoder - the only counter-sampling point Apple Silicon supports.
-            if (c->blitEnc)    { [c->blitEnc endEncoding];    [c->blitEnc release];    c->blitEnc = nil; }
-            if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
+                CommandBufferMTL* c = CB(cmd);
+                QueryPoolMTL*     q = QP(pool);
+                if (!q->sampleBuf)
+                    return;
+                if (c->renderEnc)
+                {
+                    c->device->ReportError("CmdWriteTimestamp inside a render pass is unsupported on Metal");
+                    return;
+                }
+                // Close any open aux encoder, then sample the GPU clock at the start boundary of a fresh
+                // (empty) blit encoder - the only counter-sampling point Apple Silicon supports.
+                if (c->blitEnc)    { [c->blitEnc endEncoding];    [c->blitEnc release];    c->blitEnc = nil; }
+                if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
 
-            MTLBlitPassDescriptor* bpd = [MTLBlitPassDescriptor blitPassDescriptor]; // autoreleased
-            MTLBlitPassSampleBufferAttachmentDescriptor* a = bpd.sampleBufferAttachments[0];
-            a.sampleBuffer              = q->sampleBuf;
-            a.startOfEncoderSampleIndex = index;
-            a.endOfEncoderSampleIndex   = MTLCounterDontSample;
-            id<MTLBlitCommandEncoder> e = [c->cmd blitCommandEncoderWithDescriptor:bpd];
-            // A start-of-encoder sample is only recorded if the encoder actually runs, so give it a
-            // trivial fill (the GPU clock is captured at the start boundary, before this fill).
-            if (!c->tsScratch)
-                c->tsScratch = [c->device->Device() newBufferWithLength:4 options:MTLResourceStorageModePrivate];
-            [e fillBuffer:c->tsScratch range:NSMakeRange(0, 4) value:0];
-            [e endEncoding];
+                MTLBlitPassDescriptor* bpd = [MTLBlitPassDescriptor blitPassDescriptor]; // autoreleased
+                MTLBlitPassSampleBufferAttachmentDescriptor* a = bpd.sampleBufferAttachments[0];
+                a.sampleBuffer              = q->sampleBuf;
+                a.startOfEncoderSampleIndex = index;
+                a.endOfEncoderSampleIndex   = MTLCounterDontSample;
+                id<MTLBlitCommandEncoder> e = [c->cmd blitCommandEncoderWithDescriptor:bpd];
+                // A start-of-encoder sample is only recorded if the encoder actually runs, so give it a
+                // trivial fill (the GPU clock is captured at the start boundary, before this fill).
+                if (!c->tsScratch)
+                    c->tsScratch = [c->device->Device() newBufferWithLength:4 options:MTLResourceStorageModePrivate];
+                [e fillBuffer:c->tsScratch range:NSMakeRange(0, 4) value:0];
+                [e endEncoding];
+            }
         }
 
         void VRI_CALL CmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
@@ -165,34 +168,37 @@ namespace vri::mtl
                                      VriBuffer*        dstBuffer,
                                      uint64_t          dstOffset)
         {
-            CommandBufferMTL* c = CB(cmd);
-            QueryPoolMTL*     q = QP(pool);
+            @autoreleasepool
+            {
+                CommandBufferMTL* c = CB(cmd);
+                QueryPoolMTL*     q = QP(pool);
 
-            if (q->sampleBuf)
-            {
-                // Resolve is CPU-side; record it and let QueueSubmit run it after GPU completion.
-                void* dst = static_cast<char*>([Buf(dstBuffer)->buffer contents]) + dstOffset;
-                c->tsResolves.push_back({q->sampleBuf, offset, num, dst});
-                return;
-            }
-            if (!q->results || !c->visBuffer)
-                return;
-            // Occlusion: blit each recorded slot into the destination, in query order.
-            if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
-            if (!c->blitEnc) c->blitEnc = [[c->cmd blitCommandEncoder] retain];
-            id<MTLBuffer> dst = Buf(dstBuffer)->buffer;
-            for (uint32_t k = 0; k < num; ++k)
-            {
-                for (const auto& m : c->occMarks)
+                if (q->sampleBuf)
                 {
-                    if (m.pool == q && m.index == offset + k)
+                    // Resolve is CPU-side; record it and let QueueSubmit run it after GPU completion.
+                    void* dst = static_cast<char*>([Buf(dstBuffer)->buffer contents]) + dstOffset;
+                    c->tsResolves.push_back({q->sampleBuf, offset, num, dst});
+                    return;
+                }
+                if (!q->results || !c->visBuffer)
+                    return;
+                // Occlusion: blit each recorded slot into the destination, in query order.
+                if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
+                if (!c->blitEnc) c->blitEnc = [[c->cmd blitCommandEncoder] retain];
+                id<MTLBuffer> dst = Buf(dstBuffer)->buffer;
+                for (uint32_t k = 0; k < num; ++k)
+                {
+                    for (const auto& m : c->occMarks)
                     {
-                        [c->blitEnc copyFromBuffer:c->visBuffer
-                                      sourceOffset:m.visSlot * sizeof(uint64_t)
-                                          toBuffer:dst
-                                 destinationOffset:dstOffset + k * sizeof(uint64_t)
-                                              size:sizeof(uint64_t)];
-                        break;
+                        if (m.pool == q && m.index == offset + k)
+                        {
+                            [c->blitEnc copyFromBuffer:c->visBuffer
+                                          sourceOffset:m.visSlot * sizeof(uint64_t)
+                                              toBuffer:dst
+                                     destinationOffset:dstOffset + k * sizeof(uint64_t)
+                                                  size:sizeof(uint64_t)];
+                            break;
+                        }
                     }
                 }
             }
