@@ -12,6 +12,8 @@
 #include <vri/vri.h>
 #include <vri/ext/vri_ext_raytracing.h>
 
+#include <vector>
+
 namespace vri::mtl
 {
     class DeviceMTL;
@@ -26,6 +28,7 @@ namespace vri::mtl
         // TLAS build-time state (translated from the app's VK-layout instance buffer).
         id<MTLBuffer>                  instanceBuffer;   // Metal-layout instance descriptors
         NSMutableArray*                instancedAS;      // id<MTLAccelerationStructure> referenced by instances
+        std::vector<id<MTLResource>>    residentBlas;      // Borrowed from instancedAS; rebuilt with the TLAS.
     };
 
     inline VriAccelerationStructure* ToHandle(AccelerationStructureMTL* a) { return reinterpret_cast<VriAccelerationStructure*>(a); }

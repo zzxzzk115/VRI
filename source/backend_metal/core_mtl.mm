@@ -270,6 +270,7 @@ namespace vri::mtl
             if (!c->computeEnc)
             {
                 c->computeEnc = [[c->cmd computeCommandEncoder] retain];
+                c->residentTlas.clear();
                 if (c->boundPipeline && c->boundPipeline->isCompute)
                 {
                     [c->computeEnc setComputePipelineState:c->boundPipeline->compute];
@@ -1303,6 +1304,7 @@ namespace vri::mtl
             rp.visibilityResultBuffer = c->visBuffer;
 
             c->renderEnc = [[c->cmd renderCommandEncoderWithDescriptor:rp] retain];
+            c->residentTlas.clear();
             // Apply a graphics pipeline that was bound before this encoder existed (CmdSetPipeline can
             // legally run before CmdBeginRendering; on Metal the pipeline must land on a live encoder).
             // Only a genuinely-deferred pipeline is re-applied - not a stale one left bound by a prior
@@ -1397,6 +1399,24 @@ namespace vri::mtl
             ApplyBindings(c);
         }
 
+        // Residency declarations survive pipeline/set switches within one native encoder.
+        // A TLAS rebuild uses a separate acceleration-structure encoder; the next render/compute
+        // encoder clears this list before any binding, so rebuilt BLAS membership is declared again.
+        void MakeBlasResident(CommandBufferMTL* c, AccelerationStructureMTL* tlas, MTLRenderStages stages = 0)
+        {
+            if (!tlas || tlas->residentBlas.empty()) return;
+            for (const auto& declared : c->residentTlas)
+                if (declared.first == tlas && declared.second == stages) return;
+            if (c->computeEnc)
+                [c->computeEnc useResources:tlas->residentBlas.data() count:tlas->residentBlas.size()
+                                     usage:MTLResourceUsageRead];
+            else if (c->renderEnc)
+                [c->renderEnc useResources:tlas->residentBlas.data() count:tlas->residentBlas.size()
+                                    usage:MTLResourceUsageRead stages:stages];
+            else return;
+            c->residentTlas.emplace_back(tlas, stages);
+        }
+
         void BindOne(CommandBufferMTL* c, const DescriptorSetMTL::Bound& b)
         {
             const DescriptorMTL* dsc = b.desc;
@@ -1410,8 +1430,7 @@ namespace vri::mtl
                     // resident but NOT those BLASes, so they get evicted after a while and traversal
                     // silently returns no hits. Mark each referenced BLAS resident for this dispatch.
                     if (dsc->accelObj)
-                        for (id<MTLAccelerationStructure> blas in dsc->accelObj->instancedAS)
-                            [c->computeEnc useResource:blas usage:MTLResourceUsageRead];
+                        MakeBlasResident(c, dsc->accelObj);
                 }
                 else if (b.type == VriDescriptorType_Sampler && dsc->sampler)
                     [c->computeEnc setSamplerState:dsc->sampler atIndex:b.mslIndex];
@@ -1435,8 +1454,7 @@ namespace vri::mtl
                                                            ((b.stages & VriShaderStage_Fragment) ? MTLRenderStageFragment : 0) |
                                                            ((b.stages & VriShaderStage_Mesh)     ? MTLRenderStageMesh : 0) |
                                                            ((b.stages & VriShaderStage_Task)     ? MTLRenderStageObject : 0));
-                    for (id<MTLAccelerationStructure> blas in dsc->accelObj->instancedAS)
-                        [c->renderEnc useResource:blas usage:MTLResourceUsageRead stages:st];
+                    MakeBlasResident(c, dsc->accelObj, st);
                 }
             }
             else if (b.type == VriDescriptorType_Sampler && dsc->sampler)
@@ -1481,8 +1499,7 @@ namespace vri::mtl
                 if (writeNum) [c->computeEnc useResources:s->residentReadWrite.data() count:writeNum
                                                     usage:MTLResourceUsageRead | MTLResourceUsageWrite];
                 for (AccelerationStructureMTL* tlas : s->residentTlas)
-                    for (id<MTLAccelerationStructure> blas in tlas->instancedAS)
-                        [c->computeEnc useResource:blas usage:MTLResourceUsageRead];
+                    MakeBlasResident(c, tlas);
                 return;
             }
             if (!c->renderEnc) return;
@@ -1503,8 +1520,7 @@ namespace vri::mtl
             if (writeNum) [c->renderEnc useResources:s->residentReadWrite.data() count:writeNum
                                                usage:MTLResourceUsageRead | MTLResourceUsageWrite stages:stages];
             for (AccelerationStructureMTL* tlas : s->residentTlas)
-                for (id<MTLAccelerationStructure> blas in tlas->instancedAS)
-                    [c->renderEnc useResource:blas usage:MTLResourceUsageRead stages:stages];
+                MakeBlasResident(c, tlas, stages);
         }
 
         void BindDescriptorSet(CommandBufferMTL* c, const VriDescriptorSet* set)
