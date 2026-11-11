@@ -1388,6 +1388,7 @@ namespace vri::wgpu
                                                const VriBufferTextureCopyDesc* region)
         {
             CommandBufferWGPU* c = CB(cmd);
+            EndComputePass(c);
             const TextureWGPU* t = reinterpret_cast<const TextureWGPU*>(dst);
             const uint32_t     w = region->texture.width ? region->texture.width : t->width;
             const uint32_t     h = region->texture.height ? region->texture.height : t->height;
