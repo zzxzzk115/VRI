@@ -3,7 +3,7 @@
 // BLAS = MTLPrimitiveAccelerationStructure (triangles); TLAS =
 // MTLInstanceAccelerationStructure. The app drives this with the Vulkan/DXR
 // instance layout (VkAccelerationStructureInstanceKHR), which CmdBuild translates
-// into Metal's MTLAccelerationStructureInstanceDescriptor + an instanced-AS array
+// into Metal's MTLAccelerationStructureUserIDInstanceDescriptor + an instanced-AS array
 // (Metal references BLASes by array index, not by device address). Builds run on a
 // MTLAccelerationStructureCommandEncoder. The RT *pipeline* half (raygen/SBT/
 // TraceRays) is Unsupported - Metal has no equivalent; ray query runs in compute.
@@ -56,6 +56,9 @@ namespace vri::mtl
             {
                 MTLInstanceAccelerationStructureDescriptor* d = [MTLInstanceAccelerationStructureDescriptor descriptor];
                 d.usage = ToAsUsage(desc->flags);
+                // RayQuery InstanceID is the app's custom ID, not the TLAS array index.
+                d.instanceDescriptorType = MTLAccelerationStructureInstanceDescriptorTypeUserID;
+                d.instanceDescriptorStride = sizeof(MTLAccelerationStructureUserIDInstanceDescriptor);
                 uint32_t instances = 0;
                 for (uint32_t i = 0; i < desc->geometryCount; ++i)
                     if (desc->geometries[i].type == VriAsGeometryType_Instances)
@@ -168,7 +171,7 @@ namespace vri::mtl
         }
 
         // The app's instance buffer is in VkAccelerationStructureInstanceKHR layout; translate
-        // it into Metal's MTLAccelerationStructureInstanceDescriptor + the instanced-AS array
+        // it into Metal's MTLAccelerationStructureUserIDInstanceDescriptor + the instanced-AS array
         // (Metal references each BLAS by index into that array, not by device address).
         void TranslateInstances(DeviceMTL* d, AccelerationStructureMTL* a, const VriAsInstancesDesc& in,
                                 MTLInstanceAccelerationStructureDescriptor* tlasDesc)
@@ -176,15 +179,15 @@ namespace vri::mtl
             struct VkInstance { float transform[12]; uint32_t idAndMask; uint32_t sbtAndFlags; uint64_t blasRef; };
             const auto* src = reinterpret_cast<const VkInstance*>(static_cast<const uint8_t*>([Buf(in.instanceBuffer)->buffer contents]) + in.offset);
 
-            id<MTLBuffer> dst = [d->Device() newBufferWithLength:(sizeof(MTLAccelerationStructureInstanceDescriptor) * (in.instanceCount ? in.instanceCount : 1))
+            id<MTLBuffer> dst = [d->Device() newBufferWithLength:(sizeof(MTLAccelerationStructureUserIDInstanceDescriptor) * (in.instanceCount ? in.instanceCount : 1))
                                                         options:MTLResourceStorageModeShared];
-            auto* out = static_cast<MTLAccelerationStructureInstanceDescriptor*>([dst contents]);
+            auto* out = static_cast<MTLAccelerationStructureUserIDInstanceDescriptor*>([dst contents]);
             NSMutableArray* asArray = [[NSMutableArray alloc] init];
 
             for (uint32_t i = 0; i < in.instanceCount; ++i)
             {
                 const VkInstance& s = src[i];
-                MTLAccelerationStructureInstanceDescriptor& o = out[i];
+                MTLAccelerationStructureUserIDInstanceDescriptor& o = out[i];
                 // VK transform is row-major 3x4; Metal's is 4 columns of float3 (column c, row r = transform[r*4+c]).
                 for (int c = 0; c < 4; ++c)
                 {
@@ -199,6 +202,7 @@ namespace vri::mtl
                 if (flags & 0x8u) opt |= MTLAccelerationStructureInstanceOptionNonOpaque;                        // VK force-non-opaque
                 o.options = opt;
                 o.mask = s.idAndMask >> 24;
+                o.userID = s.idAndMask & 0x00ffffffu;
                 o.intersectionFunctionTableOffset = 0; // ray query: no SBT
                 // Map the BLAS token to an index into instancedAccelerationStructures (dedup).
                 AccelerationStructureMTL* blas = reinterpret_cast<AccelerationStructureMTL*>(s.blasRef);
