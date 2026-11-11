@@ -147,9 +147,8 @@ void main()
                     lessThanEqual(linear, vec3(0.0031308)));
     color = vec4(srgb, sampleColor.a);
 }
-)"
-            };
-            const GLenum types[] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
+)"};
+            const GLenum types[]      = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER};
             swapchain->presentProgram = glCreateProgram();
             for (int index = 0; index < 2; ++index)
             {
@@ -187,13 +186,13 @@ void main()
         {
             // WebGL's default framebuffer stores display-encoded bytes. A blit from an sRGB
             // attachment decodes them, so explicitly encode the sampled linear color once.
-            GLint program = 0;
-            GLint vao = 0;
-            GLint active = 0;
-            GLint texture = 0;
-            GLint sampler = 0;
-            GLint viewport[4] = {};
-            GLboolean mask[4] = {};
+            GLint     program     = 0;
+            GLint     vao         = 0;
+            GLint     active      = 0;
+            GLint     texture     = 0;
+            GLint     sampler     = 0;
+            GLint     viewport[4] = {};
+            GLboolean mask[4]     = {};
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
@@ -201,7 +200,7 @@ void main()
             glGetBooleanv(GL_COLOR_WRITEMASK, mask);
             const GLboolean blend = glIsEnabled(GL_BLEND);
             const GLboolean depth = glIsEnabled(GL_DEPTH_TEST);
-            const GLboolean cull = glIsEnabled(GL_CULL_FACE);
+            const GLboolean cull  = glIsEnabled(GL_CULL_FACE);
             glActiveTexture(GL_TEXTURE0);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
             glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
