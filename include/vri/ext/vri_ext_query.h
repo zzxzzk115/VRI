@@ -2,19 +2,21 @@
  * vri_ext_query.h - GPU query pools (timestamps + occlusion).
  *
  * Queried via vriGetInterface(device, VRI_INTERFACE_QUERY, ...). Registered by backends that
- * support it (Vulkan, D3D12). Timestamp availability + tick scale are reported in
+ * support it. Timestamp availability + tick scale are reported in
  * VriDeviceDesc (hasTimestampQueries, timestampPeriodNanoseconds).
  *
  * Usage (timestamps, the basis of a GPU profiler): CmdResetQueries once, CmdWriteTimestamp at
  * each measurement point, then CmdCopyQueries to resolve the raw uint64 ticks into a buffer.
+ * Metal uses TimestampRange scopes instead of arbitrary timestamp points.
  * After the submit's fence signals, map the buffer; a section's GPU time in nanoseconds is
  * (tickEnd - tickStart) * VriDeviceDesc::timestampPeriodNanoseconds.
  *
  * Occlusion queries bracket draws inside a render pass with CmdBeginQuery/CmdEndQuery; the
  * result is the number of samples that passed the depth/stencil test (0 = fully occluded).
  *
- * Results are always 64-bit unsigned and resolved GPU-side into a VriBuffer (no host-side
- * read-out call); this maps cleanly onto vkCmdCopyQueryPoolResults and D3D12 ResolveQueryData.
+ * Point timestamps/occlusion are uint64 results resolved GPU-side into a VriBuffer.
+ * Metal execution ranges contain three uint64 fields and resolve in the completion handler
+ * before the submission fence signals. Always use GetQuerySize for the result stride.
  * (Pipeline-statistics query types are a planned addition.)
  */
 #ifndef VRI_EXT_QUERY_H
@@ -32,6 +34,9 @@ typedef enum VriQueryType
     VriQueryType_Timestamp          = 0, /* GPU clock tick (scale by timestampPeriodNanoseconds) */
     VriQueryType_Occlusion          = 1, /* samples that passed depth/stencil between Begin/End */
     VriQueryType_PipelineStatistics = 2, /* per-stage invocation counts (VriPipelineStatistics) */
+    /* Native execution envelope of a logical scope. Currently supported by Metal, whose GPU
+     * counters sample encoder stages rather than arbitrary bottom-of-pipe command points. */
+    VriQueryType_TimestampRange    = 3,
     VriQueryType_MaxEnum            = 0x7fffffff
 } VriQueryType;
 
@@ -54,6 +59,25 @@ typedef struct VriPipelineStatistics
     uint64_t computeShaderInvocations;
 } VriPipelineStatistics;
 
+/* TimestampRange result, in the device's timestamp ticks. Begin/EndQuery use the same
+ * index and bracket whole encoders outside render passes; nested scopes are supported.
+ * Metal samples the real vertex/fragment/compute/blit/AS encoder boundaries, without
+ * inserting work or serializing independent encoders. The result spans the earliest start
+ * to latest completion, including scheduling gaps; overlapping scopes must not be added.
+ * A scope with no executed stages returns {0,0,0}; UINT64_MAX reports unavailable data.
+ * active is the union of measured stage intervals inside this scope; end-begin is its
+ * elapsed envelope. Neither active values nor envelopes of overlapping scopes are additive.
+ * On Metal, CmdCopyQueries for this type requires a HostReadback destination and completes
+ * its host-side resolve before the submission's signal fence. Keep pools/buffers/command
+ * allocators alive until completion. Timestamp point pools are unsupported on Metal.
+ */
+typedef struct VriTimestampRange
+{
+    uint64_t begin;
+    uint64_t end;
+    uint64_t active; /* Union of valid native stage intervals; excludes gaps between stages. */
+} VriTimestampRange;
+
 typedef struct VriQueryPoolDesc
 {
     VriQueryType type;
@@ -75,19 +99,20 @@ typedef struct VriQueryInterface
     VriResult (VRI_CALL *CreateQueryPool)(VriDevice* device, const VriQueryPoolDesc* desc, VriQueryPool** outPool);
     void      (VRI_CALL *DestroyQueryPool)(VriQueryPool* pool);
     /* Bytes one query occupies in the CmdCopyQueries destination buffer: 8 for timestamp /
-     * occlusion, sizeof(VriPipelineStatistics) for pipeline statistics. */
+     * occlusion, sizeof(VriTimestampRange) for ranges, sizeof(VriPipelineStatistics) for statistics. */
     uint32_t  (VRI_CALL *GetQuerySize)(const VriQueryPool* pool);
 
     /* Reset [offset, offset+num) before (re)writing. REQUIRED on Vulkan; a no-op on D3D12. */
     void (VRI_CALL *CmdResetQueries)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num);
     /* Timestamp query: record the GPU clock once prior work has reached the bottom of the pipe. */
     void (VRI_CALL *CmdWriteTimestamp)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index);
-    /* Occlusion query: bracket draws inside a render pass. Not supported on WebGPU (its
+    /* TimestampRange: bracket whole encoders outside render passes, with the same slot
+     * at begin/end. Occlusion query: bracket draws inside a render pass. Not supported on WebGPU (its
      * occlusion model binds the query set at pass-begin, which this pool-at-query-time API
      * does not express); CreateQueryPool returns Unsupported there. */
     void (VRI_CALL *CmdBeginQuery)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index);
     void (VRI_CALL *CmdEndQuery)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index);
-    /* Resolve num results (uint64 each) into dstBuffer; read it back after the submit's fence.
+    /* Resolve num results into dstBuffer; read it back after the submit's fence.
      * dstBuffer needs num*GetQuerySize bytes and TransferDst usage (a HostReadback buffer works). */
     void (VRI_CALL *CmdCopyQueries)(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num,
                                     VriBuffer* dstBuffer, uint64_t dstOffset);

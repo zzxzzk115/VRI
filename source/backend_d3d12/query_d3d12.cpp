@@ -19,6 +19,8 @@ namespace vri::d3d12
         {
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
+            if (desc->type == VriQueryType_TimestampRange)
+                return VriResult_Unsupported;
             DeviceD3D12*          d  = Dev(device);
             D3D12_QUERY_HEAP_DESC hd = {};
             hd.Count                 = desc->queryCount;

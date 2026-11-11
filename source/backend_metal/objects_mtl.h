@@ -17,6 +17,23 @@ namespace vri::mtl
 {
     class DeviceMTL;
     struct QueryPoolMTL;
+    struct CommandBufferMTL;
+
+    struct TimestampChunkMTL
+    {
+        id<MTLCounterSampleBuffer> buffer = nil;
+        uint32_t used = 0;
+        std::vector<uint64_t> resolved;
+    };
+    struct TimestampSampleMTL { uint32_t chunk; uint32_t first; uint32_t count; };
+    struct TimestampRangeMTL
+    {
+        CommandBufferMTL* commands = nullptr;
+        uint32_t first = 0;
+        uint32_t end = 0;
+        bool closed = false;
+    };
+    struct TimestampResolveMTL { uint32_t first; uint32_t end; VriTimestampRange* destination; };
 
     // Metal exposes 31 buffer argument slots per stage. Descriptor buffers + push
     // constants grow up from 0; vertex stream buffers grow down from 30 so the two
@@ -52,6 +69,7 @@ namespace vri::mtl
     {
         DeviceMTL*  device; // Metal has no command pool; command buffers come from the queue
         VriQueueType type;
+        std::vector<CommandBufferMTL*> commands;
     };
 
     struct CommandBufferMTL
@@ -80,13 +98,16 @@ namespace vri::mtl
         // the recorded slots into the destination (all GPU-side).
         id<MTLBuffer>               visBuffer;   // lazily created; reused across Begin..Submit resets
         uint32_t                    visNextSlot; // next free slot index, reset each BeginCommandBuffer
-        id<MTLBuffer>               tsScratch;   // tiny buffer a timestamp blit encoder fills (must be non-empty)
         struct OcclusionMark { QueryPoolMTL* pool; uint32_t index; uint32_t visSlot; };
-        std::vector<OcclusionMark>  occMarks;
-        // Timestamp: Apple Silicon only resolves counter sample buffers CPU-side, so CmdCopyQueries
-        // records the resolve and QueueSubmit executes it in the command buffer's completion handler.
-        struct TimestampResolve { id<MTLCounterSampleBuffer> sb; uint32_t srcIndex; uint32_t num; void* dst; };
-        std::vector<TimestampResolve> tsResolves;
+        std::vector<OcclusionMark> occMarks;
+        // Reused per command buffer; sampling storage grows only when more real encoders are profiled.
+        std::vector<TimestampChunkMTL> timestampChunks;
+        std::vector<TimestampSampleMTL> timestampSamples;
+        std::vector<TimestampResolveMTL> timestampResolves;
+        std::vector<std::pair<uint64_t, uint64_t>> timestampIntervals;
+        uint32_t timestampChunk = 0;
+        uint32_t timestampDepth = 0;
+        bool timestampsValid = true;
     };
 
     struct BufferMTL
@@ -275,7 +296,7 @@ namespace vri::mtl
         DeviceMTL*                 device;
         VriQueryType               type;
         uint32_t                   count;
-        id<MTLCounterSampleBuffer> sampleBuf; // Timestamp: GPU clock samples (nil otherwise)
+        std::vector<TimestampRangeMTL> ranges; // TimestampRange slots; raw point timestamps are unsupported
         id<MTLBuffer>              results;    // Occlusion: count * uint64 visibility results (nil otherwise)
     };
 
