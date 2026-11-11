@@ -92,10 +92,10 @@ namespace
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
         VriQueryPoolDesc qpd {};
-        const bool ranges = api == VriGraphicsAPI_Metal;
-        qpd.type           = ranges ? VriQueryType_TimestampRange : VriQueryType_Timestamp;
-        qpd.queryCount     = 2;
-        VriQueryPool* pool = nullptr;
+        const bool       ranges = api == VriGraphicsAPI_Metal;
+        qpd.type                = ranges ? VriQueryType_TimestampRange : VriQueryType_Timestamp;
+        qpd.queryCount          = 2;
+        VriQueryPool* pool      = nullptr;
         REQUIRE(q.CreateQueryPool(dev, &qpd, &pool) == VriResult_Success);
         const uint64_t stride = ranges ? sizeof(VriTimestampRange) : sizeof(uint64_t);
         CHECK(q.GetQuerySize(pool) == stride);
@@ -115,8 +115,10 @@ namespace
 
         REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
         q.CmdResetQueries(cmd, pool, 0, 2);
-        if (ranges) q.CmdBeginQuery(cmd, pool, 0);
-        else q.CmdWriteTimestamp(cmd, pool, 0);
+        if (ranges)
+            q.CmdBeginQuery(cmd, pool, 0);
+        else
+            q.CmdWriteTimestamp(cmd, pool, 0);
         VriBufferCopyDesc region {};
         region.size = kSize;
         c.CmdCopyBuffer(cmd, dst, src, &region);
@@ -126,7 +128,8 @@ namespace
             q.CmdBeginQuery(cmd, pool, 1);
             q.CmdEndQuery(cmd, pool, 1);
         }
-        else q.CmdWriteTimestamp(cmd, pool, 1);
+        else
+            q.CmdWriteTimestamp(cmd, pool, 1);
         q.CmdCopyQueries(cmd, pool, 0, 2, readback, 0);
         REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);
 
@@ -148,15 +151,16 @@ namespace
         if (ranges)
         {
             const auto* results = reinterpret_cast<const VriTimestampRange*>(mapped);
-            ticks[0] = results[0].begin;
-            ticks[1] = results[0].end;
+            ticks[0]            = results[0].begin;
+            ticks[1]            = results[0].end;
             CHECK(results[0].active > 0);
             CHECK(results[0].active <= ticks[1] - ticks[0]);
             CHECK(results[1].begin == 0);
             CHECK(results[1].end == 0);
             CHECK(results[1].active == 0);
         }
-        else std::memcpy(ticks, mapped, sizeof(ticks));
+        else
+            std::memcpy(ticks, mapped, sizeof(ticks));
         c.UnmapBuffer(readback);
 
         if (strictNonzero)
@@ -240,11 +244,12 @@ TEST_CASE("Calibrated timestamps: Metal pairs GPU + CPU clocks") { RunCalibrated
 TEST_CASE("Query pool: Metal rejects arbitrary point timestamps")
 {
     Dev d;
-    if (!Init(d, VriGraphicsAPI_Metal)) return;
+    if (!Init(d, VriGraphicsAPI_Metal))
+        return;
     VriQueryInterface query {};
     REQUIRE(vriGetInterface(d.device, VRI_INTERFACE_QUERY, sizeof(query), &query) == VriResult_Success);
     const VriQueryPoolDesc desc {VriQueryType_Timestamp, 1};
-    VriQueryPool* pool = nullptr;
+    VriQueryPool*          pool = nullptr;
     CHECK(query.CreateQueryPool(d.device, &desc, &pool) == VriResult_Unsupported);
     CHECK(pool == nullptr);
 }
