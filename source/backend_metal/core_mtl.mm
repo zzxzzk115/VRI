@@ -14,6 +14,7 @@
 #include "conversions_mtl.h"
 #include "device_mtl.h"
 #include "objects_mtl.h"
+#include "query_mtl.h"
 
 #include "core/synchronization.h"
 #include "rt_mtl.h" // AccelerationStructureMTL (TLAS -> its referenced BLASes, for residency)
@@ -267,7 +268,12 @@ namespace vri::mtl
             @autoreleasepool
             {
                 if (c->computeEnc) { [c->computeEnc endEncoding]; [c->computeEnc release]; c->computeEnc = nil; }
-                if (!c->blitEnc) c->blitEnc = [[c->cmd blitCommandEncoder] retain];
+                if (!c->blitEnc)
+                {
+                    MTLBlitPassDescriptor* desc = [MTLBlitPassDescriptor blitPassDescriptor];
+                    AttachTimestampSamples(c, desc);
+                    c->blitEnc = [[c->cmd blitCommandEncoderWithDescriptor:desc] retain];
+                }
             }
         }
         void EnsureCompute(CommandBufferMTL* c)
@@ -277,7 +283,9 @@ namespace vri::mtl
                 if (c->blitEnc) { [c->blitEnc endEncoding]; [c->blitEnc release]; c->blitEnc = nil; }
                 if (!c->computeEnc)
                 {
-                    c->computeEnc = [[c->cmd computeCommandEncoder] retain];
+                    MTLComputePassDescriptor* desc = [MTLComputePassDescriptor computePassDescriptor];
+                    AttachTimestampSamples(c, desc);
+                    c->computeEnc = [[c->cmd computeCommandEncoderWithDescriptor:desc] retain];
                     c->residentTlas.clear();
                     if (c->boundPipeline && c->boundPipeline->isCompute)
                     {
@@ -335,7 +343,20 @@ namespace vri::mtl
             return VriResult_Success;
         }
         void VRI_CALL ResetCommandAllocator(VriCommandAllocator*) {}
-        void VRI_CALL DestroyCommandAllocator(VriCommandAllocator* a) { delete CA(a); }
+        void VRI_CALL DestroyCommandAllocator(VriCommandAllocator* allocator)
+        {
+            auto* a = CA(allocator);
+            for (auto* c : a->commands)
+            {
+                EndAux(c);
+                if (c->renderEnc) { [c->renderEnc endEncoding]; [c->renderEnc release]; }
+                if (c->cmd) [c->cmd release];
+                if (c->visBuffer) [c->visBuffer release];
+                DestroyTimestampSamples(c);
+                delete c;
+            }
+            delete a;
+        }
 
         VriResult VRI_CALL CreateCommandBuffer(VriCommandAllocator* allocator, VriCommandBuffer** out)
         {
@@ -345,6 +366,7 @@ namespace vri::mtl
             // Allocate against the queue for the allocator's type, so a Compute allocator's command
             // buffers run on the async compute queue (and signal/wait events stay in queue order).
             c->queue = a->device->GetQueue(a->type)->queue;
+            a->commands.push_back(c);
             *out = ToHandle(c);
             return VriResult_Success;
         }
@@ -363,7 +385,9 @@ namespace vri::mtl
                 // Query state resets each begin; the visibility buffer (occlusion) is reused across resets.
                 c->visNextSlot = 0;
                 c->occMarks.clear();
-                c->tsResolves.clear();
+                c->timestampSamples.clear(); c->timestampResolves.clear();
+                c->timestampChunk = 0; c->timestampDepth = 0; c->timestampsValid = true;
+                for (auto& chunk : c->timestampChunks) chunk.used = 0;
                 return c->cmd ? VriResult_Success : VriResult_Failure;
             }
         }
@@ -1324,6 +1348,7 @@ namespace vri::mtl
                                                                    options:MTLResourceStorageModeShared];
                 rp.visibilityResultBuffer = c->visBuffer;
 
+                AttachTimestampSamples(c, rp);
                 c->renderEnc = [[c->cmd renderCommandEncoderWithDescriptor:rp] retain];
                 c->residentTlas.clear();
                 // Apply a graphics pipeline that was bound before this encoder existed (CmdSetPipeline can
@@ -1877,19 +1902,16 @@ namespace vri::mtl
                         [wb encodeWaitForEvent:Fen(submit->waitFences[i].fence)->event value:submit->waitFences[i].value];
                     [wb commit];
                 }
-                // Gather CPU-side timestamp resolves from every submitted command buffer (Apple Silicon
-                // resolves counter sample buffers only on the host). When present, the last buffer's
-                // completion handler runs them and then CPU-signals the fences, so a host Wait can't
-                // observe the signal before the resolved timestamps land in the destination buffer.
-                std::vector<CommandBufferMTL::TimestampResolve> resolves;
+                // Resolve native encoder samples before making the submission's completion visible.
+                // The caller retains command allocators and readback buffers until the fence signals.
+                std::vector<std::pair<CommandBufferMTL*, id<MTLCommandBuffer>>> timingCommands;
                 for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
                 {
-                    CommandBufferMTL* c = CB(submit->commandBuffers[i]);
-                    for (CommandBufferMTL::TimestampResolve& r : c->tsResolves) { [r.sb retain]; resolves.push_back(r); }
-                    c->tsResolves.clear();
+                    auto* c = CB(submit->commandBuffers[i]);
+                    if (!c->timestampResolves.empty()) timingCommands.push_back({c, [c->cmd retain]});
                 }
                 std::vector<std::pair<id<MTLSharedEvent>, uint64_t>> deferredSignals;
-                if (!resolves.empty())
+                if (!timingCommands.empty())
                     for (uint32_t f = 0; f < submit->signalFenceNum; ++f)
                     {
                         id<MTLSharedEvent> ev = Fen(submit->signalFences[f].fence)->event;
@@ -1902,18 +1924,16 @@ namespace vri::mtl
                     CommandBufferMTL* c = CB(submit->commandBuffers[i]);
                     if (!c->cmd) continue;
                     const bool last = (i + 1 == submit->commandBufferNum);
-                    if (last && !resolves.empty())
+                    if (last && !timingCommands.empty())
                     {
                         // Resolve timestamps, then CPU-signal the fences (GPU waiters release too).
                         [c->cmd addCompletedHandler:^(id<MTLCommandBuffer>) {
                             @autoreleasepool
                             {
-                                for (const CommandBufferMTL::TimestampResolve& r : resolves)
+                                for (const auto& timing : timingCommands)
                                 {
-                                    NSData* data = [r.sb resolveCounterRange:NSMakeRange(r.srcIndex, r.num)];
-                                    if (data && [data length] >= r.num * sizeof(uint64_t))
-                                        std::memcpy(r.dst, [data bytes], r.num * sizeof(uint64_t));
-                                    [r.sb release];
+                                    ResolveTimestampRanges(timing.first, timing.second);
+                                    [timing.second release];
                                 }
                                 for (const std::pair<id<MTLSharedEvent>, uint64_t>& s : deferredSignals)
                                 {

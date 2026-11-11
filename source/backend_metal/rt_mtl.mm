@@ -12,6 +12,7 @@
 #include "conversions_mtl.h"
 #include "device_mtl.h"
 #include "objects_mtl.h"
+#include "query_mtl.h"
 
 #import <Metal/Metal.h>
 
@@ -249,7 +250,9 @@ namespace vri::mtl
                         { TranslateInstances(c->device, a, desc->geometry->geometries[i].instances, tlasDesc); break; }
                 }
 
-                id<MTLAccelerationStructureCommandEncoder> enc = [c->cmd accelerationStructureCommandEncoder];
+                MTLAccelerationStructurePassDescriptor* pass = [MTLAccelerationStructurePassDescriptor accelerationStructurePassDescriptor];
+                AttachTimestampSamples(c, pass);
+                id<MTLAccelerationStructureCommandEncoder> enc = [c->cmd accelerationStructureCommandEncoderWithDescriptor:pass];
                 [enc buildAccelerationStructure:a->as descriptor:a->descriptor scratchBuffer:a->scratch scratchBufferOffset:0];
                 [enc endEncoding];
             }

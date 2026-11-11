@@ -121,7 +121,7 @@ typedef struct VriDeviceDesc
     VriBool  hasCustomBorderColor;
     VriBool  hasShaderWaveOps;           /* subgroup/wave intrinsics (WaveActiveSum, ballots, ...) */
     VriBool  hasExternalMemory;          /* external memory/semaphore export (see ext/vri_ext_external.h) */
-    VriBool  hasTimestampQueries;        /* GPU timestamp query pools (see ext/vri_ext_query.h) */
+    VriBool  hasTimestampQueries;        /* GPU timestamps; Metal uses TimestampRange pools (see ext/vri_ext_query.h) */
     VriBool  hasPipelineStatistics;      /* pipeline-statistics query pools (see ext/vri_ext_query.h) */
     VriBool  hasCalibratedTimestamps;    /* correlated GPU+CPU timestamps (see ext/vri_ext_query.h) */
     VriBool  hasDrawIndirectCount;       /* CmdDraw[Indexed]IndirectCount (GPU-driven draw count) */
