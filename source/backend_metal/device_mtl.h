@@ -25,6 +25,7 @@ namespace vri::mtl
 
         void ReportError(const char* message) const;
         void Diagnostic(VriMessageSeverity severity, const char* message) const;
+        id<MTLComputePipelineState> ClearBufferPipeline();
 
     private:
         void FillDeviceDesc();
@@ -35,6 +36,7 @@ namespace vri::mtl
         MTLSharedEventListener* m_eventListener = nil;
         id<MTLDevice>        m_device = nil;
         id<MTLCommandQueue>  m_queue = nil;
+        id<MTLComputePipelineState> m_clearBufferPipeline = nil;
         QueueMTL             m_queueObjs[VriQueueType_Count] = {};
         VriDeviceDesc        m_desc = {};
         uint64_t             m_enabledFeatures = 0;

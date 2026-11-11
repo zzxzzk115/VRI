@@ -110,11 +110,29 @@ namespace vri::mtl
         return vri::MapOr(f, kTable, MTLVertexFormatInvalid);
     }
 
-    // Bytes per (uncompressed) texel - drives copy bytesPerRow.
+    inline uint32_t TextureBlockSize(VriFormat f)
+    {
+        switch (f)
+        {
+            case VriFormat_BC1_UNORM: case VriFormat_BC2_UNORM: case VriFormat_BC3_UNORM:
+            case VriFormat_BC4_UNORM: case VriFormat_BC5_UNORM: case VriFormat_BC6H_UFLOAT:
+            case VriFormat_BC7_UNORM:
+                return 4;
+            default:
+                return 1;
+        }
+    }
+
+    // Bytes per texel, or per compressed block for BC formats.
     inline uint32_t TexelSize(VriFormat f)
     {
         switch (f)
         {
+            case VriFormat_BC1_UNORM: case VriFormat_BC4_UNORM:
+                return 8;
+            case VriFormat_BC2_UNORM: case VriFormat_BC3_UNORM: case VriFormat_BC5_UNORM:
+            case VriFormat_BC6H_UFLOAT: case VriFormat_BC7_UNORM:
+                return 16;
             case VriFormat_R8_UNORM: case VriFormat_R8_SNORM: case VriFormat_R8_UINT:
             case VriFormat_R8_SINT:  case VriFormat_S8_UINT:
                 return 1;
