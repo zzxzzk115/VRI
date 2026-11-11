@@ -67,7 +67,7 @@ namespace
         VriQueryInterface q {};
         const bool        hasQuery = vriGetInterface(dev, VRI_INTERFACE_QUERY, sizeof(q), &q) == VriResult_Success;
         CHECK(hasQuery); // Vulkan + D3D12 always register the query interface
-        if (!hasQuery || dd->hasTimestampQueries == VRI_FALSE)
+        if (!hasQuery || (dd->hasTimestampQueries == VRI_FALSE && dd->hasTimestampRangeQueries == VRI_FALSE))
         {
             MESSAGE("[" << name << "] lacks timestamp queries - skipping");
             return;
@@ -92,7 +92,7 @@ namespace
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
         VriQueryPoolDesc qpd {};
-        const bool       ranges = api == VriGraphicsAPI_Metal;
+        const bool       ranges = dd->hasTimestampQueries == VRI_FALSE;
         qpd.type                = ranges ? VriQueryType_TimestampRange : VriQueryType_Timestamp;
         qpd.queryCount          = 2;
         VriQueryPool* pool      = nullptr;
@@ -246,6 +246,7 @@ TEST_CASE("Query pool: Metal rejects arbitrary point timestamps")
     Dev d;
     if (!Init(d, VriGraphicsAPI_Metal))
         return;
+    CHECK(d.core.GetDeviceDesc(d.device)->hasTimestampQueries == VRI_FALSE);
     VriQueryInterface query {};
     REQUIRE(vriGetInterface(d.device, VRI_INTERFACE_QUERY, sizeof(query), &query) == VriResult_Success);
     const VriQueryPoolDesc desc {VriQueryType_Timestamp, 1};
