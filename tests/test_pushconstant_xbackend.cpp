@@ -55,7 +55,8 @@ namespace
                  const void*    ps,
                  size_t         psSize,
                  const Mat4&    mvp,
-                 bool&          ran)
+                 bool&          ran,
+                 bool           partial = false)
     {
         ran                       = false;
         VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
@@ -183,6 +184,12 @@ namespace
         c.CmdSetPipeline(cmd, pipeline);
         c.CmdSetPipelineLayout(cmd, layout); // Vulkan/D3D12 push constants target the bound layout
         c.CmdSetConstants(cmd, 0, mvp.m, sizeof(mvp.m));
+        if (partial)
+        {
+            // Updating the first column must retain the translation in the last column,
+            // and still bind a complete matrix-sized Metal constant buffer.
+            c.CmdSetConstants(cmd, 0, mvp.m, sizeof(float) * 4);
+        }
         VriDrawDesc draw {};
         draw.vertexNum   = 3;
         draw.instanceNum = 1;
@@ -241,17 +248,23 @@ namespace
 
     // Assert the matrix push constant reaches the shader on `api`: identity draws the
     // triangle over the center (green), a large +x translation pushes it off (clear).
-    void CheckBackend(const char* name, VriGraphicsAPI api, const void* vs, size_t vsN, const void* ps, size_t psN)
+    void CheckBackend(const char*    name,
+                      VriGraphicsAPI api,
+                      const void*    vs,
+                      size_t         vsN,
+                      const void*    ps,
+                      size_t         psN,
+                      bool           partial = false)
     {
         bool       ran     = false;
-        const bool covered = RunPush(api, vs, vsN, ps, psN, Identity(), ran);
+        const bool covered = RunPush(api, vs, vsN, ps, psN, Identity(), ran, partial);
         if (!ran)
         {
             std::fprintf(stderr, "[pushtest] %s: unavailable (skipped)\n", name);
             return;
         }
         bool       ran2       = false;
-        const bool coveredOff = RunPush(api, vs, vsN, ps, psN, TranslateX(2.0f), ran2);
+        const bool coveredOff = RunPush(api, vs, vsN, ps, psN, TranslateX(2.0f), ran2, partial);
         std::fprintf(stderr,
                      "[pushtest] %s: identity covered=%d (want 1), translated coveredOff=%d (want 0)\n",
                      name,
@@ -266,6 +279,12 @@ namespace
 
 TEST_CASE("push-constant matrix parity: a float4x4 transform reaches the shader on each backend")
 {
+    CheckBackend("Metal",
+                 VriGraphicsAPI_Metal,
+                 g_trianglePushSpv,
+                 sizeof(g_trianglePushSpv),
+                 g_trianglePushSpv,
+                 sizeof(g_trianglePushSpv));
     CheckBackend("Vulkan",
                  VriGraphicsAPI_Vulkan,
                  g_trianglePushSpv,
@@ -292,4 +311,15 @@ TEST_CASE("push-constant matrix parity: a float4x4 transform reaches the shader 
                  g_trianglePushDxbcPS,
                  sizeof(g_trianglePushDxbcPS));
 #endif
+}
+
+TEST_CASE("Metal partial push constants preserve untouched matrix columns")
+{
+    CheckBackend("Metal partial",
+                 VriGraphicsAPI_Metal,
+                 g_trianglePushSpv,
+                 sizeof(g_trianglePushSpv),
+                 g_trianglePushSpv,
+                 sizeof(g_trianglePushSpv),
+                 true);
 }
