@@ -101,6 +101,16 @@ TEST_CASE("Metal buffer dimensions use descriptor ranges across encoder changes"
         REQUIRE(c.CreateCommandBuffer(allocator, &cmd) == VriResult_Success);
         VriFence* fence = nullptr;
         REQUIRE(c.CreateFence(dev, 0, &fence) == VriResult_Success);
+        VriTextureDesc scratchDesc {};
+        scratchDesc.type   = VriTextureType_2D;
+        scratchDesc.format = VriFormat_R32_UINT;
+        scratchDesc.width  = 8;
+        scratchDesc.height = 8;
+        scratchDesc.depth = scratchDesc.layerNum = scratchDesc.mipNum = scratchDesc.sampleNum = 1;
+        scratchDesc.usage          = VriTextureUsage_ShaderResourceStorage | VriTextureUsage_TransferDst;
+        scratchDesc.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* scratch        = nullptr;
+        REQUIRE(c.CreateTexture(dev, &scratchDesc, &scratch) == VriResult_Success);
         REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
         c.CmdSetPipelineLayout(cmd, layout);
         c.CmdSetPipeline(cmd, pipeline);
@@ -112,6 +122,9 @@ TEST_CASE("Metal buffer dimensions use descriptor ranges across encoder changes"
             // without another pipeline or descriptor command.
             if (i < 2)
                 c.CmdSetDescriptorSet(cmd, 0, descriptors[i]);
+            VriClearColor color {};
+            color.u32[0] = 7;
+            c.CmdClearStorageTexture(cmd, scratch, &color);
             c.CmdDispatch(cmd, &dispatch);
             VriBufferCopyDesc copy {};
             copy.srcOffset = 256;
@@ -150,6 +163,7 @@ TEST_CASE("Metal buffer dimensions use descriptor ranges across encoder changes"
         c.DestroyBuffer(readback);
         c.DestroyBuffer(output);
         c.DestroyBuffer(data);
+        c.DestroyTexture(scratch);
     }
     vriDestroyDevice(dev);
 }
