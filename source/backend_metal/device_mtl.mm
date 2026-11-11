@@ -17,6 +17,7 @@ namespace vri::mtl
 {
     DeviceMTL::~DeviceMTL()
     {
+        if (m_clearBufferPipeline) [m_clearBufferPipeline release];
         // QueueMTL objects are members (not heap). Compute/Transfer own a dedicated MTLCommandQueue
         // (Graphics aliases m_queue); release those, then m_queue.
         for (int t = 0; t < VriQueueType_Count; ++t)
@@ -28,6 +29,28 @@ namespace vri::mtl
     }
 
     void DeviceMTL::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+
+    id<MTLComputePipelineState> DeviceMTL::ClearBufferPipeline()
+    {
+        if (m_clearBufferPipeline) return m_clearBufferPipeline;
+        @autoreleasepool
+        {
+            NSString* source = @"#include <metal_stdlib>\nusing namespace metal;\n"
+                "kernel void fill_words(device uint* words [[buffer(0)]],\n"
+                "constant uint& value [[buffer(1)]], constant uint& count [[buffer(2)]],\n"
+                "uint index [[thread_position_in_grid]]) { if (index < count) words[index] = value; }\n";
+            NSError* error = nil;
+            id<MTLLibrary> library = [m_device newLibraryWithSource:source options:nil error:&error];
+            id<MTLFunction> function = [library newFunctionWithName:@"fill_words"];
+            if (function)
+                m_clearBufferPipeline = [m_device newComputePipelineStateWithFunction:function error:&error];
+            [function release];
+            [library release];
+            if (!m_clearBufferPipeline)
+                ReportError(error ? error.description.UTF8String : "Create Metal storage-buffer clear pipeline failed");
+        }
+        return m_clearBufferPipeline;
+    }
 
     void DeviceMTL::Diagnostic(VriMessageSeverity severity, const char* message) const
     {
@@ -124,7 +147,7 @@ namespace vri::mtl
         m_desc.adapter.videoMemorySize = [m_device recommendedMaxWorkingSetSize];
 
         m_desc.apiVersionMajor = 3; // Metal 3 baseline on supported macOS
-        m_desc.apiVersionMinor = 0;
+        m_desc.apiVersionMinor = 1;
         m_desc.viewportMaxNum = 16;
         m_desc.attachmentColorMaxNum = 8;
         m_desc.attachmentMaxDim = 16384;
@@ -141,6 +164,7 @@ namespace vri::mtl
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_desc.queueCount[t] = 1;
         m_desc.hasComputeShader = VRI_TRUE;
+        m_desc.hasClearStorageBuffer = VRI_TRUE;
         m_desc.hasGeometryShader = VRI_FALSE; // Metal has no geometry stage
         m_desc.hasTessellation = VRI_FALSE;   // Metal tessellation differs from VK; not in MVP
         m_desc.hasCustomBorderColor = VRI_TRUE;

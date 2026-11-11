@@ -108,9 +108,9 @@ namespace vri::mtl
                 spirv_cross::CompilerMSL comp(words, wordCount);
                 spirv_cross::CompilerMSL::Options o = comp.get_msl_options();
                 o.platform = spirv_cross::CompilerMSL::Options::macOS;
-                // MSL 3.0 (Metal 3): needed for ray query (>= 2.3) and mesh/object shaders (>= 3.0);
-                // backward-compatible for the plain graphics/compute shaders.
-                o.set_msl_version(3, 0);
+                // MSL 3.1 emits native texture atomics. Older targets require an extra
+                // linear-buffer alias which is not part of VRI's texture descriptor.
+                o.set_msl_version(3, 1);
                 // Resources bind directly to the argument tables unless the layout has a set that
                 // cannot be expressed that way (see SetNeedsArgumentBuffer). Turning argument
                 // buffers on changes the generated MSL for the whole module, so it stays off for
@@ -235,6 +235,7 @@ namespace vri::mtl
             NSError* err = nil;
             NSString* src = [NSString stringWithUTF8String:msl.source.c_str()];
             MTLCompileOptions* opts = [[MTLCompileOptions alloc] init];
+            opts.languageVersion = MTLLanguageVersion3_1;
             id<MTLLibrary> lib = [d->Device() newLibraryWithSource:src options:opts error:&err];
             [opts release];
             if (!lib)
@@ -252,6 +253,7 @@ namespace vri::mtl
         }
 
         // ---- encoder lifecycle (one Metal encoder open at a time) -----------
+        void ApplyBindings(CommandBufferMTL* c);
         void EndAux(CommandBufferMTL* c)
         {
             if (c->blitEnc)    { [c->blitEnc endEncoding];    [c->blitEnc release];    c->blitEnc = nil; }
@@ -265,7 +267,15 @@ namespace vri::mtl
         void EnsureCompute(CommandBufferMTL* c)
         {
             if (c->blitEnc) { [c->blitEnc endEncoding]; [c->blitEnc release]; c->blitEnc = nil; }
-            if (!c->computeEnc) c->computeEnc = [[c->cmd computeCommandEncoder] retain];
+            if (!c->computeEnc)
+            {
+                c->computeEnc = [[c->cmd computeCommandEncoder] retain];
+                if (c->boundPipeline && c->boundPipeline->isCompute)
+                {
+                    [c->computeEnc setComputePipelineState:c->boundPipeline->compute];
+                    ApplyBindings(c);
+                }
+            }
         }
         void ApplyRenderPipeline(CommandBufferMTL* c); // applies boundPipeline to the live render encoder
 
@@ -335,6 +345,7 @@ namespace vri::mtl
             c->cmd = [[c->queue commandBuffer] retain];
             c->renderEnc = nil; c->computeEnc = nil; c->blitEnc = nil;
             c->boundLayout = nullptr; c->boundPipeline = nullptr; c->renderPipelineDeferred = false;
+            c->boundSets.clear(); c->constants.clear();
             c->indexBuffer = nil; c->indexOffset = 0; c->indexType = MTLIndexTypeUInt16;
             // Query state resets each begin; the visibility buffer (occlusion) is reused across resets.
             c->visNextSlot = 0;
@@ -1300,6 +1311,7 @@ namespace vri::mtl
             {
                 c->renderPipelineDeferred = false;
                 ApplyRenderPipeline(c);
+                ApplyBindings(c);
             }
         }
 
@@ -1329,7 +1341,15 @@ namespace vri::mtl
             [CB(cmd)->renderEnc setScissorRects:r.data() count:num];
         }
 
-        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout) { CB(cmd)->boundLayout = PLc(layout); }
+        void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
+        {
+            CommandBufferMTL* c = CB(cmd);
+            if (c->boundLayout != PLc(layout))
+            {
+                c->boundSets.clear(); c->constants.clear();
+            }
+            c->boundLayout = PLc(layout);
+        }
 
         // Apply the bound graphics pipeline's state to the active render encoder. A Metal render
         // pipeline can only be set on a live encoder, but VRI's contract (like Vulkan/D3D12) lets
@@ -1365,13 +1385,16 @@ namespace vri::mtl
             {
                 EnsureCompute(c);
                 [c->computeEnc setComputePipelineState:p->compute];
+                ApplyBindings(c);
                 return;
             }
+            EndAux(c);
             // Defer to CmdBeginRendering when set before the render pass opens (valid per the VRI
             // contract; a Metal render pipeline can only be applied to a live encoder).
             if (!c->renderEnc) { c->renderPipelineDeferred = true; return; }
             c->renderPipelineDeferred = false;
             ApplyRenderPipeline(c);
+            ApplyBindings(c);
         }
 
         void BindOne(CommandBufferMTL* c, const DescriptorSetMTL::Bound& b)
@@ -1484,10 +1507,9 @@ namespace vri::mtl
                     [c->renderEnc useResource:blas usage:MTLResourceUsageRead stages:stages];
         }
 
-        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t, const VriDescriptorSet* set)
+        void BindDescriptorSet(CommandBufferMTL* c, const VriDescriptorSet* set)
         {
             if (!set) return;
-            CommandBufferMTL* c = CB(cmd);
             DescriptorSetMTL* s = const_cast<DescriptorSetMTL*>(reinterpret_cast<const DescriptorSetMTL*>(set));
             if (s->argBuffer)
             {
@@ -1498,10 +1520,19 @@ namespace vri::mtl
                 BindOne(c, b);
         }
 
-        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data, uint32_t size)
+        void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t index, const VriDescriptorSet* set)
         {
             CommandBufferMTL* c = CB(cmd);
-            if (!c->boundLayout || !c->boundLayout->hasPush || !data || !size) return;
+            if (c->boundSets.size() <= index) c->boundSets.resize(index + 1);
+            c->boundSets[index] = set;
+            BindDescriptorSet(c, set);
+        }
+
+        void ApplyConstants(CommandBufferMTL* c)
+        {
+            if (!c->boundLayout || !c->boundLayout->hasPush || c->constants.empty()) return;
+            const void* data = c->constants.data();
+            const uint32_t size = (uint32_t)c->constants.size();
             const uint32_t idx = c->boundLayout->pushBufferIndex;
             const VriShaderStageFlags st = c->boundLayout->pushStages;
             if (c->computeEnc)
@@ -1513,6 +1544,21 @@ namespace vri::mtl
                 if (st & VriShaderStage_Mesh)     [c->renderEnc setMeshBytes:data length:size atIndex:idx];
                 if (st & VriShaderStage_Task)     [c->renderEnc setObjectBytes:data length:size atIndex:idx];
             }
+        }
+
+        void ApplyBindings(CommandBufferMTL* c)
+        {
+            for (const auto* set : c->boundSets) BindDescriptorSet(c, set);
+            ApplyConstants(c);
+        }
+
+        void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data, uint32_t size)
+        {
+            CommandBufferMTL* c = CB(cmd);
+            if (!c->boundLayout || !c->boundLayout->hasPush || !data || !size) return;
+            c->constants.resize(size);
+            std::memcpy(c->constants.data(), data, size);
+            ApplyConstants(c);
         }
 
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer* cmd, uint32_t baseSlot, const VriVertexBufferBinding* bindings, uint32_t num)
@@ -1624,22 +1670,35 @@ namespace vri::mtl
         void VRI_CALL CmdBarrier(VriCommandBuffer*, const VriBarrierGroupDesc*) {} // Metal auto-tracks hazards
 
         // ---- copies (blit encoder) -----------------------------------------
-        // Metal's blit fillBuffer fills a single BYTE, not an arbitrary uint32. That still covers the
-        // overwhelmingly common case - clearing counters / accumulation buffers to a byte-uniform value
-        // (0x00000000, 0xFFFFFFFF, ...) - which is exactly what CmdClearStorageBuffer is used for. Only a
-        // genuinely non-byte-uniform uint32 (e.g. 0x00000001) has no direct blit and is diagnosed.
+        // Byte-uniform patterns use blit fill; other uint32 patterns use a cached compute pipeline.
         void VRI_CALL CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
         {
             CommandBufferMTL* c = CB(cmd);
+            id<MTLBuffer> buf = Buf(buffer)->buffer;
+            if (offset > buf.length) { c->device->ReportError("Storage-buffer clear offset is out of range"); return; }
+            const uint64_t len = size ? size : ((uint64_t)buf.length - offset);
+            if ((offset % 4) || (len % 4) || len > buf.length - offset || len / 4 > UINT32_MAX)
+            {
+                c->device->ReportError("Storage-buffer clear range must fit the buffer and contain whole uint32 words");
+                return;
+            }
+            if (!len) return;
             const uint8_t     b = (uint8_t)(value & 0xFFu);
             if (value != (uint32_t)b * 0x01010101u)
             {
-                c->device->ReportError("CmdClearStorageBuffer: only byte-uniform values (0x00/0xFF/... repeated) are "
-                                       "supported on Metal");
+                auto pipeline = c->device->ClearBufferPipeline();
+                if (!pipeline) return;
+                EnsureCompute(c);
+                const uint32_t count = (uint32_t)(len / 4);
+                [c->computeEnc setComputePipelineState:pipeline];
+                [c->computeEnc setBuffer:buf offset:(NSUInteger)offset atIndex:0];
+                [c->computeEnc setBytes:&value length:sizeof(value) atIndex:1];
+                [c->computeEnc setBytes:&count length:sizeof(count) atIndex:2];
+                [c->computeEnc dispatchThreads:MTLSizeMake(count, 1, 1)
+                        threadsPerThreadgroup:MTLSizeMake(pipeline.threadExecutionWidth, 1, 1)];
+                EndAux(c); // The internal pipeline does not replace the caller's bound VRI state.
                 return;
             }
-            id<MTLBuffer> buf = Buf(buffer)->buffer;
-            const uint64_t len = size ? size : ((uint64_t)buf.length - offset);
             EnsureBlit(c);
             [c->blitEnc fillBuffer:buf range:NSMakeRange((NSUInteger)offset, (NSUInteger)len) value:b];
         }
@@ -1683,13 +1742,16 @@ namespace vri::mtl
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
             const uint32_t d = region->texture.depth ? region->texture.depth : 1;
-            const uint32_t pitch = (region->bufferRowLength ? region->bufferRowLength : w) * t->texelSize;
+            const uint32_t block = TextureBlockSize(t->format);
+            const uint32_t rowLength = region->bufferRowLength ? region->bufferRowLength : w;
+            const uint32_t pitch = ((rowLength + block - 1) / block) * t->texelSize;
             const uint32_t imgHeight = region->bufferImageHeight ? region->bufferImageHeight : h;
+            const uint32_t rows = (imgHeight + block - 1) / block;
             MTLOrigin origin = MTLOriginMake(region->texture.x, region->texture.y, region->texture.z);
             [c->blitEnc copyFromBuffer:Buf(src)->buffer
                           sourceOffset:region->bufferOffset
                      sourceBytesPerRow:pitch
-                   sourceBytesPerImage:(NSUInteger)pitch * imgHeight
+                   sourceBytesPerImage:(NSUInteger)pitch * rows
                             sourceSize:MTLSizeMake(w, h, d)
                              toTexture:t->texture
                       destinationSlice:region->texture.baseLayer
@@ -1705,8 +1767,11 @@ namespace vri::mtl
             const uint32_t w = region->texture.width ? region->texture.width : t->width;
             const uint32_t h = region->texture.height ? region->texture.height : t->height;
             const uint32_t d = region->texture.depth ? region->texture.depth : 1;
-            const uint32_t pitch = (region->bufferRowLength ? region->bufferRowLength : w) * t->texelSize;
+            const uint32_t block = TextureBlockSize(t->format);
+            const uint32_t rowLength = region->bufferRowLength ? region->bufferRowLength : w;
+            const uint32_t pitch = ((rowLength + block - 1) / block) * t->texelSize;
             const uint32_t imgHeight = region->bufferImageHeight ? region->bufferImageHeight : h;
+            const uint32_t rows = (imgHeight + block - 1) / block;
             MTLOrigin origin = MTLOriginMake(region->texture.x, region->texture.y, region->texture.z);
             [c->blitEnc copyFromTexture:t->texture
                             sourceSlice:region->texture.baseLayer
@@ -1716,7 +1781,7 @@ namespace vri::mtl
                                toBuffer:Buf(dst)->buffer
                       destinationOffset:region->bufferOffset
                  destinationBytesPerRow:pitch
-               destinationBytesPerImage:(NSUInteger)pitch * imgHeight];
+               destinationBytesPerImage:(NSUInteger)pitch * rows];
         }
 
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer* cmd, const char* name)

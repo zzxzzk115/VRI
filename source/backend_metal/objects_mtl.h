@@ -65,6 +65,8 @@ namespace vri::mtl
         const struct PipelineLayoutMTL* boundLayout;
         const struct PipelineMTL*       boundPipeline;
         bool                        renderPipelineDeferred; // graphics pipeline set before an encoder existed
+        std::vector<const VriDescriptorSet*> boundSets;
+        std::vector<uint8_t>        constants;
         id<MTLBuffer>               indexBuffer;
         uint64_t                    indexOffset;
         MTLIndexType                indexType;

@@ -308,12 +308,13 @@ TEST_CASE("Metal mesh shader: reads a constant buffer bound to the mesh stage")
 
     // Constant buffer with scale = 2 (host-visible, filled directly).
     VriBufferDesc cbDesc {};
-    cbDesc.size           = 16;
+    // SPIR-V uniform layout aligns float3 to 16 bytes after the scalar scale.
+    cbDesc.size           = 32;
     cbDesc.usage          = VriBufferUsage_ConstantBuffer;
     cbDesc.memoryLocation = VriMemoryLocation_HostUpload;
     VriBuffer* cb         = nullptr;
     REQUIRE(c.CreateBuffer(dev, &cbDesc, &cb) == VriResult_Success);
-    const float params[4] = {2.0f, 0.0f, 0.0f, 0.0f};
+    const float params[8] = {2.0f};
     std::memcpy(c.MapBuffer(cb, 0, sizeof(params)), params, sizeof(params));
     c.UnmapBuffer(cb);
 
@@ -372,7 +373,7 @@ TEST_CASE("Metal mesh shader: reads a constant buffer bound to the mesh stage")
     cbView.buffer               = cb;
     cbView.viewType             = VriDescriptorType_ConstantBuffer;
     cbView.offset               = 0;
-    cbView.size                 = 16;
+    cbView.size                 = 32;
     VriDescriptor* cbDescriptor = nullptr;
     REQUIRE(c.CreateBufferView(dev, &cbView, &cbDescriptor) == VriResult_Success);
     VriDescriptorRangeUpdateDesc update {};
