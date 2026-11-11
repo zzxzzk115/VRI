@@ -78,7 +78,8 @@ namespace vri::vk
         void VRI_CALL CmdWriteTimestamp(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
         {
             // Include preceding query operations as well as graphics, compute and transfer work.
-            vkCmdWriteTimestamp2(Cmd(cmd)->cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, QP(pool)->pool, index);
+            Cmd(cmd)->device->Ext().CmdWriteTimestamp2(
+                Cmd(cmd)->cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, QP(pool)->pool, index);
         }
 
         void VRI_CALL CmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
