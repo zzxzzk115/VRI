@@ -49,6 +49,7 @@ namespace vri::vk
             PFN_vkCmdBeginRendering   CmdBeginRendering   = nullptr;
             PFN_vkCmdEndRendering     CmdEndRendering     = nullptr;
             PFN_vkQueueSubmit2        QueueSubmit2        = nullptr;
+            PFN_vkCmdWriteTimestamp2  CmdWriteTimestamp2  = nullptr;
 
             PFN_vkCmdSetFragmentShadingRateKHR CmdSetFragmentShadingRate = nullptr;
             PFN_vkCmdDrawMeshTasksEXT          CmdDrawMeshTasks          = nullptr;

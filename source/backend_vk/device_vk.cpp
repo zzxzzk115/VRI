@@ -561,9 +561,14 @@ namespace vri::vk
         // supported on desktop GPUs; gated on the queried bit anyway (some GLES-class drivers lack it).
         features2.features.samplerAnisotropy = baseSup.samplerAnisotropy;
         features2.features.imageCubeArray    = baseSup.imageCubeArray;
-        m_hasSamplerAnisotropy               = baseSup.samplerAnisotropy == VK_TRUE;
-        m_maxSamplerAnisotropy               = physProps.limits.maxSamplerAnisotropy;
-        m_hasPipelineStats                   = baseSup.pipelineStatisticsQuery;
+        // Implied by VK_KHR_format_feature_flags2 on 1.3, but a 1.2 driver (MoltenVK) must enable it
+        // before shaders may read or write storage images declared without a format.
+        features2.features.shaderStorageImageReadWithoutFormat  = baseSup.shaderStorageImageReadWithoutFormat;
+        features2.features.shaderStorageImageWriteWithoutFormat = baseSup.shaderStorageImageWriteWithoutFormat;
+
+        m_hasSamplerAnisotropy = baseSup.samplerAnisotropy == VK_TRUE;
+        m_maxSamplerAnisotropy = physProps.limits.maxSamplerAnisotropy;
+        m_hasPipelineStats     = baseSup.pipelineStatisticsQuery;
 
         std::vector<const char*> extensions;
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -948,8 +953,13 @@ namespace vri::vk
         ci.instance               = m_instance;
         ci.physicalDevice         = m_physicalDevice;
         ci.device                 = m_device;
-        ci.vulkanApiVersion       = VK_API_VERSION_1_3;
-        ci.flags                  = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+        // VMA calls core entry points of the version it is given; a 1.2 device (MoltenVK) has none
+        // of the 1.3 ones, so pass the device's own version capped at the instance's 1.3.
+        VkPhysicalDeviceProperties props = {};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+        const uint32_t minor = props.apiVersion >= VK_API_VERSION_1_3 ? 3 : VK_API_VERSION_MINOR(props.apiVersion);
+        ci.vulkanApiVersion  = VK_MAKE_API_VERSION(0, 1, minor, 0);
+        ci.flags             = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
         // Makes VMA chain VkMemoryPriorityAllocateInfoEXT from VmaAllocationCreateInfo::priority;
         // without it every allocation's priority field is silently ignored.
         if (m_hasMemoryPriority)
@@ -1114,6 +1124,8 @@ namespace vri::vk
             reinterpret_cast<PFN_vkCmdBeginRendering>(LoadCoreOrKhr("vkCmdBeginRendering", "vkCmdBeginRenderingKHR"));
         m_ext.CmdEndRendering =
             reinterpret_cast<PFN_vkCmdEndRendering>(LoadCoreOrKhr("vkCmdEndRendering", "vkCmdEndRenderingKHR"));
+        m_ext.CmdWriteTimestamp2 = reinterpret_cast<PFN_vkCmdWriteTimestamp2>(
+            LoadCoreOrKhr("vkCmdWriteTimestamp2", "vkCmdWriteTimestamp2KHR"));
         m_ext.QueueSubmit2 = reinterpret_cast<PFN_vkQueueSubmit2>(LoadCoreOrKhr("vkQueueSubmit2", "vkQueueSubmit2KHR"));
 
         if (m_enabledFeatures & VriFeature_CooperativeVector)
@@ -1261,6 +1273,14 @@ namespace vri::vk
         app.apiVersion           = VK_API_VERSION_1_3;
         VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         ici.pApplicationInfo     = &app;
+#if defined(__APPLE__)
+        // MoltenVK is a portability device: without the opt-in the loader enumerates no adapters.
+        // Device creation sets the same extension and flag.
+        const char* portability     = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+        ici.enabledExtensionCount   = 1;
+        ici.ppEnabledExtensionNames = &portability;
+        ici.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
         VkInstance instance = VK_NULL_HANDLE;
         if (vkCreateInstance(&ici, nullptr, &instance) != VK_SUCCESS)
