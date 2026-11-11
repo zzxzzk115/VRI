@@ -1556,7 +1556,14 @@ namespace vri::mtl
         {
             CommandBufferMTL* c = CB(cmd);
             if (!c->boundLayout || !c->boundLayout->hasPush || !data || !size) return;
-            c->constants.resize(size);
+            if (size > c->boundLayout->pushSize)
+            {
+                c->device->ReportError("CmdSetConstants: data exceeds the declared push-constant range");
+                return;
+            }
+            // Metal validates the whole constant-buffer argument even when the shader
+            // reads only the updated prefix. Preserve the rest across partial updates.
+            c->constants.resize(c->boundLayout->pushSize);
             std::memcpy(c->constants.data(), data, size);
             ApplyConstants(c);
         }
