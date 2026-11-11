@@ -9,8 +9,8 @@ set_languages("cxx23")
 
 if is_plat("android") then
     set_toolchains("@ndk", {sdkver = "26"})
-    -- Vulkan handles are 64-bit; keep arm64 only to avoid handle truncation on 32-bit.
-    set_allowedarchs("arm64-v8a")
+    -- Keep both Android ABIs 64-bit; x86_64 is used by host emulator regression tests.
+    set_allowedarchs("arm64-v8a", "x86_64")
 end
 
 -- root ?
@@ -263,7 +263,7 @@ add_rules("clangd.config")
 add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")
 -- local package overrides (prebuilt Slang 2026.11 for vri-shaderc; see the package).
 -- Anchored to os.scriptdir() so it still resolves when VRI is included as a subproject.
-add_repositories("vri-local-repo " .. path.join(os.scriptdir(), "xmake", "xmake-repo"))
+add_repositories("vri-local-repo xmake/xmake-repo", {rootdir = os.scriptdir()})
 
 -- vri-shaderc links a prebuilt Slang that can emit tessellation SPIR-V (the Vulkan
 -- SDK's 2025.11 crashes on hull shaders). Local-developer tool only (tools are off
