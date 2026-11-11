@@ -560,6 +560,7 @@ namespace vri::vk
         // without it an anisotropic sampler was a validation error rather than a request. Universally
         // supported on desktop GPUs; gated on the queried bit anyway (some GLES-class drivers lack it).
         features2.features.samplerAnisotropy = baseSup.samplerAnisotropy;
+        features2.features.imageCubeArray   = baseSup.imageCubeArray;
         m_hasSamplerAnisotropy               = baseSup.samplerAnisotropy == VK_TRUE;
         m_maxSamplerAnisotropy               = physProps.limits.maxSamplerAnisotropy;
         m_hasPipelineStats                   = baseSup.pipelineStatisticsQuery;
