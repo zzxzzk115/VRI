@@ -62,10 +62,17 @@ namespace vri::wgpu
             WGPUSurfaceConfiguration cfg = {};
             cfg.device                   = sc->device->Device();
             cfg.format                   = sc->format;
-            cfg.usage  = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc; // CopySrc: screenshot readback
-            cfg.width  = sc->width;
-            cfg.height = sc->height;
+            // Readback uses CopySrc; copying an owned render target to the canvas uses CopyDst.
+            cfg.usage     = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst;
+            cfg.width     = sc->width;
+            cfg.height    = sc->height;
             cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
+            const WGPUTextureFormat view = ToWgpuFormat(sc->requestedFormat);
+            if (view != sc->format)
+            {
+                cfg.viewFormatCount = 1;
+                cfg.viewFormats     = &view;
+            }
             // map VriPresentMode -> WGPUPresentMode; Fifo is always supported, fall back to it (+warn) otherwise.
             WGPUPresentMode want = WGPUPresentMode_Fifo;
             const char*     name = "Fifo";
@@ -129,14 +136,30 @@ namespace vri::wgpu
             WGPUSurfaceCapabilities caps = {};
             wgpuSurfaceGetCapabilities(sc->surface, d->Adapter(), &caps);
             const WGPUTextureFormat wanted = ToWgpuFormat(desc->format);
-            WGPUTextureFormat       chosen = caps.formatCount ? caps.formats[0] : WGPUTextureFormat_BGRA8Unorm;
+            WGPUTextureFormat       base   = wanted;
+            if (wanted == WGPUTextureFormat_BGRA8UnormSrgb)
+            {
+                base = WGPUTextureFormat_BGRA8Unorm;
+            }
+            else if (wanted == WGPUTextureFormat_RGBA8UnormSrgb)
+            {
+                base = WGPUTextureFormat_RGBA8Unorm;
+            }
+            WGPUTextureFormat chosen = caps.formatCount ? caps.formats[0] : WGPUTextureFormat_BGRA8Unorm;
             for (size_t i = 0; i < caps.formatCount; ++i)
-                if (caps.formats[i] == wanted)
+                if (caps.formats[i] == base)
                 {
-                    chosen = wanted;
+                    chosen = base;
                     break;
                 }
             wgpuSurfaceCapabilitiesFreeMembers(caps);
+            if (chosen != base)
+            {
+                d->ReportError("requested swapchain channel format is unsupported by the WebGPU surface");
+                wgpuSurfaceRelease(sc->surface);
+                delete sc;
+                return VriResult_Unsupported;
+            }
 
             sc->format          = chosen;
             sc->width           = desc->width;
