@@ -492,8 +492,8 @@ namespace vri::vk
             {
                 // XR runtimes may create externally synchronized caches on the bound device.
                 VkPhysicalDeviceVulkan13Features supported = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-                VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-                query.pNext = &supported;
+                VkPhysicalDeviceFeatures2        query     = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+                query.pNext                                = &supported;
                 vkGetPhysicalDeviceFeatures2(m_physicalDevice, &query);
                 f13.pipelineCreationCacheControl = supported.pipelineCreationCacheControl;
             }
@@ -560,7 +560,7 @@ namespace vri::vk
         // without it an anisotropic sampler was a validation error rather than a request. Universally
         // supported on desktop GPUs; gated on the queried bit anyway (some GLES-class drivers lack it).
         features2.features.samplerAnisotropy = baseSup.samplerAnisotropy;
-        features2.features.imageCubeArray   = baseSup.imageCubeArray;
+        features2.features.imageCubeArray    = baseSup.imageCubeArray;
         m_hasSamplerAnisotropy               = baseSup.samplerAnisotropy == VK_TRUE;
         m_maxSamplerAnisotropy               = physProps.limits.maxSamplerAnisotropy;
         m_hasPipelineStats                   = baseSup.pipelineStatisticsQuery;
@@ -1184,8 +1184,9 @@ namespace vri::vk
             // Instance lookup can return another ICD's KHR trampoline even when this GPU only
             // enabled EXT. Use the alias belonging to this physical device's enabled extension.
             auto getDomains = reinterpret_cast<PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR>(
-                vkGetInstanceProcAddr(m_instance, m_hasKhrCalibratedTimestamps ?
-                    "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR" : "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT"));
+                vkGetInstanceProcAddr(m_instance,
+                                      m_hasKhrCalibratedTimestamps ? "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR" :
+                                                                     "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT"));
             if (getDomains)
             {
                 uint32_t n = 0;
