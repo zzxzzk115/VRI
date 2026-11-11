@@ -91,6 +91,7 @@ namespace vri::mtl
             std::string entry;     // cleansed MSL function name (e.g. "main0")
             MTLSize     localSize = {1, 1, 1};
             bool        ok = false;
+            bool        needsBufferSizes = false;
         };
 
         // view_mask_buffer_index for SPIRV-Cross multiview: a buffer at this slot carries the view
@@ -112,6 +113,7 @@ namespace vri::mtl
                 // MSL 3.1 emits native texture atomics. Older targets require an extra
                 // linear-buffer alias which is not part of VRI's texture descriptor.
                 o.set_msl_version(3, 1);
+                if (layout) o.buffer_size_buffer_index = layout->bufferSizeBufferIndex;
                 // Resources bind directly to the argument tables unless the layout has a set that
                 // cannot be expressed that way (see SetNeedsArgumentBuffer). Turning argument
                 // buffers on changes the generated MSL for the whole module, so it stays off for
@@ -186,6 +188,10 @@ namespace vri::mtl
                             ab.binding = spirv_cross::kArgumentBufferBinding;
                             ab.msl_buffer = layout->setLayouts[set].argBufferSlot;
                             comp.add_msl_resource_binding(ab);
+                            // Pin the hidden length-table pointer after the declared descriptors.
+                            ab.binding = spirv_cross::kBufferSizeBufferBinding;
+                            ab.msl_buffer = layout->setLayouts[set].argEntryNum - 1;
+                            comp.add_msl_resource_binding(ab);
                         }
                     }
                     // Reuse the complete stage mapping, including task/object and mesh shaders.
@@ -202,6 +208,9 @@ namespace vri::mtl
                 }
 
                 r.source = comp.compile();
+                r.needsBufferSizes = comp.needs_buffer_size_buffer();
+                if (r.needsBufferSizes && (!layout || layout->bufferSizeBufferIndex >= kMaxMtlBuffers))
+                    throw std::runtime_error("no free Metal buffer slot for buffer-length queries");
                 r.entry = comp.get_cleansed_entry_point_name(entry, model);
                 // Compute, mesh and task stages all carry a fixed threadgroup (LocalSize).
                 if (model == spv::ExecutionModelGLCompute || model == spv::ExecutionModelMeshEXT ||
@@ -617,7 +626,20 @@ namespace vri::mtl
             v->device = Dev(device);
             v->buffer = Buf(desc->buffer)->buffer;
             v->bufferOffset = desc->offset;
-            v->bufferRange = desc->size;
+            const uint64_t length = [v->buffer length];
+            if (desc->offset > length || desc->size > length - desc->offset)
+            {
+                delete v;
+                return VriResult_InvalidArgument;
+            }
+            v->bufferRange = desc->size ? desc->size : length - desc->offset;
+            // SPIRV-Cross's length-table ABI uses 32-bit byte sizes.
+            if (v->bufferRange > UINT32_MAX)
+            {
+                Dev(device)->ReportError("Metal buffer views larger than UINT32_MAX bytes are unsupported");
+                delete v;
+                return VriResult_Unsupported;
+            }
             *out = ToHandle(v);
             return VriResult_Success;
         }
@@ -787,7 +809,7 @@ namespace vri::mtl
                     else                                          { b.mslIndex = samplerCounter; samplerCounter += b.count; }
                     dst.push_back(b);
                 }
-                sl.argEntryNum = argId;
+                sl.argEntryNum = argId + (argBuffer ? 1 : 0);
             }
             // A direct set that overflows the argument table can only happen when bindless is
             // unavailable (no Metal 3 / Tier 2). Fail loudly: the alternative is a pipeline whose
@@ -814,6 +836,15 @@ namespace vri::mtl
                 if (layout->pushStages == 0)
                     layout->pushStages = VriShaderStage_Vertex | VriShaderStage_Fragment | VriShaderStage_Compute;
             }
+            // Vertex streams occupy the high slots. The hidden length table follows the
+            // descriptor/push slots and must also avoid SPIRV-Cross's multiview slot.
+            layout->bufferSizeBufferIndex = bufferCounter == kMtlViewMaskBufferIndex ? bufferCounter + 1 : bufferCounter;
+            if (bufferCounter > kMaxMtlBuffers)
+            {
+                Dev(device)->ReportError("pipeline layout exceeds Metal's buffer argument-table limit");
+                delete layout;
+                return VriResult_Unsupported;
+            }
             *out = ToHandle(layout);
             return VriResult_Success;
         }
@@ -834,19 +865,38 @@ namespace vri::mtl
                 id<MTLFunction> vsFn = nil, fsFn = nil, objFn = nil, meshFn = nil;
                 MTLSize objTG = MTLSizeMake(1, 1, 1), meshTG = MTLSizeMake(1, 1, 1);
                 bool hasMesh = false;
+                VriShaderStageFlags bufferSizeStages = 0;
+                auto compile = [&](const VriShaderDesc& shader, spv::ExecutionModel model, uint32_t mask = 0) {
+                    MslResult m = SpirvToMsl(d, pl, shader, model, mask);
+                    if (m.needsBufferSizes) bufferSizeStages |= shader.stage;
+                    return m;
+                };
                 for (uint32_t i = 0; i < desc->shaderNum; ++i)
                 {
                     const VriShaderDesc& s = desc->shaders[i];
                     if (s.stage == VriShaderStage_Vertex)
-                        vsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelVertex, viewMask));
+                        vsFn = MakeFunction(d, compile(s, spv::ExecutionModelVertex, viewMask));
                     else if (s.stage == VriShaderStage_Fragment)
-                        fsFn = MakeFunction(d, SpirvToMsl(d, pl, s, spv::ExecutionModelFragment, viewMask));
+                        fsFn = MakeFunction(d, compile(s, spv::ExecutionModelFragment, viewMask));
                     else if (s.stage == VriShaderStage_Mesh)
-                        { MslResult m = SpirvToMsl(d, pl, s, spv::ExecutionModelMeshEXT); meshFn = MakeFunction(d, m); meshTG = m.localSize; hasMesh = true; }
+                        { MslResult m = compile(s, spv::ExecutionModelMeshEXT); meshFn = MakeFunction(d, m); meshTG = m.localSize; hasMesh = true; }
                     else if (s.stage == VriShaderStage_Task)
-                        { MslResult m = SpirvToMsl(d, pl, s, spv::ExecutionModelTaskEXT); objFn = MakeFunction(d, m); objTG = m.localSize; hasMesh = true; }
+                        { MslResult m = compile(s, spv::ExecutionModelTaskEXT); objFn = MakeFunction(d, m); objTG = m.localSize; hasMesh = true; }
                     else if (s.stage == VriShaderStage_Geometry || s.stage == VriShaderStage_TessControl || s.stage == VriShaderStage_TessEval)
                         { if (vsFn) [vsFn release]; if (fsFn) [fsFn release]; return VriResult_Unsupported; }
+                }
+                if (bufferSizeStages && pl)
+                {
+                    for (uint32_t i = 0; i < desc->vertexInput.streamNum; ++i)
+                    {
+                        if (VertexBufferIndex(desc->vertexInput.streams[i].bindingSlot) == pl->bufferSizeBufferIndex)
+                        {
+                            d->ReportError("Metal buffer-length table collides with a vertex stream");
+                            if (vsFn) [vsFn release]; if (fsFn) [fsFn release];
+                            if (objFn) [objFn release]; if (meshFn) [meshFn release];
+                            return VriResult_Unsupported;
+                        }
+                    }
                 }
                 if ((hasMesh && !meshFn) || (!hasMesh && !vsFn))
                 { if (vsFn) [vsFn release]; if (fsFn) [fsFn release]; if (objFn) [objFn release]; if (meshFn) [meshFn release]; return VriResult_Failure; }
@@ -992,6 +1042,7 @@ namespace vri::mtl
                 PipelineMTL* p = new PipelineMTL{};
                 p->device = d;
                 p->isCompute = false;
+                p->bufferSizeStages = bufferSizeStages;
                 p->render = rps;
                 p->depthStencil = dss;
                 p->primType = ToMtlPrimitive(desc->inputAssembly.topology);
@@ -1057,6 +1108,7 @@ namespace vri::mtl
                 p->compute = cps;
                 p->threadsPerThreadgroup = msl.localSize;
                 p->stageMask = VriShaderStage_Compute;
+                p->bufferSizeStages = msl.needsBufferSizes ? VriShaderStage_Compute : 0;
                 *out = ToHandle(p);
                 return VriResult_Success;
             }
@@ -1111,7 +1163,8 @@ namespace vri::mtl
                     // buffers from unified memory, so the entries are written in place with no
                     // staging copy. Zeroed, so a partially-bound set reads null descriptors
                     // rather than stale handles.
-                    const NSUInteger length = sl.argEntryNum * kMtlArgBufferEntrySize;
+                    const NSUInteger tableOffset = sl.argEntryNum * kMtlArgBufferEntrySize;
+                    const NSUInteger length = tableOffset + sl.argEntryNum * sizeof(uint32_t);
                     s->argBuffer = [p->device->Device() newBufferWithLength:length
                                                                    options:MTLResourceStorageModeShared];
                     if (!s->argBuffer)
@@ -1121,7 +1174,9 @@ namespace vri::mtl
                         return VriResult_Failure;
                     }
                     std::memset([s->argBuffer contents], 0, length);
-                    s->entries.resize(sl.argEntryNum);
+                    s->entries.resize(sl.argEntryNum - 1);
+                    auto* words = static_cast<uint64_t*>([s->argBuffer contents]);
+                    words[sl.argEntryNum - 1] = [s->argBuffer gpuAddress] + tableOffset;
                 }
                 p->sets.push_back(s);
                 outSets[i] = ToHandle(s);
@@ -1172,6 +1227,10 @@ namespace vri::mtl
                     e.writable = type == VriDescriptorType_StorageBuffer;
                 }
             }
+            const auto& sl = s->layout->setLayouts[s->setIndex];
+            auto* sizes = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>([s->argBuffer contents]) +
+                                                       sl.argEntryNum * kMtlArgBufferEntrySize);
+            sizes[entry] = dsc && dsc->buffer && IsBufferType(type) ? static_cast<uint32_t>(dsc->bufferRange) : 0;
             s->entries[entry] = e;
             s->residencyDirty = true;
         }
@@ -1583,12 +1642,41 @@ namespace vri::mtl
                 BindOne(c, b);
         }
 
+        // OpArrayLength is lowered to a uint byte-size table indexed by the mapped
+        // Metal buffer slot. Snapshot it into the encoder so later descriptor updates
+        // cannot mutate a previously recorded dispatch's lengths.
+        void ApplyBufferSizes(CommandBufferMTL* c)
+        {
+            if (!c->boundLayout || !c->boundPipeline || !c->boundPipeline->bufferSizeStages) return;
+            uint32_t sizes[kMaxMtlBuffers] = {};
+            for (const auto* handle : c->boundSets)
+            {
+                if (!handle) continue;
+                const auto* set = reinterpret_cast<const DescriptorSetMTL*>(handle);
+                if (set->argBuffer) continue;
+                for (const auto& b : set->bound)
+                    if (IsBufferType(b.type) && b.desc && b.mslIndex < kMaxMtlBuffers)
+                        sizes[b.mslIndex] = static_cast<uint32_t>(b.desc->bufferRange);
+            }
+            const uint32_t index = c->boundLayout->bufferSizeBufferIndex;
+            const auto stages = c->boundPipeline->bufferSizeStages;
+            if (c->computeEnc) [c->computeEnc setBytes:sizes length:sizeof(sizes) atIndex:index];
+            else if (c->renderEnc)
+            {
+                if (stages & VriShaderStage_Vertex) [c->renderEnc setVertexBytes:sizes length:sizeof(sizes) atIndex:index];
+                if (stages & VriShaderStage_Fragment) [c->renderEnc setFragmentBytes:sizes length:sizeof(sizes) atIndex:index];
+                if (stages & VriShaderStage_Mesh) [c->renderEnc setMeshBytes:sizes length:sizeof(sizes) atIndex:index];
+                if (stages & VriShaderStage_Task) [c->renderEnc setObjectBytes:sizes length:sizeof(sizes) atIndex:index];
+            }
+        }
+
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t index, const VriDescriptorSet* set)
         {
             CommandBufferMTL* c = CB(cmd);
             if (c->boundSets.size() <= index) c->boundSets.resize(index + 1);
             c->boundSets[index] = set;
             BindDescriptorSet(c, set);
+            ApplyBufferSizes(c);
         }
 
         void ApplyConstants(CommandBufferMTL* c)
@@ -1613,6 +1701,7 @@ namespace vri::mtl
         {
             for (const auto* set : c->boundSets) BindDescriptorSet(c, set);
             ApplyConstants(c);
+            ApplyBufferSizes(c);
         }
 
         void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data, uint32_t size)
