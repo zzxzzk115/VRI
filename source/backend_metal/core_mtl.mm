@@ -187,9 +187,9 @@ namespace vri::mtl
                             comp.add_msl_resource_binding(ab);
                         }
                     }
-                    if (layout->hasPush && (layout->pushStages &
-                        (model == spv::ExecutionModelVertex ? VriShaderStage_Vertex :
-                         model == spv::ExecutionModelFragment ? VriShaderStage_Fragment : VriShaderStage_Compute)))
+                    // Reuse the complete stage mapping, including task/object and mesh shaders.
+                    // Otherwise their push block is auto-assigned to buffer(0), colliding with frame data.
+                    if (layout->hasPush && (layout->pushStages & stageBit))
                     {
                         spirv_cross::MSLResourceBinding rb = {};
                         rb.stage = model;
