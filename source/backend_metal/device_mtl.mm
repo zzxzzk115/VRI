@@ -78,16 +78,19 @@ namespace vri::mtl
         // check; the feature bits still gate behaviour (CreatePipelineLayout consults hasBindless
         // before promoting a set to an argument buffer).
         const uint64_t requested = desc.enabledFeatures;
-        if (requested & VriFeature_Bindless)
+        uint64_t supported = 0;
+        if (SupportsArgumentBufferBindless())
+            supported |= VriFeature_Bindless;
+        if ([m_device supportsRaytracing])
+            supported |= VriFeature_RayQuery;
+        if ([m_device supportsFamily:MTLGPUFamilyMetal3])
+            supported |= VriFeature_MeshShader;
+        if ((requested & ~supported) && desc.bestEffort == VRI_FALSE)
         {
-            if (SupportsArgumentBufferBindless())
-                m_enabledFeatures |= VriFeature_Bindless;
-            else if (desc.bestEffort == VRI_FALSE)
-            {
-                ReportError("bindless (Tier 2 argument buffers / Metal 3) not supported");
-                return VriResult_Unsupported;
-            }
+            ReportError("requested features are not supported by Metal");
+            return VriResult_Unsupported;
         }
+        m_enabledFeatures = requested & supported;
 
         m_eventListener = [[MTLSharedEventListener alloc] init];
         if (!m_eventListener)
