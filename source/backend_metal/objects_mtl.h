@@ -176,7 +176,7 @@ namespace vri::mtl
     {
         SetBindingModel     model = SetBindingModel::Direct;
         uint32_t            argBufferSlot = 0; // MTLBuffer index the argument buffer binds to
-        uint32_t            argEntryNum = 0;   // number of [[id(n)]] entries (buffer size / 8)
+        uint32_t            argEntryNum = 0;   // number of [[id(n)]] entries, including the length-table pointer
         VriShaderStageFlags argStages = 0;     // union of the set's range stages
     };
 
@@ -187,6 +187,7 @@ namespace vri::mtl
         std::vector<SetLayoutMTL>             setLayouts;  // [set], parallel to setBindings
         bool                                  hasPush = false;
         bool                                  hasArgBufferSet = false; // any set on the AB path
+        uint32_t                              bufferSizeBufferIndex = 0;
         uint32_t                              pushBufferIndex = 0;
         uint32_t                              pushSize = 0;
         VriShaderStageFlags                   pushStages = 0;
@@ -233,7 +234,7 @@ namespace vri::mtl
             struct AccelerationStructureMTL* tlas = nullptr;   // TLAS: also make its BLASes resident
         };
         id<MTLBuffer>                argBuffer = nil; // nil on a Direct set
-        std::vector<Entry>           entries;         // sized argEntryNum on allocation
+        std::vector<Entry>           entries;         // one per declared descriptor; excludes the length-table pointer
         // Flattened from `entries` on demand - useResources: takes one array per usage class.
         std::vector<id<MTLResource>> residentRead;
         std::vector<id<MTLResource>> residentReadWrite;
@@ -267,6 +268,7 @@ namespace vri::mtl
         // nothing from it, so this is the exact set that must have it bound (see
         // BindArgumentBufferSet) - the set's own shaderStages would leave some of them unbound.
         VriShaderStageFlags         stageMask;
+        VriShaderStageFlags         bufferSizeStages;
         // Mesh-shader pipeline (object/mesh/fragment): threadgroup sizes for drawMeshThreadgroups.
         bool                        isMesh;
         MTLSize                     objectTG;  // task/object stage local size (1,1,1 if mesh-only)
