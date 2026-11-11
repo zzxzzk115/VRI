@@ -95,7 +95,7 @@ namespace vri::mtl
             if (desc->type != VriQueryType_Occlusion && desc->type != VriQueryType_TimestampRange)
                 return VriResult_Unsupported;
             DeviceMTL* d = Dev(device);
-            if (desc->type == VriQueryType_TimestampRange && !d->Desc().hasTimestampQueries)
+            if (desc->type == VriQueryType_TimestampRange && !d->Desc().hasTimestampRangeQueries)
                 return VriResult_Unsupported;
             QueryPoolMTL* q = new QueryPoolMTL{};
             q->device = d; q->type = desc->type; q->count = desc->queryCount;

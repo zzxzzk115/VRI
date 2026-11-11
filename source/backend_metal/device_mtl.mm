@@ -227,8 +227,10 @@ namespace vri::mtl
 
         // GPU queries: timestamps need the standard counter set + stage-boundary sampling; occlusion
         // (visibility result buffers) is always available. Apple GPUs expose no statistic counter set.
-        m_desc.hasTimestampQueries = ([m_device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary] &&
-                                      HasTimestampCounterSet()) ? VRI_TRUE : VRI_FALSE;
+        // Metal samples encoder boundaries only, so it offers TimestampRange pools and no point timestamps.
+        m_desc.hasTimestampQueries      = VRI_FALSE;
+        m_desc.hasTimestampRangeQueries = ([m_device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary] &&
+                                           HasTimestampCounterSet()) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasPipelineStatistics      = VRI_FALSE;
         m_desc.hasCalibratedTimestamps    = VRI_TRUE; // [MTLDevice sampleTimestamps:gpuTimestamp:]
 
@@ -238,7 +240,7 @@ namespace vri::mtl
         m_desc.hasMultiview = [m_device supportsFamily:MTLGPUFamilyApple1] ? VRI_TRUE : VRI_FALSE;
         m_desc.maxViewCount = m_desc.hasMultiview ? 32 : 0;
         // Apple Silicon GPU timestamps are already in nanoseconds (same domain as sampleTimestamps).
-        m_desc.timestampPeriodNanoseconds = m_desc.hasTimestampQueries ? 1.0f : 0.0f;
+        m_desc.timestampPeriodNanoseconds = m_desc.hasTimestampRangeQueries ? 1.0f : 0.0f;
     }
 
     bool DeviceMTL::HasTimestampCounterSet() const

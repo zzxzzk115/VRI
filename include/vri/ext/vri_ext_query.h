@@ -3,7 +3,7 @@
  *
  * Queried via vriGetInterface(device, VRI_INTERFACE_QUERY, ...). Registered by backends that
  * support it. Timestamp availability + tick scale are reported in
- * VriDeviceDesc (hasTimestampQueries, timestampPeriodNanoseconds).
+ * VriDeviceDesc (hasTimestampQueries or hasTimestampRangeQueries, timestampPeriodNanoseconds).
  *
  * Usage (timestamps, the basis of a GPU profiler): CmdResetQueries once, CmdWriteTimestamp at
  * each measurement point, then CmdCopyQueries to resolve the raw uint64 ticks into a buffer.
