@@ -1861,10 +1861,71 @@ namespace vri::mtl
             EnsureBlit(c);
             [c->blitEnc fillBuffer:buf range:NSMakeRange((NSUInteger)offset, (NSUInteger)len) value:b];
         }
-        // Metal clears textures via a render pass loadAction, not an out-of-pass command.
-        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture*, const VriClearColor*)
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
         {
-            CB(cmd)->device->ReportError("CmdClearStorageTexture: unsupported on Metal");
+            auto* c = CB(cmd);
+            auto* t = Tex(texture);
+            if (c->renderEnc || t->texture.sampleCount != 1)
+            {
+                c->device->ReportError("CmdClearStorageTexture requires a single-sampled texture outside a render pass");
+                return;
+            }
+            uint32_t component = 0;
+            switch (t->format)
+            {
+                case VriFormat_R8_UINT: case VriFormat_RG8_UINT: case VriFormat_RGBA8_UINT:
+                case VriFormat_R16_UINT: case VriFormat_RG16_UINT: case VriFormat_RGBA16_UINT:
+                case VriFormat_R32_UINT: case VriFormat_RG32_UINT: case VriFormat_RGBA32_UINT:
+                    component = 1; break;
+                case VriFormat_R8_SINT: case VriFormat_RG8_SINT: case VriFormat_RGBA8_SINT:
+                case VriFormat_R16_SINT: case VriFormat_RG16_SINT: case VriFormat_RGBA16_SINT:
+                case VriFormat_R32_SINT: case VriFormat_RG32_SINT: case VriFormat_RGBA32_SINT:
+                    component = 2; break;
+                default: break;
+            }
+            uint32_t dimension = 0;
+            id<MTLTexture> target = t->texture;
+            id<MTLTexture> view = nil;
+            MTLSize grid = MTLSizeMake(target.width, 1, 1);
+            switch (target.textureType)
+            {
+                case MTLTextureType1D: break;
+                case MTLTextureType1DArray:
+                    dimension = 1; grid.height = target.arrayLength; break;
+                case MTLTextureType2D:
+                    dimension = 2; grid.height = target.height; break;
+                case MTLTextureTypeCube: case MTLTextureTypeCubeArray:
+                    // Cube storage is addressed through a writable 2D-array face view.
+                    view = [target newTextureViewWithPixelFormat:target.pixelFormat textureType:MTLTextureType2DArray
+                        levels:NSMakeRange(0, 1) slices:NSMakeRange(0, target.arrayLength * 6)];
+                    if (!view)
+                    {
+                        c->device->ReportError("Create Metal storage-texture clear cube view failed");
+                        return;
+                    }
+                    target = view;
+                    [[fallthrough]];
+                case MTLTextureType2DArray:
+                    dimension = 3; grid.height = target.height; grid.depth = target.arrayLength; break;
+                case MTLTextureType3D:
+                    dimension = 4; grid.height = target.height; grid.depth = target.depth; break;
+                default:
+                    c->device->ReportError("CmdClearStorageTexture: unsupported Metal texture dimension");
+                    return;
+            }
+            auto pipeline = c->device->ClearTexturePipeline(dimension, component);
+            if (pipeline)
+            {
+                EnsureCompute(c);
+                [c->computeEnc setComputePipelineState:pipeline];
+                [c->computeEnc setTexture:target atIndex:0];
+                [c->computeEnc setBytes:value length:sizeof(*value) atIndex:0];
+                // Only mip zero is part of the VRI clear contract. Keep the caller's
+                // bound VRI pipeline/sets intact when the next encoder is restored.
+                [c->computeEnc dispatchThreads:grid threadsPerThreadgroup:MTLSizeMake(pipeline.threadExecutionWidth, 1, 1)];
+                EndAux(c);
+            }
+            [view release];
         }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
