@@ -488,6 +488,15 @@ namespace vri::vk
         {
             f13.dynamicRendering = VK_TRUE;
             f13.synchronization2 = VK_TRUE;
+            if (m_vkHooks)
+            {
+                // XR runtimes may create externally synchronized caches on the bound device.
+                VkPhysicalDeviceVulkan13Features supported = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+                VkPhysicalDeviceFeatures2 query = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+                query.pNext = &supported;
+                vkGetPhysicalDeviceFeatures2(m_physicalDevice, &query);
+                f13.pipelineCreationCacheControl = supported.pipelineCreationCacheControl;
+            }
         }
         else
         {
