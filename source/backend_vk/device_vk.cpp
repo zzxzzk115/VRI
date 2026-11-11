@@ -625,7 +625,10 @@ namespace vri::vk
         // Calibrated timestamps (correlated GPU+CPU clocks). No feature struct; just the
         // extension. Confirmed in LoadExtensionFunctions, which also picks the host time domain.
         if (hasExt("VK_KHR_calibrated_timestamps"))
+        {
             extensions.push_back("VK_KHR_calibrated_timestamps");
+            m_hasKhrCalibratedTimestamps = true;
+        }
         else if (hasExt("VK_EXT_calibrated_timestamps"))
             extensions.push_back("VK_EXT_calibrated_timestamps");
 
@@ -1168,11 +1171,11 @@ namespace vri::vk
             LoadCoreOrKhr("vkGetCalibratedTimestampsKHR", "vkGetCalibratedTimestampsEXT"));
         if (m_ext.GetCalibratedTimestamps)
         {
+            // Instance lookup can return another ICD's KHR trampoline even when this GPU only
+            // enabled EXT. Use the alias belonging to this physical device's enabled extension.
             auto getDomains = reinterpret_cast<PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR>(
-                vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR"));
-            if (!getDomains)
-                getDomains = reinterpret_cast<PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR>(
-                    vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT"));
+                vkGetInstanceProcAddr(m_instance, m_hasKhrCalibratedTimestamps ?
+                    "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR" : "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT"));
             if (getDomains)
             {
                 uint32_t n = 0;
