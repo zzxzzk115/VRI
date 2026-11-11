@@ -1,6 +1,6 @@
 // Clear storage buffer (VriCoreInterface::CmdClearStorageBuffer): fill a storage buffer with a
 // repeated uint32 outside a render pass, then read it back and confirm every element is the value.
-// Gated on VriDeviceDesc::hasClearStorageBuffer (Vulkan + desktop OpenGL 4.3; D3D12/WebGPU/Metal
+// Gated on VriDeviceDesc::hasClearStorageBuffer (Vulkan, Metal and desktop OpenGL 4.3; D3D12/WebGPU
 // have no direct buffer fill and report it unsupported, so the test self-skips there).
 #include <doctest/doctest.h>
 
@@ -109,4 +109,5 @@ TEST_CASE("Clear storage buffer: fill with a uint32 value")
     Check(VriGraphicsAPI_OpenGL, "OpenGL");
     Check(VriGraphicsAPI_D3D12, "D3D12");
     Check(VriGraphicsAPI_WebGPU, "WebGPU");
+    Check(VriGraphicsAPI_Metal, "Metal");
 }

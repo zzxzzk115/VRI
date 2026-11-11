@@ -42,6 +42,8 @@ namespace vri::gl
         {
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
+            if (desc->type == VriQueryType_TimestampRange)
+                return VriResult_Unsupported;
             DeviceGL*  d     = Dev(device);
             const bool stats = desc->type == VriQueryType_PipelineStatistics;
             if (stats ? d->Desc().hasPipelineStatistics == VRI_FALSE : d->Desc().hasTimestampQueries == VRI_FALSE)

@@ -92,17 +92,19 @@ namespace
         REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
 
         VriQueryPoolDesc qpd {};
-        qpd.type           = VriQueryType_Timestamp;
-        qpd.queryCount     = 2;
-        VriQueryPool* pool = nullptr;
+        const bool       ranges = api == VriGraphicsAPI_Metal;
+        qpd.type                = ranges ? VriQueryType_TimestampRange : VriQueryType_Timestamp;
+        qpd.queryCount          = 2;
+        VriQueryPool* pool      = nullptr;
         REQUIRE(q.CreateQueryPool(dev, &qpd, &pool) == VriResult_Success);
-        CHECK(q.GetQuerySize(pool) == sizeof(uint64_t));
+        const uint64_t stride = ranges ? sizeof(VriTimestampRange) : sizeof(uint64_t);
+        CHECK(q.GetQuerySize(pool) == stride);
 
         constexpr uint64_t kSize = 1u << 20; // 1 MiB of copy work between the timestamps
         VriBuffer*         src   = MakeBuffer(c, dev, kSize, VriBufferUsage_TransferSrc, VriMemoryLocation_Device);
         VriBuffer*         dst   = MakeBuffer(c, dev, kSize, VriBufferUsage_TransferDst, VriMemoryLocation_Device);
         VriBuffer*         readback =
-            MakeBuffer(c, dev, 2 * sizeof(uint64_t), VriBufferUsage_TransferDst, VriMemoryLocation_HostReadback);
+            MakeBuffer(c, dev, 2 * stride, VriBufferUsage_TransferDst, VriMemoryLocation_HostReadback);
 
         VriCommandAllocator* alloc = nullptr;
         VriCommandBuffer*    cmd   = nullptr;
@@ -113,11 +115,21 @@ namespace
 
         REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
         q.CmdResetQueries(cmd, pool, 0, 2);
-        q.CmdWriteTimestamp(cmd, pool, 0);
+        if (ranges)
+            q.CmdBeginQuery(cmd, pool, 0);
+        else
+            q.CmdWriteTimestamp(cmd, pool, 0);
         VriBufferCopyDesc region {};
         region.size = kSize;
         c.CmdCopyBuffer(cmd, dst, src, &region);
-        q.CmdWriteTimestamp(cmd, pool, 1);
+        if (ranges)
+        {
+            q.CmdEndQuery(cmd, pool, 0);
+            q.CmdBeginQuery(cmd, pool, 1);
+            q.CmdEndQuery(cmd, pool, 1);
+        }
+        else
+            q.CmdWriteTimestamp(cmd, pool, 1);
         q.CmdCopyQueries(cmd, pool, 0, 2, readback, 0);
         REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);
 
@@ -134,9 +146,21 @@ namespace
         c.Wait(fence, 1);
 
         uint64_t        ticks[2] = {0, 0};
-        const uint64_t* mapped   = static_cast<const uint64_t*>(c.MapBuffer(readback, 0, 2 * sizeof(uint64_t)));
+        const uint64_t* mapped   = static_cast<const uint64_t*>(c.MapBuffer(readback, 0, 2 * stride));
         REQUIRE(mapped != nullptr);
-        std::memcpy(ticks, mapped, sizeof(ticks));
+        if (ranges)
+        {
+            const auto* results = reinterpret_cast<const VriTimestampRange*>(mapped);
+            ticks[0]            = results[0].begin;
+            ticks[1]            = results[0].end;
+            CHECK(results[0].active > 0);
+            CHECK(results[0].active <= ticks[1] - ticks[0]);
+            CHECK(results[1].begin == 0);
+            CHECK(results[1].end == 0);
+            CHECK(results[1].active == 0);
+        }
+        else
+            std::memcpy(ticks, mapped, sizeof(ticks));
         c.UnmapBuffer(readback);
 
         if (strictNonzero)
@@ -210,10 +234,22 @@ TEST_CASE("Query pool: OpenGL timestamps advance across GPU work")
     RunTimestamp(VriGraphicsAPI_OpenGL, "OpenGL", /*strictNonzero*/ false);
 }
 
-// Metal samples the GPU clock at encoder stage boundaries (CmdWriteTimestamp opens an empty blit
-// encoder) and resolves the counter sample buffer CPU-side in the submit completion handler.
+// Metal execution ranges sample actual encoder boundaries and resolve before the submission fence.
 TEST_CASE("Query pool: Metal timestamps advance across GPU work") { RunTimestamp(VriGraphicsAPI_Metal, "Metal"); }
 
 TEST_CASE("Calibrated timestamps: Vulkan pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_Vulkan, "Vulkan"); }
 TEST_CASE("Calibrated timestamps: D3D12 pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_D3D12, "D3D12"); }
 TEST_CASE("Calibrated timestamps: Metal pairs GPU + CPU clocks") { RunCalibrated(VriGraphicsAPI_Metal, "Metal"); }
+
+TEST_CASE("Query pool: Metal rejects arbitrary point timestamps")
+{
+    Dev d;
+    if (!Init(d, VriGraphicsAPI_Metal))
+        return;
+    VriQueryInterface query {};
+    REQUIRE(vriGetInterface(d.device, VRI_INTERFACE_QUERY, sizeof(query), &query) == VriResult_Success);
+    const VriQueryPoolDesc desc {VriQueryType_Timestamp, 1};
+    VriQueryPool*          pool = nullptr;
+    CHECK(query.CreateQueryPool(d.device, &desc, &pool) == VriResult_Unsupported);
+    CHECK(pool == nullptr);
+}

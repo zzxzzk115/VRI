@@ -17,6 +17,10 @@ namespace vri::mtl
 {
     DeviceMTL::~DeviceMTL()
     {
+        if (m_clearBufferPipeline) [m_clearBufferPipeline release];
+        for (auto& dimension : m_clearTexturePipelines)
+            for (auto pipeline : dimension)
+                [pipeline release];
         // QueueMTL objects are members (not heap). Compute/Transfer own a dedicated MTLCommandQueue
         // (Graphics aliases m_queue); release those, then m_queue.
         for (int t = 0; t < VriQueueType_Count; ++t)
@@ -28,6 +32,63 @@ namespace vri::mtl
     }
 
     void DeviceMTL::ReportError(const char* message) const { Diagnostic(VriMessageSeverity_Error, message); }
+
+    id<MTLComputePipelineState> DeviceMTL::ClearBufferPipeline()
+    {
+        if (m_clearBufferPipeline) return m_clearBufferPipeline;
+        @autoreleasepool
+        {
+            NSString* source = @"#include <metal_stdlib>\nusing namespace metal;\n"
+                "kernel void fill_words(device uint* words [[buffer(0)]],\n"
+                "constant uint& value [[buffer(1)]], constant uint& count [[buffer(2)]],\n"
+                "uint index [[thread_position_in_grid]]) { if (index < count) words[index] = value; }\n";
+            NSError* error = nil;
+            id<MTLLibrary> library = [m_device newLibraryWithSource:source options:nil error:&error];
+            id<MTLFunction> function = [library newFunctionWithName:@"fill_words"];
+            if (function)
+                m_clearBufferPipeline = [m_device newComputePipelineStateWithFunction:function error:&error];
+            [function release];
+            [library release];
+            if (!m_clearBufferPipeline)
+                ReportError(error ? error.description.UTF8String : "Create Metal storage-buffer clear pipeline failed");
+        }
+        return m_clearBufferPipeline;
+    }
+
+    id<MTLComputePipelineState> DeviceMTL::ClearTexturePipeline(uint32_t dimension, uint32_t component)
+    {
+        std::lock_guard lock(m_clearTextureMutex);
+        auto& pipeline = m_clearTexturePipelines[dimension][component];
+        if (pipeline) return pipeline;
+        @autoreleasepool
+        {
+            NSString* types[] = {@"texture1d", @"texture1d_array", @"texture2d", @"texture2d_array", @"texture3d"};
+            NSString* components[] = {@"float", @"uint", @"int"};
+            NSString* bounds[] = {
+                @"p.x < target.get_width()",
+                @"p.x < target.get_width() && p.y < target.get_array_size()",
+                @"p.x < target.get_width() && p.y < target.get_height()",
+                @"p.x < target.get_width() && p.y < target.get_height() && p.z < target.get_array_size()",
+                @"p.x < target.get_width() && p.y < target.get_height() && p.z < target.get_depth()"};
+            NSString* coordinates[] = {@"p.x", @"p.x, p.y", @"p.xy", @"p.xy, p.z", @"p"};
+            NSString* source = [NSString stringWithFormat:
+                @"#include <metal_stdlib>\nusing namespace metal;\n"
+                "kernel void fill_texture(%@<%@, access::write> target [[texture(0)]], "
+                "constant %@4& value [[buffer(0)]], uint3 p [[thread_position_in_grid]]) "
+                "{ if (%@) target.write(value, %@); }\n",
+                types[dimension], components[component], components[component], bounds[dimension], coordinates[dimension]];
+            NSError* error = nil;
+            id<MTLLibrary> library = [m_device newLibraryWithSource:source options:nil error:&error];
+            id<MTLFunction> function = [library newFunctionWithName:@"fill_texture"];
+            if (function)
+                pipeline = [m_device newComputePipelineStateWithFunction:function error:&error];
+            [function release];
+            [library release];
+            if (!pipeline)
+                ReportError(error ? error.description.UTF8String : "Create Metal storage-texture clear pipeline failed");
+        }
+        return pipeline;
+    }
 
     void DeviceMTL::Diagnostic(VriMessageSeverity severity, const char* message) const
     {
@@ -78,16 +139,19 @@ namespace vri::mtl
         // check; the feature bits still gate behaviour (CreatePipelineLayout consults hasBindless
         // before promoting a set to an argument buffer).
         const uint64_t requested = desc.enabledFeatures;
-        if (requested & VriFeature_Bindless)
+        uint64_t supported = 0;
+        if (SupportsArgumentBufferBindless())
+            supported |= VriFeature_Bindless;
+        if ([m_device supportsRaytracing])
+            supported |= VriFeature_RayQuery;
+        if ([m_device supportsFamily:MTLGPUFamilyMetal3])
+            supported |= VriFeature_MeshShader;
+        if ((requested & ~supported) && desc.bestEffort == VRI_FALSE)
         {
-            if (SupportsArgumentBufferBindless())
-                m_enabledFeatures |= VriFeature_Bindless;
-            else if (desc.bestEffort == VRI_FALSE)
-            {
-                ReportError("bindless (Tier 2 argument buffers / Metal 3) not supported");
-                return VriResult_Unsupported;
-            }
+            ReportError("requested features are not supported by Metal");
+            return VriResult_Unsupported;
         }
+        m_enabledFeatures = requested & supported;
 
         m_eventListener = [[MTLSharedEventListener alloc] init];
         if (!m_eventListener)
@@ -121,7 +185,7 @@ namespace vri::mtl
         m_desc.adapter.videoMemorySize = [m_device recommendedMaxWorkingSetSize];
 
         m_desc.apiVersionMajor = 3; // Metal 3 baseline on supported macOS
-        m_desc.apiVersionMinor = 0;
+        m_desc.apiVersionMinor = 1;
         m_desc.viewportMaxNum = 16;
         m_desc.attachmentColorMaxNum = 8;
         m_desc.attachmentMaxDim = 16384;
@@ -138,6 +202,8 @@ namespace vri::mtl
         for (int t = 0; t < VriQueueType_Count; ++t)
             m_desc.queueCount[t] = 1;
         m_desc.hasComputeShader = VRI_TRUE;
+        m_desc.hasClearStorageBuffer = VRI_TRUE;
+        m_desc.hasClearStorageTexture = VRI_TRUE;
         m_desc.hasGeometryShader = VRI_FALSE; // Metal has no geometry stage
         m_desc.hasTessellation = VRI_FALSE;   // Metal tessellation differs from VK; not in MVP
         m_desc.hasCustomBorderColor = VRI_TRUE;

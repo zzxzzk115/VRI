@@ -19,6 +19,8 @@ namespace vri::vk
         {
             if (!desc || !out || desc->queryCount == 0)
                 return VriResult_InvalidArgument;
+            if (desc->type == VriQueryType_TimestampRange)
+                return VriResult_Unsupported;
             DeviceVK*             d  = Dev(device);
             VkQueryPoolCreateInfo ci = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
             ci.queryCount            = desc->queryCount;

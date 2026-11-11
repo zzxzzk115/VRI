@@ -5,6 +5,8 @@
 
 #include <vri/vri.h>
 
+#include <mutex>
+
 #include "core/device_base.h"
 #include "objects_mtl.h"
 
@@ -25,6 +27,8 @@ namespace vri::mtl
 
         void ReportError(const char* message) const;
         void Diagnostic(VriMessageSeverity severity, const char* message) const;
+        id<MTLComputePipelineState> ClearBufferPipeline();
+        id<MTLComputePipelineState> ClearTexturePipeline(uint32_t dimension, uint32_t component);
 
     private:
         void FillDeviceDesc();
@@ -35,6 +39,9 @@ namespace vri::mtl
         MTLSharedEventListener* m_eventListener = nil;
         id<MTLDevice>        m_device = nil;
         id<MTLCommandQueue>  m_queue = nil;
+        id<MTLComputePipelineState> m_clearBufferPipeline = nil;
+        id<MTLComputePipelineState> m_clearTexturePipelines[5][3] = {};
+        std::mutex           m_clearTextureMutex;
         QueueMTL             m_queueObjs[VriQueueType_Count] = {};
         VriDeviceDesc        m_desc = {};
         uint64_t             m_enabledFeatures = 0;

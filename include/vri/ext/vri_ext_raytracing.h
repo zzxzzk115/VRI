@@ -2,10 +2,10 @@
  * vri_ext_raytracing.h - ray tracing extension.
  *
  * Queried via vriGetInterface(device, VRI_INTERFACE_RAYTRACING, ...). Registered
- * only by backends that support it (Vulkan KHR ray tracing pipeline + acceleration
- * structure); GL/GLES/D3D11 never register it, so the table is simply unavailable
- * there. Enable with VriFeature_RayTracing at device creation and check
- * VriDeviceDesc::hasRayTracing.
+ * by backends supporting ray pipelines or inline ray queries. Enable the needed
+ * VriFeature_RayTracing / VriFeature_RayQuery at device creation. Ray-query-only
+ * devices expose the BLAS/TLAS operations here; pipeline/SBT/TraceRays operations
+ * require VriDeviceDesc::hasRayTracing and return Unsupported on native Metal.
  *
  * Model (Vulkan/D3D12-style, explicit): build bottom-level acceleration structures
  * (BLAS) from geometry and a top-level (TLAS) from instances; create a ray-tracing

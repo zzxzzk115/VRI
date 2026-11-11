@@ -1,6 +1,6 @@
 // Clear storage texture (VriCoreInterface::CmdClearStorageTexture): clear a storage texture to a
 // color outside a render pass, then read it back and confirm the pixels hold that color. Gated on
-// VriDeviceDesc::hasClearStorageTexture (Vulkan + D3D12 + desktop OpenGL 4.4; WebGPU/Metal can't
+// VriDeviceDesc::hasClearStorageTexture (Vulkan + D3D12 + desktop OpenGL 4.4 + Metal; WebGPU can't
 // clear a texture outside a pass, so the test self-skips there). Like the buffer clear it is a
 // transfer-domain op (barrier the texture to CopyDestination, then CopySource).
 #include <doctest/doctest.h>
@@ -144,4 +144,5 @@ TEST_CASE("Clear storage texture: clear to a color")
     Check(VriGraphicsAPI_D3D12, "D3D12");
     Check(VriGraphicsAPI_OpenGL, "OpenGL");
     Check(VriGraphicsAPI_WebGPU, "WebGPU");
+    Check(VriGraphicsAPI_Metal, "Metal");
 }

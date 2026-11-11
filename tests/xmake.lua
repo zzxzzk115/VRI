@@ -26,6 +26,7 @@ target("vri-tests")
     add_files("test_conversion_map.cpp")      -- shared enum/flag conversion skeleton (backend-neutral)
     add_files("test_formatsupport_xbackend.cpp") -- GetFormatSupport answers per format, not from a constant
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse
+    add_files("test_buffer_dimensions_metal.cpp")
     add_files("test_descriptor_xbackend.cpp") -- runs on whichever backends are enabled
     add_files("test_texture_xbackend.cpp")    -- sampled-texture (separate texture+sampler) parity
     add_files("test_texelfetch_xbackend.cpp") -- texelFetch on a sampler-less integer texture (GL dummy sampler)
@@ -64,6 +65,7 @@ target("vri-tests")
     add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
     add_files("test_explicitmemory_xbackend.cpp") -- explicit placed-resource memory (AllocateMemory + BindMemory)
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
+    add_files("test_clear_texture_metal.cpp")
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)
     add_files("test_multiview_xbackend.cpp") -- multiview single-pass layered rendering (viewMask)
     add_files("test_neversilent_xbackend.cpp") -- never-silent contract: no silent no-ops (DX12 CmdCopyTexture/CmdDispatchIndirect)

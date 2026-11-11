@@ -9,6 +9,7 @@
 #import <Metal/Metal.h>
 
 #include <vector>
+#include <utility>
 
 #include <vri/vri.h>
 
@@ -16,6 +17,23 @@ namespace vri::mtl
 {
     class DeviceMTL;
     struct QueryPoolMTL;
+    struct CommandBufferMTL;
+
+    struct TimestampChunkMTL
+    {
+        id<MTLCounterSampleBuffer> buffer = nil;
+        uint32_t used = 0;
+        std::vector<uint64_t> resolved;
+    };
+    struct TimestampSampleMTL { uint32_t chunk; uint32_t first; uint32_t count; };
+    struct TimestampRangeMTL
+    {
+        CommandBufferMTL* commands = nullptr;
+        uint32_t first = 0;
+        uint32_t end = 0;
+        bool closed = false;
+    };
+    struct TimestampResolveMTL { uint32_t first; uint32_t end; VriTimestampRange* destination; };
 
     // Metal exposes 31 buffer argument slots per stage. Descriptor buffers + push
     // constants grow up from 0; vertex stream buffers grow down from 30 so the two
@@ -51,6 +69,7 @@ namespace vri::mtl
     {
         DeviceMTL*  device; // Metal has no command pool; command buffers come from the queue
         VriQueueType type;
+        std::vector<CommandBufferMTL*> commands;
     };
 
     struct CommandBufferMTL
@@ -65,6 +84,10 @@ namespace vri::mtl
         const struct PipelineLayoutMTL* boundLayout;
         const struct PipelineMTL*       boundPipeline;
         bool                        renderPipelineDeferred; // graphics pipeline set before an encoder existed
+        std::vector<const VriDescriptorSet*> boundSets;
+        // Borrowed TLAS identities/stages already declared in the current native encoder.
+        std::vector<std::pair<struct AccelerationStructureMTL*, MTLRenderStages>> residentTlas;
+        std::vector<uint8_t>        constants;
         id<MTLBuffer>               indexBuffer;
         uint64_t                    indexOffset;
         MTLIndexType                indexType;
@@ -75,13 +98,16 @@ namespace vri::mtl
         // the recorded slots into the destination (all GPU-side).
         id<MTLBuffer>               visBuffer;   // lazily created; reused across Begin..Submit resets
         uint32_t                    visNextSlot; // next free slot index, reset each BeginCommandBuffer
-        id<MTLBuffer>               tsScratch;   // tiny buffer a timestamp blit encoder fills (must be non-empty)
         struct OcclusionMark { QueryPoolMTL* pool; uint32_t index; uint32_t visSlot; };
-        std::vector<OcclusionMark>  occMarks;
-        // Timestamp: Apple Silicon only resolves counter sample buffers CPU-side, so CmdCopyQueries
-        // records the resolve and QueueSubmit executes it in the command buffer's completion handler.
-        struct TimestampResolve { id<MTLCounterSampleBuffer> sb; uint32_t srcIndex; uint32_t num; void* dst; };
-        std::vector<TimestampResolve> tsResolves;
+        std::vector<OcclusionMark> occMarks;
+        // Reused per command buffer; sampling storage grows only when more real encoders are profiled.
+        std::vector<TimestampChunkMTL> timestampChunks;
+        std::vector<TimestampSampleMTL> timestampSamples;
+        std::vector<TimestampResolveMTL> timestampResolves;
+        std::vector<std::pair<uint64_t, uint64_t>> timestampIntervals;
+        uint32_t timestampChunk = 0;
+        uint32_t timestampDepth = 0;
+        bool timestampsValid = true;
     };
 
     struct BufferMTL
@@ -150,7 +176,7 @@ namespace vri::mtl
     {
         SetBindingModel     model = SetBindingModel::Direct;
         uint32_t            argBufferSlot = 0; // MTLBuffer index the argument buffer binds to
-        uint32_t            argEntryNum = 0;   // number of [[id(n)]] entries (buffer size / 8)
+        uint32_t            argEntryNum = 0;   // number of [[id(n)]] entries, including the length-table pointer
         VriShaderStageFlags argStages = 0;     // union of the set's range stages
     };
 
@@ -161,6 +187,7 @@ namespace vri::mtl
         std::vector<SetLayoutMTL>             setLayouts;  // [set], parallel to setBindings
         bool                                  hasPush = false;
         bool                                  hasArgBufferSet = false; // any set on the AB path
+        uint32_t                              bufferSizeBufferIndex = 0;
         uint32_t                              pushBufferIndex = 0;
         uint32_t                              pushSize = 0;
         VriShaderStageFlags                   pushStages = 0;
@@ -207,7 +234,7 @@ namespace vri::mtl
             struct AccelerationStructureMTL* tlas = nullptr;   // TLAS: also make its BLASes resident
         };
         id<MTLBuffer>                argBuffer = nil; // nil on a Direct set
-        std::vector<Entry>           entries;         // sized argEntryNum on allocation
+        std::vector<Entry>           entries;         // one per declared descriptor; excludes the length-table pointer
         // Flattened from `entries` on demand - useResources: takes one array per usage class.
         std::vector<id<MTLResource>> residentRead;
         std::vector<id<MTLResource>> residentReadWrite;
@@ -241,6 +268,7 @@ namespace vri::mtl
         // nothing from it, so this is the exact set that must have it bound (see
         // BindArgumentBufferSet) - the set's own shaderStages would leave some of them unbound.
         VriShaderStageFlags         stageMask;
+        VriShaderStageFlags         bufferSizeStages;
         // Mesh-shader pipeline (object/mesh/fragment): threadgroup sizes for drawMeshThreadgroups.
         bool                        isMesh;
         MTLSize                     objectTG;  // task/object stage local size (1,1,1 if mesh-only)
@@ -270,7 +298,7 @@ namespace vri::mtl
         DeviceMTL*                 device;
         VriQueryType               type;
         uint32_t                   count;
-        id<MTLCounterSampleBuffer> sampleBuf; // Timestamp: GPU clock samples (nil otherwise)
+        std::vector<TimestampRangeMTL> ranges; // TimestampRange slots; raw point timestamps are unsupported
         id<MTLBuffer>              results;    // Occlusion: count * uint64 visibility results (nil otherwise)
     };
 
