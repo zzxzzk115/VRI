@@ -241,11 +241,16 @@ namespace vri::vk
             ci.imageUsage =
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
             ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            ci.preTransform     = caps.currentTransform;
-            ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-            ci.presentMode      = mode;
-            ci.clipped          = VK_TRUE;
-            ci.oldSwapchain     = sc->swapchain;
+            // The application renders upright. Declaring the identity transform leaves a rotated display, such as a
+            // phone held sideways, to the compositor; passing the current transform would promise images that are
+            // already rotated.
+            ci.preTransform   = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0 ?
+                                    VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR :
+                                    caps.currentTransform;
+            ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+            ci.presentMode    = mode;
+            ci.clipped        = VK_TRUE;
+            ci.oldSwapchain   = sc->swapchain;
 
             VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
             if (vkCreateSwapchainKHR(d->Device(), &ci, nullptr, &newSwapchain) != VK_SUCCESS)
