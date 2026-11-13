@@ -27,6 +27,10 @@ typedef enum VriDescriptorRangeBits
        into the bind-group layout (sampler type = Comparison, texture sampleType = Depth) and
        rejects a mismatch; other backends ignore the flag (comparison comes from the sampler). */
     VriDescriptorRange_Comparison     = 1u << 2,
+    /* On a StorageTexture range: the shader only writes it (WGSL `write` access, Slang `WTexture2D`).
+       Without it WebGPU expects `read_write`, which Slang emits for `RWTexture2D` and core WebGPU
+       allows for the r32 formats only. Other backends ignore the flag. */
+    VriDescriptorRange_WriteOnly      = 1u << 3,
     VriDescriptorRange_MaxEnum       = 0x7fffffff
 } VriDescriptorRangeBits;
 
@@ -40,8 +44,14 @@ typedef struct VriDescriptorRangeDesc
     VriDescriptorRangeFlags flags;
     /* For Texture ranges: the sampled view dimension. WebGPU bakes the exact dimension
        (2D / 2DArray / Cube) into the bind-group layout, so an array/cube texture must declare
-       it here. The zero value (== 1D) is treated as 2D; other backends ignore this field. */
+       it here. The zero value (== 1D) is treated as 2D; other backends ignore this field.
+       For StorageTexture ranges: the storage view dimension (2D / 2DArray / 3D), likewise. */
     VriTextureViewType      viewType;
+    /* For StorageTexture ranges: the format the shader declares. WebGPU bakes it into the
+       bind-group layout; Unknown means RGBA8_UNORM. For Texture ranges: the format of the
+       bound views when it decides how WebGPU samples them (depth, 32-bit float and integer
+       formats); Unknown means a filterable float. Other backends ignore this field. */
+    VriFormat               format;
 } VriDescriptorRangeDesc;
 
 /* A descriptor-set layout = a register space + its ranges. */

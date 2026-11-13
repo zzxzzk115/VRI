@@ -24,6 +24,7 @@ namespace vri::wgpu
         QueueWGPU*           GetQueue(VriQueueType /*type*/) { return &m_queueObj; }
         const VriDeviceDesc& Desc() const { return m_desc; }
         bool                 HasTimestamp() const { return m_hasTimestamp; }
+        bool                 HasFloat32Filterable() const { return m_hasFloat32Filterable; }
 
         void ReportError(const char* message) const;
         void ReportWarning(const char* message) const;
@@ -34,14 +35,15 @@ namespace vri::wgpu
         void FillDeviceDesc();
         void FillRegistry();
 
-        WGPUInstance         m_instance     = nullptr;
-        WGPUAdapter          m_adapter      = nullptr;
-        WGPUDevice           m_device       = nullptr;
-        WGPUQueue            m_queue        = nullptr;
-        QueueWGPU            m_queueObj     = {};
-        VriDeviceDesc        m_desc         = {};
-        VriCallbackInterface m_callback     = {};
-        bool                 m_hasTimestamp = false; // WGPUFeatureName_TimestampQuery granted at creation
+        WGPUInstance         m_instance             = nullptr;
+        WGPUAdapter          m_adapter              = nullptr;
+        WGPUDevice           m_device               = nullptr;
+        WGPUQueue            m_queue                = nullptr;
+        QueueWGPU            m_queueObj             = {};
+        VriDeviceDesc        m_desc                 = {};
+        VriCallbackInterface m_callback             = {};
+        bool                 m_hasTimestamp         = false; // WGPUFeatureName_TimestampQuery granted at creation
+        bool                 m_hasFloat32Filterable = false; // WGPUFeatureName_Float32Filterable granted at creation
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

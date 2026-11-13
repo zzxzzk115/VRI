@@ -157,7 +157,7 @@ namespace vri::wgpu
         WGPUDeviceDescriptor deviceDesc                  = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
-        WGPUFeatureName requiredFeatures[2]              = {};
+        WGPUFeatureName requiredFeatures[4]              = {};
         uint32_t        featureCount                     = 0;
         if (m_hasTimestamp)
         {
@@ -166,9 +166,22 @@ namespace vri::wgpu
             requiredFeatures[featureCount++] =
                 static_cast<WGPUFeatureName>(WGPUNativeFeature_TimestampQueryInsideEncoders);
 #endif
-            deviceDesc.requiredFeatures     = requiredFeatures;
-            deviceDesc.requiredFeatureCount = featureCount;
         }
+#if !defined(__EMSCRIPTEN__)
+        // wgpu-native keeps read-write storage textures, even the r32 formats core WebGPU allows, behind this
+        // native feature; the browser has them in core.
+        const auto adapterFormats =
+            static_cast<WGPUFeatureName>(WGPUNativeFeature_TextureAdapterSpecificFormatFeatures);
+        if (wgpuAdapterHasFeature(m_adapter, adapterFormats) != 0)
+            requiredFeatures[featureCount++] = adapterFormats;
+#endif
+        // 32-bit float textures are filterable where the adapter allows it; without the feature they are only
+        // loaded, or sampled with a non-filtering sampler.
+        m_hasFloat32Filterable = wgpuAdapterHasFeature(m_adapter, WGPUFeatureName_Float32Filterable) != 0;
+        if (m_hasFloat32Filterable)
+            requiredFeatures[featureCount++] = WGPUFeatureName_Float32Filterable;
+        deviceDesc.requiredFeatures       = featureCount ? requiredFeatures : nullptr;
+        deviceDesc.requiredFeatureCount   = featureCount;
         WGPURequestDeviceCallbackInfo dcb = {};
         dcb.mode                          = kCallbackMode;
         dcb.callback                      = OnDevice;
@@ -239,6 +252,8 @@ namespace vri::wgpu
         // WebGPU compute is wired (CreateComputePipeline + compute pass / CmdDispatch),
         // on both native (wgpu-native) and the browser (emdawnwebgpu).
         m_desc.hasComputeShader = VRI_TRUE;
+        // CmdClearStorageTexture copies from a buffer: the formats WebGPU stores, on CopyDst textures.
+        m_desc.hasClearStorageTexture = VRI_TRUE;
         // WebGPU has no geometry or tessellation stages.
         m_desc.hasGeometryShader = VRI_FALSE;
         m_desc.hasTessellation   = VRI_FALSE;
