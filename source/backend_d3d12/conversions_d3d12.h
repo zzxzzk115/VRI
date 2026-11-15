@@ -4,6 +4,8 @@
 #include <d3d12.h>
 #include <dxgi.h>
 
+#include <algorithm>
+
 #include <vri/vri.h>
 
 #include "core/conversion_map.h"
@@ -234,18 +236,26 @@ namespace vri::d3d12
 
     inline D3D12_SAMPLER_DESC ToD3DSampler(const VriSamplerDesc& s)
     {
-        D3D12_SAMPLER_DESC d      = {};
-        const bool         linear = s.magFilter == VriFilter_Linear || s.minFilter == VriFilter_Linear;
+        D3D12_SAMPLER_DESC d = {};
+        // Minification, magnification and mip filtering are chosen separately, as on the other backends.
         // A comparison sampler (shadow PCF) needs a COMPARISON filter variant + the compare func.
-        if (s.compareEnable)
-            d.Filter = linear ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR : D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
+        const auto type = [](bool linear) { return linear ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT; };
+        const D3D12_FILTER_REDUCTION_TYPE reduction =
+            s.compareEnable ? D3D12_FILTER_REDUCTION_TYPE_COMPARISON : D3D12_FILTER_REDUCTION_TYPE_STANDARD;
+        if (s.anisotropyEnable)
+            d.Filter = D3D12_ENCODE_ANISOTROPIC_FILTER(reduction);
         else
-            d.Filter = linear ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_MIN_MAG_MIP_POINT;
-        d.AddressU      = ToD3DAddress(s.addressModeU);
-        d.AddressV      = ToD3DAddress(s.addressModeV);
-        d.AddressW      = ToD3DAddress(s.addressModeW);
-        d.MipLODBias    = s.mipLodBias;
-        d.MaxAnisotropy = 1;
+            d.Filter = D3D12_ENCODE_BASIC_FILTER(type(s.minFilter == VriFilter_Linear),
+                                                 type(s.magFilter == VriFilter_Linear),
+                                                 type(s.mipmapMode == VriMipmapMode_Linear),
+                                                 reduction);
+        d.AddressU   = ToD3DAddress(s.addressModeU);
+        d.AddressV   = ToD3DAddress(s.addressModeV);
+        d.AddressW   = ToD3DAddress(s.addressModeW);
+        d.MipLODBias = s.mipLodBias;
+        // Every D3D12 device supports anisotropy up to 16.
+        d.MaxAnisotropy =
+            s.anisotropyEnable ? static_cast<UINT>((std::min)((std::max)(s.maxAnisotropy, 1.0f), 16.0f)) : 1u;
         // Non-comparison samplers must use COMPARISON_FUNC_NONE: a non-NONE func on a non-comparison
         // filter trips a debug-layer warning (the func is ignored, but it flags likely-unintended use).
         d.ComparisonFunc = s.compareEnable ? ToD3DCompare(s.compareOp) : D3D12_COMPARISON_FUNC_NONE;

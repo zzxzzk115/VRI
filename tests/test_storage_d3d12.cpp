@@ -17,6 +17,7 @@
 #include <wrl/client.h>
 
 #include "shaders/tests/mip_reduce_dxbc.h"          // g_mipReduceDxbcCS
+#include "shaders/tests/sample_filter_dxbc.h"       // g_sampleFilterDxbcCS
 #include "shaders/tests/storage_constant_dxbc.h"    // g_storageConstantDxbcCS
 #include "shaders/tests/storage_write_3d_dxbc.h"    // g_storageWrite3dDxbcCS
 #include "shaders/tests/storage_write_array_dxbc.h" // g_storageWriteArrayDxbcCS
@@ -118,6 +119,7 @@ namespace
             poolDesc.textureMaxNum          = 4;
             poolDesc.storageTextureMaxNum   = 4;
             poolDesc.structuredBufferMaxNum = 4;
+            poolDesc.samplerMaxNum          = 4;
             REQUIRE(c.CreateDescriptorPool(dev, &poolDesc, &pool) == VriResult_Success);
             REQUIRE(c.AllocateDescriptorSets(pool, layout, 0, &set, 1) == VriResult_Success);
             REQUIRE(c.CreateCommandAllocator(dev, queueType, &alloc) == VriResult_Success);
@@ -760,4 +762,71 @@ TEST_CASE("D3D12: views may be destroyed once written into a descriptor set")
     CHECK(f.errors == 0);
     f.c.DestroyTexture(t);
     f.c.DestroyBuffer(input);
+}
+
+TEST_CASE("D3D12: samplers filter magnification and minification separately")
+{
+    const VriDescriptorRangeDesc ranges[3] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute},
+                                            {1, 1, VriDescriptorType_Texture, VriShaderStage_Compute},
+                                            {2, 1, VriDescriptorType_Sampler, VriShaderStage_Compute}};
+    for (const bool magnifyLinear : {false, true})
+    {
+        CAPTURE(magnifyLinear);
+        ComputeFixture f;
+        if (!f.Create(ranges, 3, g_sampleFilterDxbcCS, sizeof(g_sampleFilterDxbcCS)))
+        {
+            MESSAGE("D3D12 unavailable - skipping");
+            return;
+        }
+        // A 2x2 source: red at (0, 0), black elsewhere.
+        VriTexture*   source = f.Texture(VriTextureType_2D, 2, 1, 1, 1);
+        VriTexture*   target = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+        const Texel   texels[4] {{1, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}};
+        VriBufferDesc bd {};
+        bd.size           = sizeof(texels);
+        bd.usage          = VriBufferUsage_TransferSrc;
+        bd.memoryLocation = VriMemoryLocation_HostUpload;
+        VriBuffer* upload = nullptr;
+        REQUIRE(f.c.CreateBuffer(f.dev, &bd, &upload) == VriResult_Success);
+        std::memcpy(f.c.MapBuffer(upload, 0, sizeof(texels)), texels, sizeof(texels));
+        f.c.UnmapBuffer(upload);
+        // The minification filter is the opposite of the magnification filter, which LOD 0 selects.
+        VriSamplerDesc sd {};
+        sd.magFilter       = magnifyLinear ? VriFilter_Linear : VriFilter_Nearest;
+        sd.minFilter       = magnifyLinear ? VriFilter_Nearest : VriFilter_Linear;
+        sd.addressModeU    = VriAddressMode_ClampToEdge;
+        sd.addressModeV    = VriAddressMode_ClampToEdge;
+        sd.addressModeW    = VriAddressMode_ClampToEdge;
+        VriDescriptor* smp = nullptr;
+        REQUIRE(f.c.CreateSampler(f.dev, &sd, &smp) == VriResult_Success);
+        const VriDescriptor* views[3] {
+            f.View(target, VriTextureViewType_2D, 0, 0, 1), f.View(source, VriTextureViewType_2D, 0, 0, 1), smp};
+        f.Bind(views, 3);
+        f.Begin();
+        f.Barrier(source, VriLayout_Undefined, VriLayout_CopyDestination, 0, 0);
+        VriBufferTextureCopyDesc cp {};
+        cp.texture.layerNum = 1;
+        cp.texture.aspect   = VriImageAspect_Color;
+        f.c.CmdUploadBufferToTexture(f.cmd, source, upload, &cp);
+        f.Barrier(source, VriLayout_CopyDestination, VriLayout_ShaderResource, 0, 0);
+        f.Barrier(target, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+        f.Dispatch(2, 2, 1);
+        f.Barrier(target, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+        f.Submit();
+        // uv (0.4, 0.4) lies in texel (0, 0), between the four texel centers.
+        const Texel texel = f.Read(target, 0, 0);
+        if (magnifyLinear)
+        {
+            CHECK(texel.x > 0.0f);
+            CHECK(texel.x < 1.0f);
+        }
+        else
+            CHECK(texel.x == 1.0f);
+        CHECK(f.errors == 0);
+        for (const VriDescriptor* view : views)
+            f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+        f.c.DestroyBuffer(upload);
+        f.c.DestroyTexture(source);
+        f.c.DestroyTexture(target);
+    }
 }
