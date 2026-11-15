@@ -455,14 +455,15 @@ void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture,
 }
 void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
 {
-    // Buffers implicitly promote from COMMON to COPY_DEST on a direct queue. Record that
-    // so a following read-state barrier (CmdBarrier -> TransitionBuffer) emits the correct
-    // StateBefore (COPY_DEST), instead of a stale COMMON that the debug layer rejects.
-    BufferD3D12* s = Buf(src);
-    BufferD3D12* d = Buf(dst);
-    CB(cmd)->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
-    if (d->heapType == D3D12_HEAP_TYPE_DEFAULT)
-        d->state = D3D12_RESOURCE_STATE_COPY_DEST;
+    // Implicit promotion to COPY_DEST covers only a buffer in COMMON; a buffer refreshed by a copy
+    // after being read is in a read state, so both sides are transitioned explicitly (upload and
+    // readback heaps keep their fixed states).
+    CommandBufferD3D12* c = CB(cmd);
+    BufferD3D12*        s = Buf(src);
+    BufferD3D12*        d = Buf(dst);
+    TransitionBuffer(c, s, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    TransitionBuffer(c, d, D3D12_RESOURCE_STATE_COPY_DEST);
+    c->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
 }
 // Texture->texture copy. The app barriers src to CopySource and dst to CopyDestination, so
 // this just issues CopyTextureRegion between the selected subresources (subresource = mip +

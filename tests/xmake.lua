@@ -109,6 +109,7 @@ target("vri-tests")
         add_files("test_ubo_d3d12.cpp")
         add_files("test_texture_d3d12.cpp")
         add_files("test_formats_d3d12.cpp")   -- DXGI format mapping; unmapped formats are errors
+        add_files("test_copy_d3d12.cpp")      -- buffer copies into a buffer in a read state
         add_files("test_bc_upload_d3d12.cpp")
         add_files("test_depth_d3d12.cpp")
         add_files("test_msaa_d3d12.cpp")
