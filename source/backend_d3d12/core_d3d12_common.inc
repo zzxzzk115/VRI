@@ -43,6 +43,35 @@
         }
         DescriptorSetD3D12* DSet(VriDescriptorSet* s) { return reinterpret_cast<DescriptorSetD3D12*>(s); }
 
+        // The resource dimension and extent of `desc`: 1D and 3D textures keep their dimension
+        // (a 3D texture's depth is its third extent); 2D textures, arrays and cubes are 2D array
+        // resources with one slice per layer.
+        void SetTextureExtent(D3D12_RESOURCE_DESC& rd, const VriTextureDesc* desc)
+        {
+            const UINT   height = desc->height ? desc->height : 1;
+            const UINT16 layers = static_cast<UINT16>(desc->layerNum ? desc->layerNum : 1);
+            rd.Width            = desc->width ? desc->width : 1;
+            switch (desc->type)
+            {
+                case VriTextureType_1D:
+                case VriTextureType_1DArray:
+                    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE1D;
+                    rd.Height           = 1;
+                    rd.DepthOrArraySize = layers;
+                    break;
+                case VriTextureType_3D:
+                    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+                    rd.Height           = height;
+                    rd.DepthOrArraySize = static_cast<UINT16>(desc->depth ? desc->depth : 1);
+                    break;
+                default:
+                    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                    rd.Height           = height;
+                    rd.DepthOrArraySize = layers;
+                    break;
+            }
+        }
+
         // `access` decides the General layout: storage access needs UNORDERED_ACCESS, which textures
         // are never promoted to implicitly.
         D3D12_RESOURCE_STATES ToState(VriLayout layout, VriAccessFlags access)

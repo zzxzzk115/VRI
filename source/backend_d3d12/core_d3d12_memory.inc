@@ -46,10 +46,7 @@
                 return; // a zero size: no memory type can hold the texture
             }
             D3D12_RESOURCE_DESC  rd = {};
-            rd.Dimension            = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            rd.Width                = desc->width ? desc->width : 1;
-            rd.Height               = desc->height ? desc->height : 1;
-            rd.DepthOrArraySize     = static_cast<UINT16>(desc->layerNum ? desc->layerNum : 1);
+            SetTextureExtent(rd, desc);
             rd.MipLevels            = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
             rd.Format               = fi.format;
             rd.SampleDesc.Count     = desc->sampleNum ? desc->sampleNum : 1;

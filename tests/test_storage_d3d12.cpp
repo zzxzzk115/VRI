@@ -15,7 +15,9 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 
-#include "shaders/tests/storage_write_dxbc.h" // g_storageWriteDxbcCS
+#include "shaders/tests/storage_write_3d_dxbc.h"    // g_storageWrite3dDxbcCS
+#include "shaders/tests/storage_write_array_dxbc.h" // g_storageWriteArrayDxbcCS
+#include "shaders/tests/storage_write_dxbc.h"       // g_storageWriteDxbcCS
 
 namespace
 {
@@ -230,9 +232,9 @@ namespace
             c.Wait(fence, fenceValue);
         }
 
-        // Reads texel (0, 0) of one subresource (2D: mip/layer, 3D: mip and depth slice z) on the
-        // graphics queue.
-        Texel Read(VriTexture* t, uint32_t mip, uint32_t layer, int32_t z = 0)
+        // Reads one texel of a subresource (mip and layer) on the graphics queue. `offset` is the
+        // texel's byte offset in the readback footprint (rows are 256 bytes apart).
+        Texel Read(VriTexture* t, uint32_t mip, uint32_t layer, size_t offset = 0)
         {
             VriBufferDesc bd {};
             bd.size             = 256 * 64; // 256-byte rows; enough for the 16-texel tests
@@ -246,11 +248,10 @@ namespace
             cp.texture.baseLayer = layer;
             cp.texture.layerNum  = 1;
             cp.texture.aspect    = VriImageAspect_Color;
-            cp.texture.z         = z;
             c.CmdReadbackTextureToBuffer(readCmd, readback, t, &cp);
             Submit(readCmd, graphics);
             Texel texel {};
-            std::memcpy(&texel, c.MapBuffer(readback, 0, sizeof(texel)), sizeof(texel));
+            std::memcpy(&texel, static_cast<const uint8_t*>(c.MapBuffer(readback, 0, bd.size)) + offset, sizeof(texel));
             c.UnmapBuffer(readback);
             c.DestroyBuffer(readback);
             return texel;
@@ -324,6 +325,92 @@ TEST_CASE("D3D12: a compute queue hands a storage texture to the graphics queue 
         CHECK(texel.x == 16.0f);
         CHECK(texel.z == 7.0f);
     }
+    CHECK(f.errors == 0);
+    f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyTexture(t);
+}
+
+TEST_CASE("D3D12: a storage view writes the mip it selects")
+{
+    const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 1, g_storageWriteDxbcCS, sizeof(g_storageWriteDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTexture* t = f.Texture(VriTextureType_2D, 16, 1, 3, 1);
+    for (uint32_t mip = 1; mip < 3; ++mip)
+    {
+        CAPTURE(mip);
+        const VriDescriptor* view = f.View(t, VriTextureViewType_2D, mip, 0, 1);
+        f.Bind(&view, 1);
+        f.Begin();
+        f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+        f.Dispatch(1, 1, 1);
+        f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+        f.Submit();
+        // The shader sees the mip's own size and writes it there.
+        const Texel texel = f.Read(t, mip, 0);
+        CHECK(texel.x == float(16 >> mip));
+        CHECK(texel.z == 7.0f);
+        f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    }
+    CHECK(f.errors == 0);
+    f.c.DestroyTexture(t);
+}
+
+TEST_CASE("D3D12: an array storage view writes the layers it selects")
+{
+    const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 1, g_storageWriteArrayDxbcCS, sizeof(g_storageWriteArrayDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTexture*          t    = f.Texture(VriTextureType_2DArray, 16, 1, 1, 3);
+    const VriDescriptor* view = f.View(t, VriTextureViewType_2DArray, 0, 1, 2);
+    f.Bind(&view, 1);
+    f.Begin();
+    f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    f.Dispatch(2, 2, 2);
+    f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    for (uint32_t layer = 1; layer < 3; ++layer)
+    {
+        CAPTURE(layer);
+        const Texel texel = f.Read(t, 0, layer);
+        CHECK(texel.x == 16.0f);
+        CHECK(texel.z == 2.0f); // the view's layer count
+    }
+    CHECK(f.errors == 0);
+    f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyTexture(t);
+}
+
+TEST_CASE("D3D12: a 3D texture is written and read back per depth slice")
+{
+    const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 1, g_storageWrite3dDxbcCS, sizeof(g_storageWrite3dDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTexture*          t    = f.Texture(VriTextureType_3D, 4, 4, 1, 1);
+    const VriDescriptor* view = f.View(t, VriTextureViewType_3D, 0, 0, 1);
+    f.Bind(&view, 1);
+    f.Begin();
+    f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    f.Dispatch(1, 1, 1);
+    f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    // Texel (1, 2, 3): rows are 256 bytes apart, slices 4 rows apart, texels 16 bytes wide.
+    const Texel texel = f.Read(t, 0, 0, 3 * 4 * 256 + 2 * 256 + 1 * 16);
+    CHECK(texel.x == 1.0f);
+    CHECK(texel.y == 2.0f);
+    CHECK(texel.z == 3.0f);
     CHECK(f.errors == 0);
     f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
     f.c.DestroyTexture(t);

@@ -165,10 +165,7 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     D3D12_HEAP_PROPERTIES hp = {};
     hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
     D3D12_RESOURCE_DESC rd   = {};
-    rd.Dimension             = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    rd.Width                 = desc->width ? desc->width : 1;
-    rd.Height                = desc->height ? desc->height : 1;
-    rd.DepthOrArraySize      = static_cast<UINT16>(desc->layerNum ? desc->layerNum : 1);
+    SetTextureExtent(rd, desc);
     rd.MipLevels             = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
     rd.Format                = fi.format;
     rd.SampleDesc.Count      = desc->sampleNum ? desc->sampleNum : 1;
@@ -236,11 +233,12 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     t->dsvFormat      = dsvFormat;
     t->srvFormat      = srvFormat;
     t->texelSize      = fi.texelSize;
-    t->width          = desc->width;
-    t->height         = desc->height ? desc->height : 1;
-    t->depth          = 1;
+    t->dimension      = rd.Dimension;
+    t->width          = static_cast<uint32_t>(rd.Width);
+    t->height         = rd.Height;
+    t->depth          = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? rd.DepthOrArraySize : 1u;
     t->mipNum         = rd.MipLevels;
-    t->layerNum       = rd.DepthOrArraySize;
+    t->layerNum       = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1u : rd.DepthOrArraySize;
     t->state          = D3D12_RESOURCE_STATE_COMMON;
     t->sampleCount    = rd.SampleDesc.Count;
     t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
@@ -297,6 +295,10 @@ VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc
     v->texture         = reinterpret_cast<const TextureD3D12*>(desc->texture);
     v->mip             = desc->baseMip;
     v->viewType        = desc->viewType;
+    // 0 selects every remaining mip or layer.
+    v->mipNum    = desc->mipNum ? desc->mipNum : v->texture->mipNum - desc->baseMip;
+    v->baseLayer = desc->baseLayer;
+    v->layerNum  = desc->layerNum ? desc->layerNum : v->texture->layerNum - desc->baseLayer;
     // The view records the texture; it serves as an RTV (color attachment) and/or an
     // SRV source (sampling - the SRV is created into a descriptor set's heap slot at
     // UpdateDescriptorRanges). Pre-create the RTV only for RT-capable textures.

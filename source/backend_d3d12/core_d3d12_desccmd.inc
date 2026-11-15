@@ -80,6 +80,107 @@ VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
     }
     return VriResult_Success;
 }
+// A texture view covers its own mips and layers. A view of one slice of an array resource needs
+// an array descriptor: D3D12's non-array descriptors always address slice 0.
+bool ArrayView(const DescriptorD3D12* v)
+{
+    return v->viewType == VriTextureViewType_1DArray || v->viewType == VriTextureViewType_2DArray ||
+           v->texture->layerNum > 1;
+}
+
+D3D12_UNORDERED_ACCESS_VIEW_DESC StorageViewDesc(const DescriptorD3D12* v)
+{
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+    uav.Format                           = v->texture->format;
+    if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+    {
+        uav.ViewDimension         = D3D12_UAV_DIMENSION_TEXTURE3D;
+        uav.Texture3D.MipSlice    = v->mip;
+        uav.Texture3D.FirstWSlice = 0;
+        uav.Texture3D.WSize       = UINT(-1); // every depth slice of the mip
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D && !ArrayView(v))
+    {
+        uav.ViewDimension      = D3D12_UAV_DIMENSION_TEXTURE1D;
+        uav.Texture1D.MipSlice = v->mip;
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D)
+    {
+        uav.ViewDimension                  = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
+        uav.Texture1DArray.MipSlice        = v->mip;
+        uav.Texture1DArray.FirstArraySlice = v->baseLayer;
+        uav.Texture1DArray.ArraySize       = v->layerNum;
+    }
+    else if (ArrayView(v))
+    {
+        uav.ViewDimension                  = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+        uav.Texture2DArray.MipSlice        = v->mip;
+        uav.Texture2DArray.FirstArraySlice = v->baseLayer;
+        uav.Texture2DArray.ArraySize       = v->layerNum;
+    }
+    else
+    {
+        uav.ViewDimension      = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uav.Texture2D.MipSlice = v->mip;
+    }
+    return uav;
+}
+
+D3D12_SHADER_RESOURCE_VIEW_DESC SampledViewDesc(const DescriptorD3D12* v)
+{
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Format                  = v->texture->srvFormat; // typed sampleable format (R32_FLOAT for a sampled D32)
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+    {
+        srv.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE3D;
+        srv.Texture3D.MostDetailedMip = v->mip;
+        srv.Texture3D.MipLevels       = v->mipNum;
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D && !ArrayView(v))
+    {
+        srv.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE1D;
+        srv.Texture1D.MostDetailedMip = v->mip;
+        srv.Texture1D.MipLevels       = v->mipNum;
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D)
+    {
+        srv.ViewDimension                  = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
+        srv.Texture1DArray.MostDetailedMip = v->mip;
+        srv.Texture1DArray.MipLevels       = v->mipNum;
+        srv.Texture1DArray.FirstArraySlice = v->baseLayer;
+        srv.Texture1DArray.ArraySize       = v->layerNum;
+    }
+    else if (v->viewType == VriTextureViewType_CubeArray) // samples cubes by direction and index
+    {
+        srv.ViewDimension                     = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+        srv.TextureCubeArray.MostDetailedMip  = v->mip;
+        srv.TextureCubeArray.MipLevels        = v->mipNum;
+        srv.TextureCubeArray.First2DArrayFace = v->baseLayer;
+        srv.TextureCubeArray.NumCubes         = v->layerNum / 6;
+    }
+    else if (v->viewType == VriTextureViewType_Cube) // samples a 6-layer resource by direction
+    {
+        srv.ViewDimension               = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        srv.TextureCube.MostDetailedMip = v->mip;
+        srv.TextureCube.MipLevels       = v->mipNum;
+    }
+    else if (ArrayView(v))
+    {
+        srv.ViewDimension                  = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        srv.Texture2DArray.MostDetailedMip = v->mip;
+        srv.Texture2DArray.MipLevels       = v->mipNum;
+        srv.Texture2DArray.FirstArraySlice = v->baseLayer;
+        srv.Texture2DArray.ArraySize       = v->layerNum;
+    }
+    else
+    {
+        srv.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srv.Texture2D.MostDetailedMip = v->mip;
+        srv.Texture2D.MipLevels       = v->mipNum;
+    }
+    return srv;
+}
 void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
                                      uint32_t                            baseRange,
                                      uint32_t                            rangeNum,
@@ -128,37 +229,15 @@ void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
             }
             else if (lb->type == VriDescriptorType_StorageTexture && v->texture) // UAV
             {
-                D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-                uav.Format                           = v->texture->format;
-                uav.ViewDimension                    = D3D12_UAV_DIMENSION_TEXTURE2D;
-                D3D12_CPU_DESCRIPTOR_HANDLE h        = s->srvCpu;
+                const D3D12_UNORDERED_ACCESS_VIEW_DESC uav = StorageViewDesc(v);
+                D3D12_CPU_DESCRIPTOR_HANDLE            h   = s->srvCpu;
                 h.ptr += slot * s->pool->srvSize;
                 d->Device()->CreateUnorderedAccessView(v->texture->resource.Get(), nullptr, &uav, h);
             }
             else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
             {
-                D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
-                srv.Format = v->texture->srvFormat; // typed sampleable format (R32_FLOAT for a sampled D32 depth)
-                srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                const bool isCube =
-                    v->viewType == VriTextureViewType_Cube || v->viewType == VriTextureViewType_CubeArray;
-                if (isCube) // a TextureCube SRV samples a 6-layer resource by direction
-                {
-                    srv.ViewDimension         = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                    srv.TextureCube.MipLevels = v->texture->mipNum;
-                }
-                else if (v->texture->layerNum > 1)
-                {
-                    srv.ViewDimension            = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                    srv.Texture2DArray.MipLevels = v->texture->mipNum;
-                    srv.Texture2DArray.ArraySize = v->texture->layerNum;
-                }
-                else
-                {
-                    srv.ViewDimension       = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    srv.Texture2D.MipLevels = v->texture->mipNum;
-                }
-                D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu;
+                const D3D12_SHADER_RESOURCE_VIEW_DESC srv = SampledViewDesc(v);
+                D3D12_CPU_DESCRIPTOR_HANDLE           h   = s->srvCpu;
                 h.ptr += slot * s->pool->srvSize;
                 d->Device()->CreateShaderResourceView(v->texture->resource.Get(), &srv, h);
             }
@@ -428,15 +507,12 @@ void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture,
 {
     CommandBufferD3D12*              c   = CB(cmd);
     TextureD3D12*                    t   = Tex(texture);
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-    uav.Format                           = t->format;
-    if (t->layerNum > 1)
-    {
-        uav.ViewDimension            = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-        uav.Texture2DArray.ArraySize = t->layerNum;
-    }
-    else
-        uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    // Mip 0 of every layer (every depth slice of a 3D texture).
+    DescriptorD3D12 whole {};
+    whole.texture                        = t;
+    whole.viewType                       = VriTextureViewType_2D;
+    whole.layerNum                       = t->layerNum;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = StorageViewDesc(&whole);
     D3D12_GPU_DESCRIPTOR_HANDLE gpu {};
     D3D12_CPU_DESCRIPTOR_HANDLE cpuView {};
     ID3D12DescriptorHeap*       gpuHeap = nullptr;

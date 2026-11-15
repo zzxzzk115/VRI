@@ -61,12 +61,13 @@ namespace vri::d3d12
         DXGI_FORMAT            format = DXGI_FORMAT_UNKNOWN; // resource format (TYPELESS for a sampled depth target)
         DXGI_FORMAT dsvFormat         = DXGI_FORMAT_UNKNOWN; // typed depth format for the DSV (== format if not depth)
         DXGI_FORMAT srvFormat         = DXGI_FORMAT_UNKNOWN; // typed format for the SRV (R32_FLOAT for sampled D32)
-        uint32_t    width = 0, height = 0, depth = 1;
-        uint32_t    mipNum = 1, layerNum = 1;
-        uint32_t    texelSize      = 0;
-        uint32_t    sampleCount    = 1;     // >1 => multisample (TEXTURE2DMS views)
-        bool        isRenderTarget = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
-        bool        isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
+        D3D12_RESOURCE_DIMENSION dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        uint32_t                 width = 0, height = 0, depth = 1;
+        uint32_t                 mipNum = 1, layerNum = 1;
+        uint32_t                 texelSize      = 0;
+        uint32_t                 sampleCount    = 1;     // >1 => multisample (TEXTURE2DMS views)
+        bool                     isRenderTarget = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
+        bool                     isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
         // Created with VriTextureUsage_ConcurrentQueues: every command list returns it to COMMON,
         // the state each queue can transition from (see CommandBufferD3D12::concurrentTextures).
         bool                  concurrent = false;
@@ -97,7 +98,10 @@ namespace vri::d3d12
         uint64_t                    bufferOffset = 0;
         uint64_t                    bufferSize   = 0;
         D3D12_CPU_DESCRIPTOR_HANDLE cpu          = {}; // for RTV/DSV
-        uint32_t                    mip          = 0;
+        uint32_t                    mip          = 0;  // first mip of a texture view
+        uint32_t                    mipNum       = 1;  // texture view: mips from `mip` (resolved, never 0)
+        uint32_t                    baseLayer    = 0;
+        uint32_t                    layerNum     = 1; // texture view: layers from baseLayer (resolved)
         VriTextureViewType          viewType     = VriTextureViewType_2D; // SRV dimension (cube vs 2d/2darray)
         VriSamplerDesc              sampler      = {}; // for Kind::Sampler (built into the sampler heap at update)
         D3D12_GPU_VIRTUAL_ADDRESS   accelAddress = 0;  // for an acceleration-structure SRV (TLAS)
