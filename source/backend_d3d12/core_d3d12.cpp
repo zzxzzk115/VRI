@@ -8,8 +8,6 @@
 
 #include "core/synchronization.h"
 
-#include <d3dcompiler.h> // D3DReflect (VS input-signature reflection for the input layout)
-
 #include <algorithm>
 #include <cstring>
 #include <string>
