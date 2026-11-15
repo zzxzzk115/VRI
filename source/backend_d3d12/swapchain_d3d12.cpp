@@ -10,6 +10,22 @@ namespace vri::d3d12
         DeviceD3D12*    Dev(VriDevice* d) { return reinterpret_cast<DeviceD3D12*>(d); }
         SwapChainD3D12* SC(VriSwapChain* s) { return reinterpret_cast<SwapChainD3D12*>(s); }
 
+        // Flip-model swapchains reject sRGB formats: the buffers are created with the UNORM
+        // format of the same layout and the sRGB encoding comes from the render-target view,
+        // which takes the texture's (sRGB) format.
+        DXGI_FORMAT FlipModelBufferFormat(DXGI_FORMAT f)
+        {
+            switch (f)
+            {
+                case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+                    return DXGI_FORMAT_R8G8B8A8_UNORM;
+                case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+                    return DXGI_FORMAT_B8G8R8A8_UNORM;
+                default:
+                    return f;
+            }
+        }
+
         // Wrap each DXGI backbuffer as an RTV-capable VRI texture (state PRESENT).
         bool WrapBackbuffers(SwapChainD3D12* s)
         {
@@ -54,6 +70,12 @@ namespace vri::d3d12
             HWND hwnd = static_cast<HWND>(desc->window.handle.win32.hwnd);
             if (!hwnd)
                 return VriResult_InvalidArgument;
+            const DXGI_FORMAT format = ToDxgiFormat(desc->format).format;
+            if (format == DXGI_FORMAT_UNKNOWN)
+            {
+                d->ReportError("D3D12 swapchain: unmapped DXGI format");
+                return VriResult_Unsupported;
+            }
             ID3D12CommandQueue* queue = reinterpret_cast<QueueD3D12*>(desc->queue)->queue.Get();
 
             SwapChainD3D12* s = new SwapChainD3D12 {};
@@ -71,7 +93,7 @@ namespace vri::d3d12
             DXGI_SWAP_CHAIN_DESC1 sd = {};
             sd.Width                 = s->width;
             sd.Height                = s->height;
-            sd.Format                = ToDxgiFormat(desc->format).format;
+            sd.Format                = FlipModelBufferFormat(format);
             sd.SampleDesc.Count      = 1;
             sd.BufferUsage           = DXGI_USAGE_RENDER_TARGET_OUTPUT;
             sd.BufferCount           = s->bufferCount;
@@ -159,7 +181,7 @@ namespace vri::d3d12
             s->width  = width ? width : 1;
             s->height = height ? height : 1;
             if (FAILED(s->swapchain->ResizeBuffers(
-                    s->bufferCount, s->width, s->height, ToDxgiFormat(s->format).format, 0)))
+                    s->bufferCount, s->width, s->height, FlipModelBufferFormat(ToDxgiFormat(s->format).format), 0)))
             {
                 s->device->ReportError("ResizeBuffers failed");
                 return VriResult_Failure;
