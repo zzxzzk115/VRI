@@ -175,27 +175,25 @@ namespace vri::d3d12
 
     VriResult DeviceD3D12::CreateDescriptorHeaps()
     {
-        D3D12_DESCRIPTOR_HEAP_DESC rtv = {};
-        rtv.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-        rtv.NumDescriptors             = kRtvHeapSize;
-        rtv.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // CPU-only
-        if (FAILED(m_device->CreateDescriptorHeap(&rtv, IID_PPV_ARGS(&m_rtvHeap))))
+        for (auto [attachment, type, size] : {std::tuple {&m_rtvHeap, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kRtvHeapSize},
+                                              std::tuple {&m_dsvHeap, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, kDsvHeapSize}})
         {
-            ReportError("CreateDescriptorHeap (RTV) failed");
-            return VriResult_Failure;
+            D3D12_DESCRIPTOR_HEAP_DESC cpu = {};
+            cpu.Type                       = type;
+            cpu.NumDescriptors             = size;
+            cpu.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // CPU-only
+            if (FAILED(m_device->CreateDescriptorHeap(&cpu, IID_PPV_ARGS(&attachment->heap))))
+            {
+                ReportError(type == D3D12_DESCRIPTOR_HEAP_TYPE_RTV ? "CreateDescriptorHeap (RTV) failed" :
+                                                                     "CreateDescriptorHeap (DSV) failed");
+                return VriResult_Failure;
+            }
+            attachment->increment = m_device->GetDescriptorHandleIncrementSize(type);
+            // Popped from the back, so the lowest slots are handed out first.
+            attachment->free.resize(size);
+            for (uint32_t slot = 0; slot < size; ++slot)
+                attachment->free[slot] = size - 1 - slot;
         }
-        m_rtvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-        D3D12_DESCRIPTOR_HEAP_DESC dsv = {};
-        dsv.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsv.NumDescriptors             = kDsvHeapSize;
-        dsv.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        if (FAILED(m_device->CreateDescriptorHeap(&dsv, IID_PPV_ARGS(&m_dsvHeap))))
-        {
-            ReportError("CreateDescriptorHeap (DSV) failed");
-            return VriResult_Failure;
-        }
-        m_dsvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
         for (auto [shared, type, size] :
              {std::tuple {&m_viewHeap, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kViewHeapSize},
@@ -262,20 +260,24 @@ namespace vri::d3d12
         }
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocRtv()
+    bool DeviceD3D12::AllocateAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE& out)
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
-        h.ptr += static_cast<SIZE_T>(m_rtvNext % kRtvHeapSize) * m_rtvSize; // ring (Phase 1: few RTVs)
-        ++m_rtvNext;
-        return h;
+        std::lock_guard lock(m_attachmentHeapMutex);
+        AttachmentHeap& heap = depth ? m_dsvHeap : m_rtvHeap;
+        if (heap.free.empty())
+            return false;
+        out = heap.heap->GetCPUDescriptorHandleForHeapStart();
+        out.ptr += static_cast<SIZE_T>(heap.free.back()) * heap.increment;
+        heap.free.pop_back();
+        return true;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocDsv()
+    void DeviceD3D12::FreeAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE handle)
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE h = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-        h.ptr += static_cast<SIZE_T>(m_dsvNext % kDsvHeapSize) * m_dsvSize;
-        ++m_dsvNext;
-        return h;
+        std::lock_guard lock(m_attachmentHeapMutex);
+        AttachmentHeap& heap = depth ? m_dsvHeap : m_rtvHeap;
+        heap.free.push_back(
+            static_cast<uint32_t>((handle.ptr - heap.heap->GetCPUDescriptorHandleForHeapStart().ptr) / heap.increment));
     }
 
     // D3D12 has no per-feature device-creation flag (features are pure capabilities),

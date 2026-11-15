@@ -86,6 +86,9 @@ This is the one backend where the model is *stricter* than the general contract 
   one of each at a time. Creating and destroying a pool takes a block of them under a device lock; sets
   are bump-allocated within the pool's block with no lock, so descriptor allocation/reset on one pool is
   single-owner (the table's descriptor-pool rule). The sampler heap holds 2048 samplers for all pools.
+- Render-target and depth-stencil views each hold a CPU descriptor (4096 RTVs and 1024 DSVs per device) from
+  `CreateTextureView` to `DestroyDescriptor`, taken and returned under a device lock. Creating a view when all
+  are held fails with `VriResult_OutOfMemory`.
 - Each `VriQueueType` maps to its own engine — Graphics→DIRECT, Compute→COMPUTE, Transfer→COPY
   (`source/backend_d3d12/device_d3d12.h`) — so the three queues run independently; cross-queue
   ordering is the caller's via timeline fences.

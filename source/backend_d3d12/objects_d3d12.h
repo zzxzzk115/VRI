@@ -101,9 +101,10 @@ namespace vri::d3d12
         const BufferD3D12*          buffer       = nullptr;
         uint64_t                    bufferOffset = 0;
         uint64_t                    bufferSize   = 0;
-        D3D12_CPU_DESCRIPTOR_HANDLE cpu          = {}; // for RTV/DSV
-        uint32_t                    mip          = 0;  // first mip of a texture view
-        uint32_t                    mipNum       = 1;  // texture view: mips from `mip` (resolved, never 0)
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu          = {};    // RTV or DSV slot, held until DestroyDescriptor
+        bool                        cpuIsDepth   = false; // `cpu` is in the DSV heap
+        uint32_t                    mip          = 0;     // first mip of a texture view
+        uint32_t                    mipNum       = 1;     // texture view: mips from `mip` (resolved, never 0)
         uint32_t                    baseLayer    = 0;
         uint32_t                    layerNum     = 1; // texture view: layers from baseLayer (resolved)
         VriTextureViewType          viewType     = VriTextureViewType_2D; // SRV dimension (cube vs 2d/2darray)

@@ -6,7 +6,7 @@ VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriForm
 {
     VriFormatSupportFlags             r  = VriFormatSupport_None;
     D3D12_FEATURE_DATA_FORMAT_SUPPORT fs = {};
-    fs.Format = ToDxgiFormat(format).format;
+    fs.Format                            = ToDxgiFormat(format).format;
     if (fs.Format == DXGI_FORMAT_UNKNOWN ||
         FAILED(Dev(device)->Device()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &fs, sizeof(fs))))
         return r;
@@ -167,10 +167,10 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
     D3D12_RESOURCE_DESC rd   = {};
     SetTextureExtent(rd, desc);
-    rd.MipLevels             = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
-    rd.Format                = fi.format;
-    rd.SampleDesc.Count      = desc->sampleNum ? desc->sampleNum : 1;
-    rd.Layout                = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    rd.MipLevels        = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
+    rd.Format           = fi.format;
+    rd.SampleDesc.Count = desc->sampleNum ? desc->sampleNum : 1;
+    rd.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     // A depth target that is ALSO sampled (shadow map) must use a TYPELESS resource so it
     // can carry both a typed DSV and a typed SRV (D3D12 forbids a D*_ format SRV directly).
     DXGI_FORMAT dsvFormat = fi.format, srvFormat = fi.format;
@@ -228,18 +228,18 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
         pcv = &cv;
     }
 
-    TextureD3D12* t   = new TextureD3D12 {};
-    t->device         = d;
-    t->format         = rd.Format;
-    t->dsvFormat      = dsvFormat;
-    t->srvFormat      = srvFormat;
-    t->texelSize      = fi.texelSize;
-    t->dimension      = rd.Dimension;
-    t->width          = static_cast<uint32_t>(rd.Width);
-    t->height         = rd.Height;
-    t->depth          = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? rd.DepthOrArraySize : 1u;
-    t->mipNum         = rd.MipLevels;
-    t->layerNum       = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1u : rd.DepthOrArraySize;
+    TextureD3D12* t = new TextureD3D12 {};
+    t->device       = d;
+    t->format       = rd.Format;
+    t->dsvFormat    = dsvFormat;
+    t->srvFormat    = srvFormat;
+    t->texelSize    = fi.texelSize;
+    t->dimension    = rd.Dimension;
+    t->width        = static_cast<uint32_t>(rd.Width);
+    t->height       = rd.Height;
+    t->depth        = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? rd.DepthOrArraySize : 1u;
+    t->mipNum       = rd.MipLevels;
+    t->layerNum     = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1u : rd.DepthOrArraySize;
     t->ResetStates(D3D12_RESOURCE_STATE_COMMON);
     t->sampleCount    = rd.SampleDesc.Count;
     t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
@@ -303,13 +303,21 @@ VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc
     // The view records the texture; it serves as an RTV (color attachment) and/or an
     // SRV source (sampling - the SRV is created into a descriptor set's heap slot at
     // UpdateDescriptorRanges). Pre-create the RTV only for RT-capable textures.
-    v->kind = DescriptorD3D12::Kind::TextureRtv;
+    v->kind       = DescriptorD3D12::Kind::TextureRtv;
+    v->cpuIsDepth = v->texture->isDepthStencil;
+    if ((v->texture->isDepthStencil || v->texture->isRenderTarget) && !d->AllocateAttachmentView(v->cpuIsDepth, v->cpu))
+    {
+        d->ReportError(v->cpuIsDepth ? "CreateTextureView: every depth-stencil-view descriptor is held by a live view" :
+                                       "CreateTextureView: every render-target-view descriptor is held by a live view");
+        delete v;
+        *out = nullptr;
+        return VriResult_OutOfMemory;
+    }
     if (v->texture->isDepthStencil) // depth-stencil view (used as the depth attachment)
     {
-        v->cpu                            = d->AllocDsv();
         D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
         dsv.Format = v->texture->dsvFormat; // typed depth (resource may be TYPELESS for sampling)
-        if (v->texture->layerNum > 1) // a slice of an array: Texture2D views address slice 0 only
+        if (v->texture->layerNum > 1)       // a slice of an array: Texture2D views address slice 0 only
         {
             dsv.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
             dsv.Texture2DArray.MipSlice        = desc->baseMip;
@@ -325,7 +333,6 @@ VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc
     }
     else if (v->texture->isRenderTarget)
     {
-        v->cpu                            = d->AllocRtv();
         D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
         rtv.Format                        = v->texture->format;
         // Array RTV for a layered target (viewType 2DArray, or > 1 layer): multiview
@@ -386,6 +393,10 @@ VriResult VRI_CALL CreateSampler(VriDevice* device, const VriSamplerDesc* desc, 
 }
 void VRI_CALL DestroyDescriptor(VriDescriptor* descriptor)
 {
-    if (descriptor)
-        delete Desc(descriptor);
+    if (!descriptor)
+        return;
+    DescriptorD3D12* v = Desc(descriptor);
+    if (v->cpu.ptr)
+        v->device->FreeAttachmentView(v->cpuIsDepth, v->cpu);
+    delete v;
 }
