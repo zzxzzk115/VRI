@@ -157,8 +157,9 @@ namespace vri::wgpu
         WGPUDeviceDescriptor deviceDesc                  = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
-        WGPUFeatureName requiredFeatures[7]              = {};
-        uint32_t        featureCount                     = 0;
+        // At most: two timestamp features, adapter-specific formats, float32-filterable, three compression families.
+        WGPUFeatureName requiredFeatures[7] = {};
+        uint32_t        featureCount        = 0;
         if (m_hasTimestamp)
         {
             requiredFeatures[featureCount++] = WGPUFeatureName_TimestampQuery;

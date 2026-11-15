@@ -9,6 +9,7 @@
 
 #include "core/synchronization.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -1631,8 +1632,9 @@ namespace vri::wgpu
             // at the aligned pitch first (per-row buffer copy), so any texture size just works.
             const uint32_t          tightPitch   = (rowTexels + block - 1) / block * t->texelSize;
             const uint32_t          alignedPitch = (tightPitch + 255u) & ~255u;
+            const uint32_t          sourceRows   = (imageRows + block - 1) / block; // block rows per source slice
             WGPUTexelCopyBufferInfo srcInfo      = {};
-            srcInfo.layout.rowsPerImage          = (imageRows + block - 1) / block;
+            srcInfo.layout.rowsPerImage          = sourceRows;
             if (tightPitch == alignedPitch)
             {
                 srcInfo.buffer             = Buf(src)->buffer;
@@ -1643,16 +1645,18 @@ namespace vri::wgpu
             else
             {
                 WGPUBufferDescriptor bd = {};
-                bd.size                 = uint64_t(alignedPitch) * blockRows;
+                bd.size                 = uint64_t(alignedPitch) * blockRows * extDepth;
                 bd.usage                = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
                 WGPUBuffer temp         = wgpuDeviceCreateBuffer(c->device->Device(), &bd);
-                for (uint32_t r = 0; r < blockRows; ++r)
-                    wgpuCommandEncoderCopyBufferToBuffer(c->encoder,
-                                                         Buf(src)->buffer,
-                                                         region->bufferOffset + uint64_t(r) * tightPitch,
-                                                         temp,
-                                                         uint64_t(r) * alignedPitch,
-                                                         tightPitch);
+                for (uint32_t slice = 0; slice < extDepth; ++slice)
+                    for (uint32_t r = 0; r < blockRows; ++r)
+                        wgpuCommandEncoderCopyBufferToBuffer(c->encoder,
+                                                             Buf(src)->buffer,
+                                                             region->bufferOffset +
+                                                                 (uint64_t(slice) * sourceRows + r) * tightPitch,
+                                                             temp,
+                                                             (uint64_t(slice) * blockRows + r) * alignedPitch,
+                                                             tightPitch);
                 srcInfo.buffer              = temp;
                 srcInfo.layout.offset       = 0;
                 srcInfo.layout.bytesPerRow  = alignedPitch;
@@ -1667,21 +1671,40 @@ namespace vri::wgpu
                                      VriTexture*               src,
                                      const VriTextureCopyDesc* region)
         {
-            const TextureWGPU*       s  = reinterpret_cast<const TextureWGPU*>(src);
-            const TextureWGPU*       d  = reinterpret_cast<const TextureWGPU*>(dst);
-            WGPUTexelCopyTextureInfo si = {};
-            si.texture                  = s->texture;
-            si.aspect                   = WGPUTextureAspect_All;
-            WGPUTexelCopyTextureInfo di = {};
-            di.texture                  = d->texture;
-            di.aspect                   = WGPUTextureAspect_All;
-            if (region)
-            {
-                si.mipLevel = region->src.mip;
-                di.mipLevel = region->dst.mip;
-            }
-            WGPUExtent3D ext = {s->width, s->height, s->depth};
-            wgpuCommandEncoderCopyTextureToTexture(CB(cmd)->encoder, &si, &di, &ext);
+            CommandBufferWGPU* c = CB(cmd);
+            EndComputePass(c);
+            const TextureWGPU*         s           = reinterpret_cast<const TextureWGPU*>(src);
+            const TextureWGPU*         d           = reinterpret_cast<const TextureWGPU*>(dst);
+            const VriTextureRegionDesc source      = region ? region->src : VriTextureRegionDesc {};
+            const VriTextureRegionDesc destination = region ? region->dst : VriTextureRegionDesc {};
+            // As in CmdUploadBufferToTexture: array layers are origin.z and depthOrArrayLayers, as volume slices are.
+            // A zero size is the whole source mip, as in the Vulkan backend.
+            const bool               sourceArray      = s->layerNum > 1;
+            const bool               destinationArray = d->layerNum > 1;
+            const uint32_t           layers           = source.layerNum ? source.layerNum : 1u;
+            WGPUTexelCopyTextureInfo si               = {};
+            si.texture                                = s->texture;
+            si.aspect                                 = WGPUTextureAspect_All;
+            si.mipLevel                               = source.mip;
+            si.origin                                 = {static_cast<uint32_t>(source.x),
+                                                         static_cast<uint32_t>(source.y),
+                         sourceArray ? source.baseLayer : static_cast<uint32_t>(source.z)};
+            WGPUTexelCopyTextureInfo di               = {};
+            di.texture                                = d->texture;
+            di.aspect                                 = WGPUTextureAspect_All;
+            di.mipLevel                               = destination.mip;
+            di.origin                                 = {static_cast<uint32_t>(destination.x),
+                                                         static_cast<uint32_t>(destination.y),
+                         destinationArray ? destination.baseLayer : static_cast<uint32_t>(destination.z)};
+            // Compressed copies cover whole blocks, as in CmdUploadBufferToTexture.
+            const uint32_t     block  = s->blockDim;
+            const uint32_t     width  = source.width ? source.width : std::max(s->width >> source.mip, 1u);
+            const uint32_t     height = source.height ? source.height : std::max(s->height >> source.mip, 1u);
+            const WGPUExtent3D ext    = {
+                (width + block - 1) / block * block,
+                (height + block - 1) / block * block,
+                sourceArray ? layers : (source.depth ? source.depth : std::max(s->depth >> source.mip, 1u))};
+            wgpuCommandEncoderCopyTextureToTexture(c->encoder, &si, &di, &ext);
         }
 
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}
