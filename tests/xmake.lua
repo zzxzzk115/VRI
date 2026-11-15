@@ -100,7 +100,8 @@ target("vri-tests")
         if is_plat("windows") then
             add_files("test_timed_wait_d3d12.cpp") -- host wait policy, no GPU required
             add_files("test_swapchain_d3d12.cpp") -- sRGB swapchain on a hidden Win32 window
-            add_syslinks("user32")
+            add_files("test_storage_d3d12.cpp")   -- compute storage textures under GPU-based validation
+            add_syslinks("user32", "d3d12")
         end
         add_files("test_clear_d3d12.cpp")
         add_files("test_triangle_d3d12.cpp")

@@ -43,7 +43,9 @@
         }
         DescriptorSetD3D12* DSet(VriDescriptorSet* s) { return reinterpret_cast<DescriptorSetD3D12*>(s); }
 
-        D3D12_RESOURCE_STATES ToState(VriLayout layout)
+        // `access` decides the General layout: storage access needs UNORDERED_ACCESS, which textures
+        // are never promoted to implicitly.
+        D3D12_RESOURCE_STATES ToState(VriLayout layout, VriAccessFlags access)
         {
             switch (layout)
             {
@@ -55,6 +57,8 @@
                     return D3D12_RESOURCE_STATE_DEPTH_READ;
                 case VriLayout_ShaderResource:
                     return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+                case VriLayout_ShaderResourceStorage:
+                    return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
                 case VriLayout_CopySource:
                     return D3D12_RESOURCE_STATE_COPY_SOURCE;
                 case VriLayout_CopyDestination:
@@ -62,7 +66,9 @@
                 case VriLayout_Present:
                     return D3D12_RESOURCE_STATE_PRESENT;
                 case VriLayout_General:
-                    return D3D12_RESOURCE_STATE_COMMON;
+                    return (access & (VriAccess_ShaderResourceStorageRead | VriAccess_ShaderResourceStorageWrite)) ?
+                               D3D12_RESOURCE_STATE_UNORDERED_ACCESS :
+                               D3D12_RESOURCE_STATE_COMMON;
                 default:
                     return D3D12_RESOURCE_STATE_COMMON;
             }
@@ -112,6 +118,16 @@
             b.Transition.StateAfter  = after;
             c->list->ResourceBarrier(1, &b);
             t->state = after;
+        }
+
+        // Orders unordered-access writes before later unordered-access reads or writes of `resource`;
+        // a transition cannot, because both sides are in the same state.
+        void UavBarrier(CommandBufferD3D12* c, ID3D12Resource* resource)
+        {
+            D3D12_RESOURCE_BARRIER b = {};
+            b.Type                   = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+            b.UAV.pResource          = resource;
+            c->list->ResourceBarrier(1, &b);
         }
 
         void TransitionBuffer(CommandBufferD3D12* c, BufferD3D12* b, D3D12_RESOURCE_STATES after)

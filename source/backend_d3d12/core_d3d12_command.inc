@@ -75,15 +75,26 @@
             for (uint32_t i = 0; i < g->textureNum; ++i)
             {
                 const VriTextureBarrierDesc& tb = g->textures[i];
-                if (tb.texture)
-                    Transition(c, reinterpret_cast<TextureD3D12*>(tb.texture), ToState(tb.after.layout));
+                if (!tb.texture)
+                    continue;
+                TextureD3D12*               t     = reinterpret_cast<TextureD3D12*>(tb.texture);
+                const D3D12_RESOURCE_STATES after = ToState(tb.after.layout, tb.after.access);
+                if (after == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && t->state == after)
+                    UavBarrier(c, t->resource.Get());
+                else
+                    Transition(c, t, after);
             }
             for (uint32_t i = 0; i < g->bufferNum; ++i)
             {
                 const VriBufferBarrierDesc& bb = g->buffers[i];
-                if (bb.buffer)
-                    TransitionBuffer(
-                        c, reinterpret_cast<BufferD3D12*>(bb.buffer), BufferStateForAccess(bb.after.access));
+                if (!bb.buffer)
+                    continue;
+                BufferD3D12*                b     = reinterpret_cast<BufferD3D12*>(bb.buffer);
+                const D3D12_RESOURCE_STATES after = BufferStateForAccess(bb.after.access);
+                if (after == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && b->state == after)
+                    UavBarrier(c, b->resource.Get());
+                else
+                    TransitionBuffer(c, b, after);
             }
         }
 
