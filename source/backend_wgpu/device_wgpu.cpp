@@ -234,14 +234,16 @@ namespace vri::wgpu
         }
         wgpuAdapterInfoFreeMembers(info);
 
+        // The device was created with the core default limits, which are lower than the adapter's.
         WGPULimits limits = {};
-        if (wgpuAdapterGetLimits(m_adapter, &limits) == WGPUStatus_Success)
+        if (wgpuDeviceGetLimits(m_device, &limits) == WGPUStatus_Success)
         {
-            m_desc.texture1DMaxDim               = limits.maxTextureDimension1D;
-            m_desc.texture2DMaxDim               = limits.maxTextureDimension2D;
-            m_desc.texture3DMaxDim               = limits.maxTextureDimension3D;
-            m_desc.textureArrayLayerMaxNum       = limits.maxTextureArrayLayers;
-            m_desc.attachmentColorMaxNum         = limits.maxColorAttachments;
+            m_desc.texture1DMaxDim         = limits.maxTextureDimension1D;
+            m_desc.texture2DMaxDim         = limits.maxTextureDimension2D;
+            m_desc.texture3DMaxDim         = limits.maxTextureDimension3D;
+            m_desc.textureArrayLayerMaxNum = limits.maxTextureArrayLayers;
+            // wgpu-native leaves this field 0; such a device has the core default of 8.
+            m_desc.attachmentColorMaxNum         = limits.maxColorAttachments != 0 ? limits.maxColorAttachments : 8;
             m_desc.bufferMaxSize                 = limits.maxBufferSize;
             m_desc.constantBufferOffsetAlignment = limits.minUniformBufferOffsetAlignment;
             m_desc.storageBufferOffsetAlignment  = limits.minStorageBufferOffsetAlignment;
