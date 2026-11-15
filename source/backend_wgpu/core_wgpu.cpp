@@ -79,8 +79,41 @@ namespace vri::wgpu
                     return 8;
                 case VriFormat_RGBA32_SFLOAT:
                     return 16;
+                case VriFormat_BC1_UNORM:
+                case VriFormat_BC4_UNORM:
+                    return 8; // per 4x4 block
+                case VriFormat_BC2_UNORM:
+                case VriFormat_BC3_UNORM:
+                case VriFormat_BC5_UNORM:
+                case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC7_UNORM:
+                case VriFormat_ETC2_RGBA8_UNORM:
+                case VriFormat_ASTC_4x4_UNORM:
+                    return 16; // per 4x4 block
                 default:
                     return 4;
+            }
+        }
+
+        // The feature that enables a compressed format, or WGPUFeatureName_Force32 for an uncompressed one.
+        WGPUFeatureName CompressionFeature(VriFormat f)
+        {
+            switch (f)
+            {
+                case VriFormat_BC1_UNORM:
+                case VriFormat_BC2_UNORM:
+                case VriFormat_BC3_UNORM:
+                case VriFormat_BC4_UNORM:
+                case VriFormat_BC5_UNORM:
+                case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC7_UNORM:
+                    return WGPUFeatureName_TextureCompressionBC;
+                case VriFormat_ETC2_RGBA8_UNORM:
+                    return WGPUFeatureName_TextureCompressionETC2;
+                case VriFormat_ASTC_4x4_UNORM:
+                    return WGPUFeatureName_TextureCompressionASTC;
+                default:
+                    return WGPUFeatureName_Force32;
             }
         }
 
@@ -133,9 +166,17 @@ namespace vri::wgpu
         // ones ToWgpuFormat maps to Undefined, gave depth formats ColorAttachment|Blend,
         // and never set DepthStencil at all - so the usual "probe a depth format, else
         // fall back" pattern got no usable answer here. Report per format instead.
-        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat format)
+        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
             VriFormatSupportFlags r = VriFormatSupport_None;
+
+            // Compressed formats are only sampled, and only with the feature of their family.
+            const WGPUFeatureName compression = CompressionFeature(format);
+            if (compression != WGPUFeatureName_Force32)
+            {
+                return wgpuDeviceHasFeature(Dev(device)->Device(), compression) != 0 ? VriFormatSupport_Texture :
+                                                                                       VriFormatSupport_None;
+            }
 
             // Depth32FloatStencil8 is behind the optional depth32float-stencil8
             // feature, which DeviceWGPU::Init does not request - so
@@ -397,10 +438,13 @@ namespace vri::wgpu
             t->mipNum      = td.mipLevelCount;
             t->layerNum    = desc->type == VriTextureType_3D ? 1u : td.size.depthOrArrayLayers;
             t->texelSize   = TexelSize(desc->format);
+            t->blockDim    = CompressionFeature(desc->format) != WGPUFeatureName_Force32 ? 4u : 1u;
             t->owned       = true;
             {
-                VriObjectInfo info = MakeObjectInfo(VriObjectType_Texture);
-                uint64_t      size = static_cast<uint64_t>(t->width) * t->height * t->depth * t->texelSize;
+                VriObjectInfo  info = MakeObjectInfo(VriObjectType_Texture);
+                const uint32_t blocks =
+                    ((t->width + t->blockDim - 1) / t->blockDim) * ((t->height + t->blockDim - 1) / t->blockDim);
+                uint64_t size = static_cast<uint64_t>(blocks) * t->depth * t->texelSize;
                 if (t->mipNum > 1)
                     size += size / 3;
                 info.memoryBytes = size;
@@ -1572,16 +1616,23 @@ namespace vri::wgpu
             dstInfo.mipLevel                 = region->texture.mip;
             dstInfo.origin                   = {
                 static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), originZ};
-            dstInfo.aspect   = WGPUTextureAspect_All;
-            WGPUExtent3D ext = {w, h, extDepth};
+            dstInfo.aspect = WGPUTextureAspect_All;
+
+            // Compressed formats copy whole blocks: rows and pitches count blocks, and the extent of a mip
+            // smaller than a block, or not a multiple of it, is its physical size in blocks.
+            const uint32_t block     = t->blockDim;
+            const uint32_t blockRows = (h + block - 1) / block;
+            const uint32_t rowTexels = region->bufferRowLength ? region->bufferRowLength : w;
+            const uint32_t imageRows = region->bufferImageHeight ? region->bufferImageHeight : h;
+            WGPUExtent3D   ext       = {(w + block - 1) / block * block, blockRows * block, extDepth};
 
             // copyBufferToTexture requires bytesPerRow to be a multiple of 256. If the app's
             // staging is tightly packed and narrower than that, pack the rows into a temp buffer
             // at the aligned pitch first (per-row buffer copy), so any texture size just works.
-            const uint32_t          tightPitch = (region->bufferRowLength ? region->bufferRowLength : w) * t->texelSize;
+            const uint32_t          tightPitch   = (rowTexels + block - 1) / block * t->texelSize;
             const uint32_t          alignedPitch = (tightPitch + 255u) & ~255u;
             WGPUTexelCopyBufferInfo srcInfo      = {};
-            srcInfo.layout.rowsPerImage          = region->bufferImageHeight ? region->bufferImageHeight : h;
+            srcInfo.layout.rowsPerImage          = (imageRows + block - 1) / block;
             if (tightPitch == alignedPitch)
             {
                 srcInfo.buffer             = Buf(src)->buffer;
@@ -1592,10 +1643,10 @@ namespace vri::wgpu
             else
             {
                 WGPUBufferDescriptor bd = {};
-                bd.size                 = uint64_t(alignedPitch) * h;
+                bd.size                 = uint64_t(alignedPitch) * blockRows;
                 bd.usage                = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
                 WGPUBuffer temp         = wgpuDeviceCreateBuffer(c->device->Device(), &bd);
-                for (uint32_t r = 0; r < h; ++r)
+                for (uint32_t r = 0; r < blockRows; ++r)
                     wgpuCommandEncoderCopyBufferToBuffer(c->encoder,
                                                          Buf(src)->buffer,
                                                          region->bufferOffset + uint64_t(r) * tightPitch,
@@ -1605,7 +1656,7 @@ namespace vri::wgpu
                 srcInfo.buffer              = temp;
                 srcInfo.layout.offset       = 0;
                 srcInfo.layout.bytesPerRow  = alignedPitch;
-                srcInfo.layout.rowsPerImage = h;
+                srcInfo.layout.rowsPerImage = blockRows;
                 wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
                 c->tempUploads.push_back(temp); // keep alive until the GPU consumes it
             }

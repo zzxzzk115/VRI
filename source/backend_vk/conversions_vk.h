@@ -62,6 +62,8 @@ namespace vri::vk
             {VriFormat_BC5_UNORM, VK_FORMAT_BC5_UNORM_BLOCK},
             {VriFormat_BC6H_UFLOAT, VK_FORMAT_BC6H_UFLOAT_BLOCK},
             {VriFormat_BC7_UNORM, VK_FORMAT_BC7_UNORM_BLOCK},
+            {VriFormat_ETC2_RGBA8_UNORM, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK},
+            {VriFormat_ASTC_4x4_UNORM, VK_FORMAT_ASTC_4x4_UNORM_BLOCK},
             {VriFormat_D16_UNORM, VK_FORMAT_D16_UNORM},
             {VriFormat_D32_SFLOAT, VK_FORMAT_D32_SFLOAT},
             {VriFormat_S8_UINT, VK_FORMAT_S8_UINT},

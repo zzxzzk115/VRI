@@ -157,7 +157,7 @@ namespace vri::wgpu
         WGPUDeviceDescriptor deviceDesc                  = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
-        WGPUFeatureName requiredFeatures[4]              = {};
+        WGPUFeatureName requiredFeatures[7]              = {};
         uint32_t        featureCount                     = 0;
         if (m_hasTimestamp)
         {
@@ -180,6 +180,14 @@ namespace vri::wgpu
         m_hasFloat32Filterable = wgpuAdapterHasFeature(m_adapter, WGPUFeatureName_Float32Filterable) != 0;
         if (m_hasFloat32Filterable)
             requiredFeatures[featureCount++] = WGPUFeatureName_Float32Filterable;
+        // Every compressed family the adapter has: desktop GPUs offer BC, mobile and Apple GPUs ETC2 and ASTC.
+        for (const WGPUFeatureName compression : {WGPUFeatureName_TextureCompressionBC,
+                                                  WGPUFeatureName_TextureCompressionETC2,
+                                                  WGPUFeatureName_TextureCompressionASTC})
+        {
+            if (wgpuAdapterHasFeature(m_adapter, compression) != 0)
+                requiredFeatures[featureCount++] = compression;
+        }
         deviceDesc.requiredFeatures       = featureCount ? requiredFeatures : nullptr;
         deviceDesc.requiredFeatureCount   = featureCount;
         WGPURequestDeviceCallbackInfo dcb = {};

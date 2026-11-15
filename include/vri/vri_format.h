@@ -80,6 +80,11 @@ typedef enum VriFormat
     VriFormat_D24_UNORM_S8_UINT,
     VriFormat_D32_SFLOAT_S8_UINT,
 
+    /* block-compressed, 4x4 blocks of 16 bytes, mostly on mobile and Apple GPUs; appended so that the values
+       of the formats above, which applications store, stay the same */
+    VriFormat_ETC2_RGBA8_UNORM,
+    VriFormat_ASTC_4x4_UNORM,
+
     VriFormat_Count,
     VriFormat_MaxEnum = 0x7fffffff
 } VriFormat;
