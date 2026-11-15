@@ -96,7 +96,10 @@ typedef enum VriFeatureBits
     VriFeature_RayQuery            = 1ull << 6, /* inline ray tracing (no RT pipeline/SBT) */
     VriFeature_ExternalMemory =
         1ull << 7, /* external memory/semaphore export (CUDA/OptiX/cross-API/-process interop) */
-    VriFeature_CooperativeVector = 1ull << 8 /* shader matrix-vector inference; see ext/vri_ext_cooperative_vector.h */
+    VriFeature_CooperativeVector = 1ull << 8, /* shader matrix-vector inference; see ext/vri_ext_cooperative_vector.h */
+    /* 64-bit integer atomics on storage buffers (InterlockedMax/Min/Add/... on uint64_t, int64_t);
+       the shader also gets 64-bit integer types. Vulkan and D3D12 (Shader Model 6.6). */
+    VriFeature_ShaderAtomicInt64 = 1ull << 9
 } VriFeatureBits;
 
 VRI_EXTERN_C_END
