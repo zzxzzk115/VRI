@@ -40,6 +40,11 @@
                 return;
             *o                      = VriMemoryDesc {};
             const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
+            if (fi.format == DXGI_FORMAT_UNKNOWN)
+            {
+                Dev(device)->ReportError("GetTextureMemoryDesc: unmapped DXGI format");
+                return; // a zero size: no memory type can hold the texture
+            }
             D3D12_RESOURCE_DESC  rd = {};
             rd.Dimension            = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
             rd.Width                = desc->width ? desc->width : 1;
@@ -65,6 +70,9 @@
                         break;
                     case DXGI_FORMAT_D24_UNORM_S8_UINT:
                         rd.Format = DXGI_FORMAT_R24G8_TYPELESS;
+                        break;
+                    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+                        rd.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
                         break;
                     default:
                         break;

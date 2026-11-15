@@ -17,22 +17,49 @@ namespace vri::d3d12
     };
 
     inline constexpr vri::ConvRow<VriFormat, DxgiFormatInfo> kDxgiFormatTable[] = {
+        {VriFormat_R8_UNORM, {DXGI_FORMAT_R8_UNORM, 1}},
+        {VriFormat_R8_SNORM, {DXGI_FORMAT_R8_SNORM, 1}},
+        {VriFormat_R8_UINT, {DXGI_FORMAT_R8_UINT, 1}},
+        {VriFormat_R8_SINT, {DXGI_FORMAT_R8_SINT, 1}},
+        {VriFormat_RG8_UNORM, {DXGI_FORMAT_R8G8_UNORM, 2}},
+        {VriFormat_RG8_SNORM, {DXGI_FORMAT_R8G8_SNORM, 2}},
+        {VriFormat_RG8_UINT, {DXGI_FORMAT_R8G8_UINT, 2}},
+        {VriFormat_RG8_SINT, {DXGI_FORMAT_R8G8_SINT, 2}},
         {VriFormat_RGBA8_UNORM, {DXGI_FORMAT_R8G8B8A8_UNORM, 4}},
         {VriFormat_RGBA8_SRGB, {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4}},
+        {VriFormat_RGBA8_UINT, {DXGI_FORMAT_R8G8B8A8_UINT, 4}},
+        {VriFormat_RGBA8_SINT, {DXGI_FORMAT_R8G8B8A8_SINT, 4}},
         {VriFormat_BGRA8_UNORM, {DXGI_FORMAT_B8G8R8A8_UNORM, 4}},
-        {VriFormat_RG8_UNORM, {DXGI_FORMAT_R8G8_UNORM, 2}},
-        {VriFormat_R8_UNORM, {DXGI_FORMAT_R8_UNORM, 1}},
+        {VriFormat_BGRA8_SRGB, {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, 4}},
+        {VriFormat_R16_UNORM, {DXGI_FORMAT_R16_UNORM, 2}},
+        {VriFormat_R16_SNORM, {DXGI_FORMAT_R16_SNORM, 2}},
+        {VriFormat_R16_UINT, {DXGI_FORMAT_R16_UINT, 2}},
+        {VriFormat_R16_SINT, {DXGI_FORMAT_R16_SINT, 2}},
+        {VriFormat_R16_SFLOAT, {DXGI_FORMAT_R16_FLOAT, 2}},
+        {VriFormat_RG16_UNORM, {DXGI_FORMAT_R16G16_UNORM, 4}},
+        {VriFormat_RG16_SNORM, {DXGI_FORMAT_R16G16_SNORM, 4}},
+        {VriFormat_RG16_UINT, {DXGI_FORMAT_R16G16_UINT, 4}},
+        {VriFormat_RG16_SINT, {DXGI_FORMAT_R16G16_SINT, 4}},
+        {VriFormat_RG16_SFLOAT, {DXGI_FORMAT_R16G16_FLOAT, 4}},
+        {VriFormat_RGBA16_UNORM, {DXGI_FORMAT_R16G16B16A16_UNORM, 8}},
+        {VriFormat_RGBA16_SNORM, {DXGI_FORMAT_R16G16B16A16_SNORM, 8}},
+        {VriFormat_RGBA16_UINT, {DXGI_FORMAT_R16G16B16A16_UINT, 8}},
+        {VriFormat_RGBA16_SINT, {DXGI_FORMAT_R16G16B16A16_SINT, 8}},
         {VriFormat_RGBA16_SFLOAT, {DXGI_FORMAT_R16G16B16A16_FLOAT, 8}},
-        {VriFormat_RGBA32_SFLOAT, {DXGI_FORMAT_R32G32B32A32_FLOAT, 16}},
-        {VriFormat_RG32_SFLOAT, {DXGI_FORMAT_R32G32_FLOAT, 8}},
-        {VriFormat_RGB32_SFLOAT, {DXGI_FORMAT_R32G32B32_FLOAT, 12}},
-        {VriFormat_R32_SFLOAT, {DXGI_FORMAT_R32_FLOAT, 4}},
         {VriFormat_R32_UINT, {DXGI_FORMAT_R32_UINT, 4}},
         {VriFormat_R32_SINT, {DXGI_FORMAT_R32_SINT, 4}},
+        {VriFormat_R32_SFLOAT, {DXGI_FORMAT_R32_FLOAT, 4}},
         {VriFormat_RG32_UINT, {DXGI_FORMAT_R32G32_UINT, 8}},
         {VriFormat_RG32_SINT, {DXGI_FORMAT_R32G32_SINT, 8}},
+        {VriFormat_RG32_SFLOAT, {DXGI_FORMAT_R32G32_FLOAT, 8}},
+        {VriFormat_RGB32_UINT, {DXGI_FORMAT_R32G32B32_UINT, 12}},
+        {VriFormat_RGB32_SINT, {DXGI_FORMAT_R32G32B32_SINT, 12}},
+        {VriFormat_RGB32_SFLOAT, {DXGI_FORMAT_R32G32B32_FLOAT, 12}},
         {VriFormat_RGBA32_UINT, {DXGI_FORMAT_R32G32B32A32_UINT, 16}},
         {VriFormat_RGBA32_SINT, {DXGI_FORMAT_R32G32B32A32_SINT, 16}},
+        {VriFormat_RGBA32_SFLOAT, {DXGI_FORMAT_R32G32B32A32_FLOAT, 16}},
+        {VriFormat_RGB10A2_UNORM, {DXGI_FORMAT_R10G10B10A2_UNORM, 4}},
+        {VriFormat_RG11B10_UFLOAT, {DXGI_FORMAT_R11G11B10_FLOAT, 4}},
         // Compressed storage is measured in blocks, not integer bytes per texel.
         // Copy/readback pitches come from GetCopyableFootprints.
         {VriFormat_BC1_UNORM, {DXGI_FORMAT_BC1_UNORM, 0}},
@@ -42,26 +69,19 @@ namespace vri::d3d12
         {VriFormat_BC5_UNORM, {DXGI_FORMAT_BC5_UNORM, 0}},
         {VriFormat_BC6H_UFLOAT, {DXGI_FORMAT_BC6H_UF16, 0}},
         {VriFormat_BC7_UNORM, {DXGI_FORMAT_BC7_UNORM, 0}},
+        {VriFormat_D16_UNORM, {DXGI_FORMAT_D16_UNORM, 2}},
         {VriFormat_D32_SFLOAT, {DXGI_FORMAT_D32_FLOAT, 4}},
         {VriFormat_D24_UNORM_S8_UINT, {DXGI_FORMAT_D24_UNORM_S8_UINT, 4}},
+        {VriFormat_D32_SFLOAT_S8_UINT, {DXGI_FORMAT_D32_FLOAT_S8X24_UINT, 8}},
+        // VriFormat_S8_UINT has no DXGI equivalent (D3D12 has no stencil-only format): unmapped.
     };
 
-    // Look `f` up WITHOUT ToDxgiFormat's RGBA8 fallback: DXGI_FORMAT_UNKNOWN
-    // means the backend has no DXGI format for it. GetFormatSupport needs the
-    // difference - asking D3D12 about the substitute would report RGBA8's
-    // capabilities under the unmapped format's name.
-    inline DxgiFormatInfo ToDxgiFormatOrNone(VriFormat f)
+    // DXGI_FORMAT_UNKNOWN means the backend has no DXGI format for `f`. Every caller that
+    // creates an object reports that as an error instead of substituting another format.
+    inline DxgiFormatInfo ToDxgiFormat(VriFormat f)
     {
         return vri::MapOr(f, kDxgiFormatTable, DxgiFormatInfo {DXGI_FORMAT_UNKNOWN, 0});
     }
-
-    inline DxgiFormatInfo ToDxgiFormat(VriFormat f)
-    {
-        const DxgiFormatInfo mapped = ToDxgiFormatOrNone(f);
-        return mapped.format != DXGI_FORMAT_UNKNOWN ? mapped : DxgiFormatInfo {DXGI_FORMAT_R8G8B8A8_UNORM, 4};
-    }
-
-    inline DXGI_FORMAT ToDxgiVertexFormat(VriFormat f) { return ToDxgiFormat(f).format; }
 
     inline D3D12_PRIMITIVE_TOPOLOGY_TYPE ToD3DTopologyType(VriPrimitiveTopology t)
     {

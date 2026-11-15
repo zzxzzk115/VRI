@@ -6,10 +6,7 @@ VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriForm
 {
     VriFormatSupportFlags             r  = VriFormatSupport_None;
     D3D12_FEATURE_DATA_FORMAT_SUPPORT fs = {};
-    // OrNone, not ToDxgiFormat: the latter's RGBA8 fallback made every unmapped
-    // format report RGBA8's capabilities instead of "unsupported", which also
-    // kept the DXGI_FORMAT_UNKNOWN guard below from ever firing.
-    fs.Format = ToDxgiFormatOrNone(format).format;
+    fs.Format = ToDxgiFormat(format).format;
     if (fs.Format == DXGI_FORMAT_UNKNOWN ||
         FAILED(Dev(device)->Device()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &fs, sizeof(fs))))
         return r;
@@ -158,7 +155,7 @@ uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
     DeviceD3D12*         d  = Dev(device);
-    const DxgiFormatInfo fi = ToDxgiFormatOrNone(desc->format);
+    const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
     if (fi.format == DXGI_FORMAT_UNKNOWN)
     {
         *out = nullptr;
@@ -196,6 +193,10 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
             case DXGI_FORMAT_D24_UNORM_S8_UINT:
                 rd.Format = DXGI_FORMAT_R24G8_TYPELESS;
                 srvFormat = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+                break;
+            case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+                rd.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
+                srvFormat = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
                 break;
             default:
                 break; // already a sampleable format

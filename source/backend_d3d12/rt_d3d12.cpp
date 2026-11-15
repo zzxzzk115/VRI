@@ -97,7 +97,7 @@ namespace vri::d3d12
                 {
                     const VriAsTrianglesDesc&                t   = g.triangles;
                     D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC tri = {};
-                    tri.VertexFormat                             = ToDxgiVertexFormat(t.vertexFormat);
+                    tri.VertexFormat                             = ToDxgiFormat(t.vertexFormat).format;
                     tri.VertexCount                              = t.vertexCount;
                     tri.VertexBuffer.StrideInBytes               = t.vertexStride;
                     tri.IndexFormat = t.indexBuffer ? (t.indexType == VriIndexType_UInt16 ? DXGI_FORMAT_R16_UINT :

@@ -174,6 +174,22 @@
                 delete PL(layout);
         }
 
+        // An attachment or vertex format without a DXGI equivalent fails pipeline creation instead
+        // of being replaced by another format.
+        bool PipelineFormatsMapped(DeviceD3D12* d, const VriGraphicsPipelineDesc* desc)
+        {
+            bool mapped = true;
+            for (uint32_t i = 0; i < desc->outputMerger.colorNum; ++i)
+                mapped = mapped && ToDxgiFormat(desc->outputMerger.colors[i].format).format != DXGI_FORMAT_UNKNOWN;
+            if (desc->outputMerger.depthStencilFormat != VriFormat_Unknown)
+                mapped = mapped && ToDxgiFormat(desc->outputMerger.depthStencilFormat).format != DXGI_FORMAT_UNKNOWN;
+            for (uint32_t i = 0; i < desc->vertexInput.attributeNum; ++i)
+                mapped = mapped && ToDxgiFormat(desc->vertexInput.attributes[i].format).format != DXGI_FORMAT_UNKNOWN;
+            if (!mapped)
+                d->ReportError("CreateGraphicsPipeline: unmapped DXGI attachment or vertex format");
+            return mapped;
+        }
+
         // Mesh-shader pipeline (MS [+ AS] + PS) via the pipeline-state-stream API
         // (ID3D12Device2). No vertex input / input assembly. Returns Success/Failure.
         VriResult CreateMeshPipeline(DeviceD3D12* d, const VriGraphicsPipelineDesc* desc, VriPipeline** out)
@@ -392,6 +408,8 @@
             DeviceD3D12*         d      = Dev(device);
             PipelineLayoutD3D12* layout = PL(desc->pipelineLayout);
 
+            if (!PipelineFormatsMapped(d, desc))
+                return VriResult_Unsupported;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
                 if (desc->shaders[i].stage == VriShaderStage_Mesh || desc->shaders[i].stage == VriShaderStage_Task)
                     return CreateMeshPipeline(d, desc, out);
@@ -465,7 +483,7 @@
                     e.SemanticName  = "TEXCOORD";
                     e.SemanticIndex = i;
                 }
-                e.Format               = ToDxgiVertexFormat(a.format);
+                e.Format               = ToDxgiFormat(a.format).format;
                 e.InputSlot            = slot;
                 e.AlignedByteOffset    = a.offset;
                 e.InputSlotClass       = perInstance ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA :

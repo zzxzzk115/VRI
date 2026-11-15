@@ -91,6 +91,11 @@ namespace vri::d3d12
                 return VriResult_InvalidArgument;
             DeviceD3D12*         d  = Dev(device);
             const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
+            if (fi.format == DXGI_FORMAT_UNKNOWN)
+            {
+                d->ReportError("CreateExportableTexture: unmapped DXGI format");
+                return VriResult_Unsupported;
+            }
 
             D3D12_HEAP_PROPERTIES hp = {};
             hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
