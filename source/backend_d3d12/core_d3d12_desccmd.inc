@@ -556,24 +556,32 @@ CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset,
 }
 void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
 {
-    CommandBufferD3D12*              c   = CB(cmd);
-    TextureD3D12*                    t   = Tex(texture);
+    CommandBufferD3D12* c = CB(cmd);
+    TextureD3D12*       t = Tex(texture);
     // Mip 0 of every layer (every depth slice of a 3D texture).
     DescriptorD3D12 whole {};
-    whole.texture                        = t;
-    whole.viewType                       = VriTextureViewType_2D;
-    whole.layerNum                       = t->layerNum;
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = StorageViewDesc(&whole);
-    D3D12_GPU_DESCRIPTOR_HANDLE gpu {};
+    whole.texture                              = t;
+    whole.viewType                             = VriTextureViewType_2D;
+    whole.layerNum                             = t->layerNum;
+    const D3D12_UNORDERED_ACCESS_VIEW_DESC uav = StorageViewDesc(&whole);
+    D3D12_GPU_DESCRIPTOR_HANDLE            gpu {};
     D3D12_CPU_DESCRIPTOR_HANDLE cpuView {};
     ID3D12DescriptorHeap*       gpuHeap = nullptr;
     c->device->ClearUavViews(t->resource.Get(), uav, gpu, cpuView, gpuHeap);
-    Transition(c, t, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    // D3D12 clears through a UAV, but the caller barriered the texture for a transfer-domain clear
+    // (CopyDestination): move only mip 0 to UNORDERED_ACCESS and give it back its states afterwards,
+    // so the caller's view of every subresource stays true.
+    std::vector<D3D12_RESOURCE_STATES> before(t->layerNum);
+    for (uint32_t layer = 0; layer < t->layerNum; ++layer)
+        before[layer] = t->states[layer * t->mipNum];
+    Transition(c, t, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {0, 1, 0, t->layerNum});
     c->list->SetDescriptorHeaps(1, &gpuHeap);
     if (IsIntegerDxgi(t->format))
         c->list->ClearUnorderedAccessViewUint(gpu, cpuView, t->resource.Get(), value->u32, 0, nullptr);
     else
         c->list->ClearUnorderedAccessViewFloat(gpu, cpuView, t->resource.Get(), value->f32, 0, nullptr);
+    for (uint32_t layer = 0; layer < t->layerNum; ++layer)
+        Transition(c, t, before[layer], {0, 1, layer, 1});
     if (c->boundSrvHeap)
     {
         ID3D12DescriptorHeap* h[2] = {c->boundSrvHeap, c->boundSamplerHeap};

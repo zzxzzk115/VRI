@@ -603,3 +603,46 @@ TEST_CASE("D3D12: a readback copies only the region it names")
     f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
     f.c.DestroyTexture(t);
 }
+
+TEST_CASE("D3D12: a storage-texture clear leaves the other mips in the caller's state")
+{
+    const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 1, g_storageWriteDxbcCS, sizeof(g_storageWriteDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTexture*   target = f.Texture(VriTextureType_2D, 16, 1, 2, 1);
+    VriTexture*   source = f.Texture(VriTextureType_2D, 8, 1, 1, 1);
+    VriClearColor red {};
+    red.f32[0] = 1.0f;
+    red.f32[3] = 1.0f;
+    VriClearColor blue {};
+    blue.f32[2] = 1.0f;
+    blue.f32[3] = 1.0f;
+    // The clear is a transfer-domain operation: the caller barriers to CopyDestination, and a copy
+    // into mip 1, which the clear does not touch, needs no further barrier.
+    f.Begin();
+    f.Barrier(source, VriLayout_Undefined, VriLayout_CopyDestination, 0, 0);
+    f.Barrier(target, VriLayout_Undefined, VriLayout_CopyDestination, 0, 0);
+    f.c.CmdClearStorageTexture(f.cmd, source, &red);
+    f.c.CmdClearStorageTexture(f.cmd, target, &blue);
+    f.Barrier(source, VriLayout_CopyDestination, VriLayout_CopySource, 0, 0);
+    VriTextureCopyDesc copy {};
+    copy.src.layerNum = 1;
+    copy.src.aspect   = VriImageAspect_Color;
+    copy.dst          = copy.src;
+    copy.dst.mip      = 1;
+    f.c.CmdCopyTexture(f.cmd, target, source, &copy);
+    f.Barrier(target, VriLayout_CopyDestination, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    const Texel mip0 = f.Read(target, 0, 0);
+    const Texel mip1 = f.Read(target, 1, 0);
+    CHECK(mip0.z == 1.0f);
+    CHECK(mip1.x == 1.0f);
+    CHECK(mip1.z == 0.0f);
+    CHECK(f.errors == 0);
+    f.c.DestroyTexture(source);
+    f.c.DestroyTexture(target);
+}
