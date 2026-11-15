@@ -1,13 +1,15 @@
 // D3D12 render-target views of single array layers: each layer of a 2D array texture is cleared
 // through its own view to a different color and read back. A Texture2D RTV addresses slice 0 only,
-// so without array views every clear lands in layer 0.
+// so without array views every clear lands in layer 0. A copy naming several layers copies each.
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
 
 #include <cstdint>
 
-TEST_CASE("D3D12: a render-target view of one array layer renders to that layer")
+// Clears each layer of an array texture through its own render-target view and reads every layer
+// back; with `copyAll` the layers are first copied to a second array texture in one CmdCopyTexture.
+static void RenderLayers(bool copyAll)
 {
     VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
     dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
@@ -40,6 +42,9 @@ TEST_CASE("D3D12: a render-target view of one array layer renders to that layer"
     td.memoryLocation  = VriMemoryLocation_Device;
     VriTexture* target = nullptr;
     REQUIRE(c.CreateTexture(dev, &td, &target) == VriResult_Success);
+    td.usage         = VriTextureUsage_TransferDst | VriTextureUsage_TransferSrc;
+    VriTexture* copy = nullptr;
+    REQUIRE(c.CreateTexture(dev, &td, &copy) == VriResult_Success);
     VriDescriptor* views[kLayers] {};
     VriBuffer*     readbacks[kLayers] {};
     for (uint32_t layer = 0; layer < kLayers; ++layer)
@@ -98,13 +103,37 @@ TEST_CASE("D3D12: a render-target view of one array layer renders to that layer"
     tb.after.access = VriAccess_CopySourceRead;
     tb.after.stages = VriPipelineStage_Transfer;
     c.CmdBarrier(cmd, &g);
+    VriTexture* source = target;
+    if (copyAll)
+    {
+        VriTextureBarrierDesc cb {};
+        cb.texture      = copy;
+        cb.after.layout = VriLayout_CopyDestination;
+        cb.after.access = VriAccess_CopyDestinationWrite;
+        cb.after.stages = VriPipelineStage_Transfer;
+        cb.aspect       = VriImageAspect_Color;
+        VriBarrierGroupDesc cg {};
+        cg.textures   = &cb;
+        cg.textureNum = 1;
+        c.CmdBarrier(cmd, &cg);
+        VriTextureCopyDesc region {};
+        region.src.layerNum = kLayers;
+        region.src.aspect   = VriImageAspect_Color;
+        region.dst          = region.src;
+        c.CmdCopyTexture(cmd, copy, target, &region);
+        cb.before       = cb.after;
+        cb.after.layout = VriLayout_CopySource;
+        cb.after.access = VriAccess_CopySourceRead;
+        c.CmdBarrier(cmd, &cg);
+        source = copy;
+    }
     for (uint32_t layer = 0; layer < kLayers; ++layer)
     {
         VriBufferTextureCopyDesc cp {};
         cp.texture.aspect    = VriImageAspect_Color;
         cp.texture.baseLayer = layer;
         cp.texture.layerNum  = 1;
-        c.CmdReadbackTextureToBuffer(cmd, readbacks[layer], target, &cp);
+        c.CmdReadbackTextureToBuffer(cmd, readbacks[layer], source, &cp);
     }
     REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);
     VriFenceSubmitDesc signal {};
@@ -136,5 +165,10 @@ TEST_CASE("D3D12: a render-target view of one array layer renders to that layer"
         c.DestroyBuffer(readbacks[layer]);
     }
     c.DestroyTexture(target);
+    c.DestroyTexture(copy);
     vriDestroyDevice(dev);
 }
+
+TEST_CASE("D3D12: a render-target view of one array layer renders to that layer") { RenderLayers(false); }
+
+TEST_CASE("D3D12: a texture copy copies every layer it names") { RenderLayers(true); }
