@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include <wrl/client.h>
 
 #include "shaders/tests/mip_reduce_dxbc.h"          // g_mipReduceDxbcCS
+#include "shaders/tests/storage_constant_dxbc.h"    // g_storageConstantDxbcCS
 #include "shaders/tests/storage_write_3d_dxbc.h"    // g_storageWrite3dDxbcCS
 #include "shaders/tests/storage_write_array_dxbc.h" // g_storageWriteArrayDxbcCS
 #include "shaders/tests/storage_write_dxbc.h"       // g_storageWriteDxbcCS
@@ -68,7 +70,8 @@ namespace
                     uint32_t                      rangeNum,
                     const void*                   cs,
                     size_t                        csSize,
-                    VriQueueType                  queueType = VriQueueType_Graphics)
+                    VriQueueType                  queueType = VriQueueType_Graphics,
+                    uint32_t                      pushSize  = 0)
         {
             VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
             dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
@@ -94,6 +97,9 @@ namespace
             ld.descriptorSets   = &sd;
             ld.descriptorSetNum = 1;
             ld.shaderStages     = VriShaderStage_Compute;
+            const VriPushConstantDesc push {0, pushSize, VriShaderStage_Compute};
+            ld.pushConstants   = pushSize ? &push : nullptr;
+            ld.pushConstantNum = pushSize ? 1u : 0u;
             REQUIRE(c.CreatePipelineLayout(dev, &ld, &layout) == VriResult_Success);
             VriComputePipelineDesc pd {};
             pd.pipelineLayout        = layout;
@@ -460,4 +466,41 @@ TEST_CASE("D3D12: a mip reduction reads one mip while it writes the next")
     CHECK(texel.z == 5.0f); // 3 + 1 per reduction step
     CHECK(f.errors == 0);
     f.c.DestroyTexture(t);
+}
+
+TEST_CASE("D3D12: compute layouts, constants and descriptors bind before the pipeline")
+{
+    // On the compute queue, and on the graphics queue where compute and graphics share a list.
+    for (const VriQueueType queueType : {VriQueueType_Compute, VriQueueType_Graphics})
+    {
+        CAPTURE(queueType);
+        const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+        ComputeFixture               f;
+        if (!f.Create(ranges, 1, g_storageConstantDxbcCS, sizeof(g_storageConstantDxbcCS), queueType, 16))
+        {
+            MESSAGE("D3D12 unavailable - skipping");
+            return;
+        }
+        VriTexture*          t    = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+        const VriDescriptor* view = f.View(t, VriTextureViewType_2D, 0, 0, 1);
+        f.Bind(&view, 1);
+        f.Begin();
+        f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+        // The layout and its bindings come before the pipeline, as a render graph records them.
+        const float value[4] {0.25f, 0.5f, 0.75f, 1.0f};
+        f.c.CmdSetPipelineLayout(f.cmd, f.layout);
+        f.c.CmdSetDescriptorSet(f.cmd, 0, f.set);
+        f.c.CmdSetConstants(f.cmd, 0, value, sizeof(value));
+        f.c.CmdSetPipeline(f.cmd, f.pipeline);
+        VriDispatchDesc groups {2, 2, 1};
+        f.c.CmdDispatch(f.cmd, &groups);
+        f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_ShaderResource, 0, 0);
+        f.Submit();
+        const Texel texel = f.Read(t, 0, 0);
+        CHECK(texel.x == 0.25f);
+        CHECK(texel.z == 0.75f);
+        CHECK(f.errors == 0);
+        f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+        f.c.DestroyTexture(t);
+    }
 }

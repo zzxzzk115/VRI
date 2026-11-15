@@ -244,12 +244,22 @@ void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
         }
     }
 }
+// Whether layouts, descriptor sets and constants bind on the compute root: always on a compute
+// list, otherwise by the bound pipeline, or by the layout while no pipeline is bound yet.
+bool ComputeBinding(const CommandBufferD3D12* c)
+{
+    if (c->allocator->listType == D3D12_COMMAND_LIST_TYPE_COMPUTE)
+        return true;
+    if (c->boundPipeline)
+        return c->boundPipeline->isCompute;
+    return c->boundLayout && c->boundLayout->computeOnly;
+}
 void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
 {
     CommandBufferD3D12* c   = CB(cmd);
     c->boundLayout          = PL(layout);
     ID3D12RootSignature* rs = PL(layout)->rootSig.Get();
-    if (c->boundPipeline && c->boundPipeline->isCompute)
+    if (ComputeBinding(c))
         c->list->SetComputeRootSignature(rs);
     else
         c->list->SetGraphicsRootSignature(rs);
@@ -292,7 +302,7 @@ void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, cons
     if (!s || !s->layout)
         return;
     const LayoutSetD3D12* si      = s->layout->FindSet(setIndex);
-    const bool            compute = c->boundPipeline && c->boundPipeline->isCompute;
+    const bool            compute = ComputeBinding(c);
     // Bind the pool's shader-visible heaps (needed for the SRV/sampler tables).
     if (s->pool && (si && (si->srvCount || si->samplerCount)))
     {
@@ -347,7 +357,10 @@ void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data,
     CommandBufferD3D12* c = CB(cmd);
     if (!c->boundLayout || !c->boundLayout->hasPush || !data || !size)
         return;
-    c->list->SetGraphicsRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
+    if (ComputeBinding(c))
+        c->list->SetComputeRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
+    else
+        c->list->SetGraphicsRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
 }
 // Record the bindings only; the actual IASetVertexBuffers happens at draw time (FlushVertexBuffers),
 // because the per-stream stride comes from the pipeline and the app may bind buffers before it.

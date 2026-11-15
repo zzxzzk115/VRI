@@ -7,6 +7,7 @@
             DeviceD3D12*         d = Dev(device);
             PipelineLayoutD3D12* l = new PipelineLayoutD3D12 {};
             l->device              = d;
+            l->computeOnly         = desc->shaderStages == VriShaderStage_Compute;
             // Constant buffers -> root CBV (by GPU address). Textures (SRV) and samplers ->
             // one descriptor table per set per heap-type. D3D12 registers are per-type, so we
             // flatten per-type from 0 within the set (matching Slang's HLSL assignment): the

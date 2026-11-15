@@ -240,6 +240,8 @@ namespace vri::d3d12
         ComPtr<ID3D12RootSignature>     rootSig;
         std::vector<LayoutBindingD3D12> bindings;
         std::vector<LayoutSetD3D12>     sets;
+        // Declared for the compute stage only: bound on the compute root even before a pipeline is.
+        bool computeOnly = false;
         // Push constants -> a root 32-bit-constants parameter (SetGraphicsRoot32BitConstants).
         bool     hasPush       = false;
         uint32_t pushRootParam = 0;
