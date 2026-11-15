@@ -20,12 +20,14 @@ struct Params
     float4 misc0; // x = instance total, y = compact mode (0/1), z = minimap size (0 = off), w = field extent
     float4 misc1; // x = bounding radius at scale 1
 };
-[[vk::binding(0, 0)]] ConstantBuffer<Params> uParams;
-[[vk::binding(1, 0)]] StructuredBuffer<Instance> uInstances;
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint> uRecords;  // 5 uints per VriDrawIndexedDesc record
-[[vk::binding(3, 0)]] RWStructuredBuffer<uint> uCount;    // [0] = visible count / indirect draw count
-[[vk::binding(4, 0)]] RWStructuredBuffer<Instance> uVisible; // per-instance vertex stream for the draw
-[[vk::binding(5, 0)]] [format("rgba8")] RWTexture2D<float4> uMinimap;
+// D3D12 registers follow VRI's mapping (see rt_gltf.slang): root CBV / root UAV registers equal the
+// range's baseRegister; table resources (the structured buffer, the minimap) count from 0 per class.
+[[vk::binding(0, 0)]] ConstantBuffer<Params> uParams : register(b0);
+[[vk::binding(1, 0)]] StructuredBuffer<Instance> uInstances : register(t0);
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> uRecords : register(u2);     // 5 uints per VriDrawIndexedDesc record
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint> uCount : register(u3);       // [0] = visible count / indirect draw count
+[[vk::binding(4, 0)]] RWStructuredBuffer<Instance> uVisible : register(u4); // per-instance vertex stream for the draw
+[[vk::binding(5, 0)]] [format("rgba8")] RWTexture2D<float4> uMinimap : register(u0);
 
 static const uint kCubeIndexNum = 36;
 
