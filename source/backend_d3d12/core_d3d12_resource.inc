@@ -100,10 +100,11 @@ VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, Vr
     if (uav)
         rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-    BufferD3D12* b = new BufferD3D12 {};
-    b->device      = d;
-    b->size        = desc->size;
-    b->wantsUav    = uav;
+    BufferD3D12* b     = new BufferD3D12 {};
+    b->device          = d;
+    b->size            = desc->size;
+    b->structureStride = desc->structureStride;
+    b->wantsUav        = uav;
     // Explicit-memory path: create the buffer UNBOUND and defer the placed-resource creation
     // to BindBufferMemory (D3D12 has no memory-less resource, so we stash the desc instead).
     if (desc->memoryLocation == VriMemoryLocation_Undefined)

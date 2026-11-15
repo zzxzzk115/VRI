@@ -181,6 +181,32 @@ D3D12_SHADER_RESOURCE_VIEW_DESC SampledViewDesc(const DescriptorD3D12* v)
     }
     return srv;
 }
+// A read-only buffer view: structured with the buffer's structureStride (an HLSL StructuredBuffer),
+// or raw 32-bit words when the buffer has none (a ByteAddressBuffer).
+D3D12_SHADER_RESOURCE_VIEW_DESC BufferViewDesc(const DescriptorD3D12* v)
+{
+    const uint64_t size = v->bufferSize ? v->bufferSize : v->buffer->size - v->bufferOffset;
+    const uint32_t stride = v->buffer->structureStride;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.ViewDimension                   = D3D12_SRV_DIMENSION_BUFFER;
+    srv.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    if (stride)
+    {
+        srv.Format                     = DXGI_FORMAT_UNKNOWN;
+        srv.Buffer.FirstElement        = v->bufferOffset / stride;
+        srv.Buffer.NumElements         = static_cast<UINT>(size / stride);
+        srv.Buffer.StructureByteStride = stride;
+    }
+    else
+    {
+        srv.Format              = DXGI_FORMAT_R32_TYPELESS;
+        srv.Buffer.FirstElement = v->bufferOffset / 4;
+        srv.Buffer.NumElements  = static_cast<UINT>(size / 4);
+        srv.Buffer.Flags        = D3D12_BUFFER_SRV_FLAG_RAW;
+    }
+    return srv;
+}
+
 void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
                                      uint32_t                            baseRange,
                                      uint32_t                            rangeNum,
@@ -226,6 +252,13 @@ void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
                 D3D12_CPU_DESCRIPTOR_HANDLE h                = s->srvCpu;
                 h.ptr += slot * s->pool->srvSize;
                 d->Device()->CreateShaderResourceView(nullptr, &srv, h);
+            }
+            else if (lb->type == VriDescriptorType_StructuredBuffer && v->buffer) // buffer SRV in the table
+            {
+                const D3D12_SHADER_RESOURCE_VIEW_DESC srv = BufferViewDesc(v);
+                D3D12_CPU_DESCRIPTOR_HANDLE           h   = s->srvCpu;
+                h.ptr += slot * s->pool->srvSize;
+                d->Device()->CreateShaderResourceView(v->buffer->resource.Get(), &srv, h);
             }
             else if (lb->type == VriDescriptorType_StorageTexture && v->texture) // UAV
             {

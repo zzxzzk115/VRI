@@ -21,6 +21,7 @@
 #include "shaders/tests/storage_write_3d_dxbc.h"    // g_storageWrite3dDxbcCS
 #include "shaders/tests/storage_write_array_dxbc.h" // g_storageWriteArrayDxbcCS
 #include "shaders/tests/storage_write_dxbc.h"       // g_storageWriteDxbcCS
+#include "shaders/tests/structured_read_dxbc.h"     // g_structuredReadDxbcCS
 
 namespace
 {
@@ -108,11 +109,12 @@ namespace
             pd.shader.bytecodeSize   = csSize;
             pd.shader.entryPointName = "computeMain";
             REQUIRE(c.CreateComputePipeline(dev, &pd, &pipeline) == VriResult_Success);
-            VriDescriptorPoolDesc pool_desc {};
-            pool_desc.descriptorSetMaxNum  = 1;
-            pool_desc.textureMaxNum        = 4;
-            pool_desc.storageTextureMaxNum = 4;
-            REQUIRE(c.CreateDescriptorPool(dev, &pool_desc, &pool) == VriResult_Success);
+            VriDescriptorPoolDesc poolDesc {};
+            poolDesc.descriptorSetMaxNum    = 1;
+            poolDesc.textureMaxNum          = 4;
+            poolDesc.storageTextureMaxNum   = 4;
+            poolDesc.structuredBufferMaxNum = 4;
+            REQUIRE(c.CreateDescriptorPool(dev, &poolDesc, &pool) == VriResult_Success);
             REQUIRE(c.AllocateDescriptorSets(pool, layout, 0, &set, 1) == VriResult_Success);
             REQUIRE(c.CreateCommandAllocator(dev, queueType, &alloc) == VriResult_Success);
             REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
@@ -503,4 +505,47 @@ TEST_CASE("D3D12: compute layouts, constants and descriptors bind before the pip
         f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
         f.c.DestroyTexture(t);
     }
+}
+
+TEST_CASE("D3D12: a structured buffer is readable through a descriptor table")
+{
+    const VriDescriptorRangeDesc ranges[2] {{0, 1, VriDescriptorType_StructuredBuffer, VriShaderStage_Compute},
+                                            {1, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 2, g_structuredReadDxbcCS, sizeof(g_structuredReadDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    const Texel   elements[2] {{9.0f, 9.0f, 9.0f, 9.0f}, {0.25f, 0.5f, 0.75f, 1.0f}};
+    VriBufferDesc bd {};
+    bd.size            = sizeof(elements);
+    bd.structureStride = sizeof(Texel);
+    bd.usage           = VriBufferUsage_StorageBuffer;
+    bd.memoryLocation  = VriMemoryLocation_HostUpload;
+    VriBuffer* input   = nullptr;
+    REQUIRE(f.c.CreateBuffer(f.dev, &bd, &input) == VriResult_Success);
+    std::memcpy(f.c.MapBuffer(input, 0, sizeof(elements)), elements, sizeof(elements));
+    f.c.UnmapBuffer(input);
+    VriBufferViewDesc vd {};
+    vd.buffer                = input;
+    vd.viewType              = VriDescriptorType_StructuredBuffer;
+    VriDescriptor* inputView = nullptr;
+    REQUIRE(f.c.CreateBufferView(f.dev, &vd, &inputView) == VriResult_Success);
+    VriTexture*          t = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+    const VriDescriptor* views[2] {inputView, f.View(t, VriTextureViewType_2D, 0, 0, 1)};
+    f.Bind(views, 2);
+    f.Begin();
+    f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    f.Dispatch(2, 2, 1);
+    f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    const Texel texel = f.Read(t, 0, 0);
+    CHECK(texel.x == 0.25f);
+    CHECK(texel.z == 0.75f);
+    CHECK(f.errors == 0);
+    for (const VriDescriptor* view : views)
+        f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyTexture(t);
+    f.c.DestroyBuffer(input);
 }

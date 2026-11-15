@@ -43,10 +43,11 @@ namespace vri::d3d12
     {
         DeviceD3D12*           device = nullptr;
         ComPtr<ID3D12Resource> resource;
-        uint64_t               size     = 0;
-        D3D12_HEAP_TYPE        heapType = D3D12_HEAP_TYPE_DEFAULT;
-        D3D12_RESOURCE_STATES  state    = D3D12_RESOURCE_STATE_COMMON;
-        void*                  mapped   = nullptr; // persistent CPU pointer for upload/readback heaps
+        uint64_t               size            = 0;
+        uint32_t               structureStride = 0; // element size of a structured buffer view; 0 = raw
+        D3D12_HEAP_TYPE        heapType        = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_STATES  state           = D3D12_RESOURCE_STATE_COMMON;
+        void*                  mapped          = nullptr; // persistent CPU pointer for upload/readback heaps
         // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
         // at BindBufferMemory via CreatePlacedResource from the saved desc.
         D3D12_RESOURCE_DESC placedDesc = {};
