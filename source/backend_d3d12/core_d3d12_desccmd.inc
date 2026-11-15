@@ -462,11 +462,13 @@ void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
         d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
 }
 // Indirect draws via ExecuteIndirect + a DRAW/DRAW_INDEXED command signature (cached by stride).
-// The *Count variants pass the count buffer; the others pass null and a fixed drawNum.
+// The *Count variants pass the count buffer; the others pass null and a fixed drawNum. Like direct draws
+// they first bind the pending vertex buffers.
 void VRI_CALL
 CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(
         c->device->DrawSignature(false, stride), drawNum, Buf(buffer)->resource.Get(), offset, nullptr, 0);
 }
@@ -474,6 +476,7 @@ void VRI_CALL
 CmdDrawIndexedIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(
         c->device->DrawSignature(true, stride), drawNum, Buf(buffer)->resource.Get(), offset, nullptr, 0);
 }
@@ -486,6 +489,7 @@ void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
                                    uint32_t          stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(c->device->DrawSignature(false, stride),
                              maxDrawNum,
                              Buf(buffer)->resource.Get(),
@@ -502,6 +506,7 @@ void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
                                           uint32_t          stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(c->device->DrawSignature(true, stride),
                              maxDrawNum,
                              Buf(buffer)->resource.Get(),
