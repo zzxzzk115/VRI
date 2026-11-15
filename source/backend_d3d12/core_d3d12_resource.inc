@@ -239,7 +239,7 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     t->depth          = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? rd.DepthOrArraySize : 1u;
     t->mipNum         = rd.MipLevels;
     t->layerNum       = rd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1u : rd.DepthOrArraySize;
-    t->state          = D3D12_RESOURCE_STATE_COMMON;
+    t->ResetStates(D3D12_RESOURCE_STATE_COMMON);
     t->sampleCount    = rd.SampleDesc.Count;
     t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
     t->isDepthStencil = (desc->usage & VriTextureUsage_DepthStencilAttachment) != 0;

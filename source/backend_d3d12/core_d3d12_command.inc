@@ -84,10 +84,16 @@
                     continue;
                 TextureD3D12*               t     = reinterpret_cast<TextureD3D12*>(tb.texture);
                 const D3D12_RESOURCE_STATES after = ForList(c, ToState(tb.after.layout, tb.after.access));
-                if (after == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && t->state == after)
+                // 0 mips or layers select every remaining one; the range is clamped to the texture.
+                SubresourceRange r;
+                r.baseMip   = (std::min)(tb.baseMip, t->mipNum);
+                r.mipNum    = (std::min)(tb.mipNum ? tb.mipNum : t->mipNum, t->mipNum - r.baseMip);
+                r.baseLayer = (std::min)(tb.baseLayer, t->layerNum);
+                r.layerNum  = (std::min)(tb.layerNum ? tb.layerNum : t->layerNum, t->layerNum - r.baseLayer);
+                if (after == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && InState(t, r, after))
                     UavBarrier(c, t->resource.Get());
                 else
-                    Transition(c, t, after);
+                    Transition(c, t, after, r);
             }
             for (uint32_t i = 0; i < g->bufferNum; ++i)
             {
@@ -113,7 +119,7 @@
             {
                 const DescriptorD3D12* v = Desc(a->colors[i].view);
                 TextureD3D12*          t = const_cast<TextureD3D12*>(v->texture);
-                Transition(c, t, D3D12_RESOURCE_STATE_RENDER_TARGET); // defensive (usually already RT)
+                Transition(c, t, D3D12_RESOURCE_STATE_RENDER_TARGET, ViewRange(v)); // usually already RT
                 c->rtvs[i] = v->cpu;
                 if (a->colors[i].resolveView) // MSAA -> single-sample resolve at EndRendering
                 {
@@ -126,7 +132,7 @@
             if (hasDepth)
             {
                 const DescriptorD3D12* dv = Desc(a->depth->view);
-                Transition(c, const_cast<TextureD3D12*>(dv->texture), D3D12_RESOURCE_STATE_DEPTH_WRITE);
+                Transition(c, const_cast<TextureD3D12*>(dv->texture), D3D12_RESOURCE_STATE_DEPTH_WRITE, ViewRange(dv));
                 dsv = dv->cpu;
             }
             c->list->OMSetRenderTargets(
@@ -201,7 +207,10 @@
             UINT64                             rowBytes = 0, total = 0;
             c->device->Device()->GetCopyableFootprints(
                 &rd, sub, 1, region ? region->bufferOffset : 0, &fp, &rows, &rowBytes, &total);
-            Transition(c, t, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            Transition(c,
+                       t,
+                       D3D12_RESOURCE_STATE_COPY_SOURCE,
+                       {region ? region->texture.mip : 0, 1, region ? region->texture.baseLayer : 0, 1});
             D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
             dstLoc.pResource                   = b->resource.Get();
             dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;

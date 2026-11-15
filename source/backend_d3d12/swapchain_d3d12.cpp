@@ -47,7 +47,7 @@ namespace vri::d3d12
                 t->layerNum       = 1;
                 t->sampleCount    = 1;
                 t->isRenderTarget = true;
-                t->state          = D3D12_RESOURCE_STATE_PRESENT;
+                t->ResetStates(D3D12_RESOURCE_STATE_PRESENT);
                 s->textures.push_back(t);
             }
             return true;

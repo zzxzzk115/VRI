@@ -15,6 +15,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 
+#include "shaders/tests/mip_reduce_dxbc.h"          // g_mipReduceDxbcCS
 #include "shaders/tests/storage_write_3d_dxbc.h"    // g_storageWrite3dDxbcCS
 #include "shaders/tests/storage_write_array_dxbc.h" // g_storageWriteArrayDxbcCS
 #include "shaders/tests/storage_write_dxbc.h"       // g_storageWriteDxbcCS
@@ -413,5 +414,50 @@ TEST_CASE("D3D12: a 3D texture is written and read back per depth slice")
     CHECK(texel.z == 3.0f);
     CHECK(f.errors == 0);
     f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyTexture(t);
+}
+
+TEST_CASE("D3D12: a mip reduction reads one mip while it writes the next")
+{
+    const VriDescriptorRangeDesc ranges[2] {{0, 1, VriDescriptorType_Texture, VriShaderStage_Compute},
+                                            {1, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 2, g_mipReduceDxbcCS, sizeof(g_mipReduceDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTexture* t = f.Texture(VriTextureType_2D, 16, 1, 3, 1);
+    f.Begin();
+    f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    VriClearColor clear {};
+    clear.f32[0] = 1.0f;
+    clear.f32[1] = 2.0f;
+    clear.f32[2] = 3.0f;
+    clear.f32[3] = 4.0f;
+    f.c.CmdClearStorageTexture(f.cmd, t, &clear); // mip 0
+    f.Submit();
+    // Each step samples mip - 1 and writes mip: only those two mips change state, so mip - 1
+    // stays a shader resource while mip is an unordered-access target.
+    for (uint32_t mip = 1; mip < 3; ++mip)
+    {
+        const VriDescriptor* views[2] {f.View(t, VriTextureViewType_2D, mip - 1, 0, 1),
+                                       f.View(t, VriTextureViewType_2D, mip, 0, 1)};
+        f.Bind(views, 2);
+        f.Begin();
+        f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_ShaderResource, mip - 1, 1);
+        f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, mip, 1);
+        f.Dispatch(1, 1, 1);
+        f.Submit();
+        for (const VriDescriptor* view : views)
+            f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    }
+    f.Begin();
+    f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    const Texel texel = f.Read(t, 2, 0);
+    CHECK(texel.x == 1.0f);
+    CHECK(texel.z == 5.0f); // 3 + 1 per reduction step
+    CHECK(f.errors == 0);
     f.c.DestroyTexture(t);
 }

@@ -191,6 +191,6 @@
                                "(RT/DS vs non-RT/DS) and that offset is 64KB-aligned");
                 return VriResult_Failure;
             }
-            t->state = D3D12_RESOURCE_STATE_COMMON;
+            t->ResetStates(D3D12_RESOURCE_STATE_COMMON);
             return VriResult_Success;
         }

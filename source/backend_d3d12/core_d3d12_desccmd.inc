@@ -653,7 +653,7 @@ void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
         c->device->ReportError("texture-upload source buffer too small");
         return;
     }
-    Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST);
+    Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST, {mip, 1, baseLayer, layers});
 
     D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
     dstLoc.pResource                   = t->resource.Get();

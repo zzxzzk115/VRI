@@ -135,21 +135,82 @@
             }
         }
 
-        void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after)
+        // Mips [baseMip, baseMip + mipNum) of layers [baseLayer, baseLayer + layerNum).
+        struct SubresourceRange
         {
-            if (t->state == after)
-                return;
+            uint32_t baseMip   = 0;
+            uint32_t mipNum    = 0;
+            uint32_t baseLayer = 0;
+            uint32_t layerNum  = 0;
+        };
+
+        SubresourceRange WholeTexture(const TextureD3D12* t) { return {0, t->mipNum, 0, t->layerNum}; }
+
+        // An attachment view renders to one mip of its layers.
+        SubresourceRange ViewRange(const DescriptorD3D12* v) { return {v->mip, 1, v->baseLayer, v->layerNum}; }
+
+        bool InState(const TextureD3D12* t, const SubresourceRange& r, D3D12_RESOURCE_STATES state)
+        {
+            for (uint32_t layer = r.baseLayer; layer < r.baseLayer + r.layerNum; ++layer)
+                for (uint32_t mip = r.baseMip; mip < r.baseMip + r.mipNum; ++mip)
+                    if (t->states[mip + layer * t->mipNum] != state)
+                        return false;
+            return true;
+        }
+
+        // Moves the subresources of `r` to `after`. A whole texture in one state takes a single
+        // all-subresources barrier; otherwise each subresource that changes gets its own, for
+        // both planes of a depth-stencil format.
+        void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after, const SubresourceRange& r)
+        {
+            const bool whole = r.baseMip == 0 && r.mipNum == t->mipNum && r.baseLayer == 0 && r.layerNum == t->layerNum;
             D3D12_RESOURCE_BARRIER b = {};
             b.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             b.Transition.pResource   = t->resource.Get();
-            b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b.Transition.StateBefore = t->state;
             b.Transition.StateAfter  = after;
-            c->list->ResourceBarrier(1, &b);
-            t->state = after;
+            if (whole && InState(t, r, t->states[0]))
+            {
+                if (t->states[0] == after)
+                    return;
+                b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b.Transition.StateBefore = t->states[0];
+                c->list->ResourceBarrier(1, &b);
+                t->ResetStates(after);
+            }
+            else
+            {
+                const bool planes = t->dsvFormat == DXGI_FORMAT_D24_UNORM_S8_UINT ||
+                                    t->dsvFormat == DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+                const UINT subresources = t->mipNum * t->layerNum;
+                std::vector<D3D12_RESOURCE_BARRIER> barriers;
+                for (uint32_t layer = r.baseLayer; layer < r.baseLayer + r.layerNum; ++layer)
+                    for (uint32_t mip = r.baseMip; mip < r.baseMip + r.mipNum; ++mip)
+                    {
+                        D3D12_RESOURCE_STATES& state = t->states[mip + layer * t->mipNum];
+                        if (state == after)
+                            continue;
+                        b.Transition.StateBefore = state;
+                        b.Transition.Subresource = mip + layer * t->mipNum;
+                        barriers.push_back(b);
+                        if (planes)
+                        {
+                            b.Transition.Subresource += subresources;
+                            barriers.push_back(b);
+                        }
+                        state = after;
+                    }
+                if (barriers.empty())
+                    return;
+                c->list->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+            }
             if (t->concurrent && after != D3D12_RESOURCE_STATE_COMMON &&
                 std::find(c->concurrentTextures.begin(), c->concurrentTextures.end(), t) == c->concurrentTextures.end())
                 c->concurrentTextures.push_back(t);
+        }
+
+        void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after)
+        {
+            Transition(c, t, after, WholeTexture(t));
         }
 
         // Compute lists accept no graphics-only states: a read-only texture there is a

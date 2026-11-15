@@ -70,8 +70,11 @@ namespace vri::d3d12
         bool                     isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
         // Created with VriTextureUsage_ConcurrentQueues: every command list returns it to COMMON,
         // the state each queue can transition from (see CommandBufferD3D12::concurrentTextures).
-        bool                  concurrent = false;
-        D3D12_RESOURCE_STATES state      = D3D12_RESOURCE_STATE_COMMON;
+        bool concurrent = false;
+        // Tracked state per subresource (mip + layer * mipNum; both planes of a depth-stencil
+        // format share it), so one mip can be read while another is written.
+        std::vector<D3D12_RESOURCE_STATES> states;
+        void ResetStates(D3D12_RESOURCE_STATES s) { states.assign(size_t(mipNum) * layerNum, s); }
         // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
         // at BindTextureMemory via CreatePlacedResource from the saved desc + optional clear value.
         D3D12_RESOURCE_DESC placedDesc  = {};
