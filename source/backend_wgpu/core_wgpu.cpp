@@ -1584,14 +1584,17 @@ namespace vri::wgpu
                 static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), originZ};
             srcInfo.aspect = WGPUTextureAspect_All;
 
-            WGPUTexelCopyBufferInfo dstInfo = {};
-            dstInfo.buffer                  = Buf(dst)->buffer;
-            dstInfo.layout.offset           = region->bufferOffset;
-            dstInfo.layout.bytesPerRow =
-                region->bufferRowLength ? region->bufferRowLength * t->texelSize : w * t->texelSize;
-            dstInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
+            // As in CmdUploadBufferToTexture, compressed formats count rows and pitches in blocks.
+            const uint32_t          block     = t->blockDim;
+            const uint32_t          rowTexels = region->bufferRowLength ? region->bufferRowLength : w;
+            const uint32_t          imageRows = region->bufferImageHeight ? region->bufferImageHeight : h;
+            WGPUTexelCopyBufferInfo dstInfo   = {};
+            dstInfo.buffer                    = Buf(dst)->buffer;
+            dstInfo.layout.offset             = region->bufferOffset;
+            dstInfo.layout.bytesPerRow        = (rowTexels + block - 1) / block * t->texelSize;
+            dstInfo.layout.rowsPerImage       = (imageRows + block - 1) / block;
 
-            WGPUExtent3D ext = {w, h, extDepth};
+            WGPUExtent3D ext = {(w + block - 1) / block * block, (h + block - 1) / block * block, extDepth};
             wgpuCommandEncoderCopyTextureToBuffer(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
         }
 
