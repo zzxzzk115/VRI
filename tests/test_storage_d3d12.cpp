@@ -48,17 +48,24 @@ namespace
         VriCallbackInterface callback {&errors, CountErrors};
         VriDevice*           dev = nullptr;
         VriCoreInterface     c {};
-        VriQueue*            queue      = nullptr;
+        VriQueue*            queue      = nullptr; // runs the dispatches
+        VriQueue*            graphics   = nullptr; // runs the readbacks
         VriPipelineLayout*   layout     = nullptr;
         VriPipeline*         pipeline   = nullptr;
         VriDescriptorPool*   pool       = nullptr;
         VriDescriptorSet*    set        = nullptr;
         VriCommandAllocator* alloc      = nullptr;
         VriCommandBuffer*    cmd        = nullptr;
+        VriCommandAllocator* readAlloc  = nullptr;
+        VriCommandBuffer*    readCmd    = nullptr;
         VriFence*            fence      = nullptr;
         uint64_t             fenceValue = 0;
 
-        bool Create(const VriDescriptorRangeDesc* ranges, uint32_t rangeNum, const void* cs, size_t csSize)
+        bool Create(const VriDescriptorRangeDesc* ranges,
+                    uint32_t                      rangeNum,
+                    const void*                   cs,
+                    size_t                        csSize,
+                    VriQueueType                  queueType = VriQueueType_Graphics)
         {
             VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
             dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
@@ -75,7 +82,8 @@ namespace
                 return false;
             }
             REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
-            REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) == VriResult_Success);
+            REQUIRE(c.GetQueue(dev, queueType, 0, &queue) == VriResult_Success);
+            REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &graphics) == VriResult_Success);
             VriDescriptorSetDesc sd {};
             sd.ranges   = ranges;
             sd.rangeNum = rangeNum;
@@ -97,8 +105,10 @@ namespace
             pool_desc.storageTextureMaxNum = 4;
             REQUIRE(c.CreateDescriptorPool(dev, &pool_desc, &pool) == VriResult_Success);
             REQUIRE(c.AllocateDescriptorSets(pool, layout, 0, &set, 1) == VriResult_Success);
-            REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc) == VriResult_Success);
+            REQUIRE(c.CreateCommandAllocator(dev, queueType, &alloc) == VriResult_Success);
             REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
+            REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &readAlloc) == VriResult_Success);
+            REQUIRE(c.CreateCommandBuffer(readAlloc, &readCmd) == VriResult_Success);
             REQUIRE(c.CreateFence(dev, 0, &fence) == VriResult_Success);
             return true;
         }
@@ -109,6 +119,7 @@ namespace
                 return;
             c.DestroyFence(fence);
             c.DestroyCommandAllocator(alloc);
+            c.DestroyCommandAllocator(readAlloc);
             c.DestroyDescriptorPool(pool);
             c.DestroyPipeline(pipeline);
             c.DestroyPipelineLayout(layout);
@@ -202,22 +213,25 @@ namespace
             c.CmdDispatch(cmd, &groups);
         }
 
-        void Submit()
+        void Submit() { Submit(cmd, queue); }
+
+        void Submit(VriCommandBuffer* buffer, VriQueue* target)
         {
-            REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);
+            REQUIRE(c.EndCommandBuffer(buffer) == VriResult_Success);
             VriFenceSubmitDesc signal {};
             signal.fence = fence;
             signal.value = ++fenceValue;
             VriQueueSubmitDesc submit {};
-            submit.commandBuffers   = &cmd;
+            submit.commandBuffers   = &buffer;
             submit.commandBufferNum = 1;
             submit.signalFences     = &signal;
             submit.signalFenceNum   = 1;
-            REQUIRE(c.QueueSubmit(queue, &submit) == VriResult_Success);
+            REQUIRE(c.QueueSubmit(target, &submit) == VriResult_Success);
             c.Wait(fence, fenceValue);
         }
 
-        // Reads texel (0, 0) of one subresource (2D: mip/layer, 3D: mip and depth slice z).
+        // Reads texel (0, 0) of one subresource (2D: mip/layer, 3D: mip and depth slice z) on the
+        // graphics queue.
         Texel Read(VriTexture* t, uint32_t mip, uint32_t layer, int32_t z = 0)
         {
             VriBufferDesc bd {};
@@ -226,15 +240,15 @@ namespace
             bd.memoryLocation   = VriMemoryLocation_HostReadback;
             VriBuffer* readback = nullptr;
             REQUIRE(c.CreateBuffer(dev, &bd, &readback) == VriResult_Success);
-            Begin();
+            REQUIRE(c.BeginCommandBuffer(readCmd) == VriResult_Success);
             VriBufferTextureCopyDesc cp {};
             cp.texture.mip       = mip;
             cp.texture.baseLayer = layer;
             cp.texture.layerNum  = 1;
             cp.texture.aspect    = VriImageAspect_Color;
             cp.texture.z         = z;
-            c.CmdReadbackTextureToBuffer(cmd, readback, t, &cp);
-            Submit();
+            c.CmdReadbackTextureToBuffer(readCmd, readback, t, &cp);
+            Submit(readCmd, graphics);
             Texel texel {};
             std::memcpy(&texel, c.MapBuffer(readback, 0, sizeof(texel)), sizeof(texel));
             c.UnmapBuffer(readback);
@@ -267,6 +281,49 @@ TEST_CASE("D3D12: a storage texture is in the unordered-access state when a disp
     const Texel texel = f.Read(t, 0, 0);
     CHECK(texel.x == 16.0f);
     CHECK(texel.z == 7.0f);
+    CHECK(f.errors == 0);
+    f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyTexture(t);
+}
+
+TEST_CASE("D3D12: a compute queue hands a storage texture to the graphics queue as a shader resource")
+{
+    const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 1, g_storageWriteDxbcCS, sizeof(g_storageWriteDxbcCS), VriQueueType_Compute))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTextureDesc td {};
+    td.type      = VriTextureType_2D;
+    td.format    = VriFormat_RGBA32_SFLOAT;
+    td.width     = 16;
+    td.height    = 16;
+    td.depth     = 1;
+    td.mipNum    = 1;
+    td.layerNum  = 1;
+    td.sampleNum = 1;
+    td.usage =
+        VriTextureUsage_ShaderResource | VriTextureUsage_ShaderResourceStorage | VriTextureUsage_ConcurrentQueues;
+    td.memoryLocation = VriMemoryLocation_Device;
+    VriTexture* t     = nullptr;
+    REQUIRE(f.c.CreateTexture(f.dev, &td, &t) == VriResult_Success);
+    const VriDescriptor* view = f.View(t, VriTextureViewType_2D, 0, 0, 1);
+    f.Bind(&view, 1);
+    // Written on the compute queue and left readable by the graphics queue, as an async-compute
+    // frame does; the readback then runs on the graphics queue.
+    for (int frame = 0; frame < 2; ++frame)
+    {
+        f.Begin();
+        f.Barrier(t, frame ? VriLayout_ShaderResource : VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+        f.Dispatch(2, 2, 1);
+        f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_ShaderResource, 0, 0);
+        f.Submit();
+        const Texel texel = f.Read(t, 0, 0);
+        CHECK(texel.x == 16.0f);
+        CHECK(texel.z == 7.0f);
+    }
     CHECK(f.errors == 0);
     f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
     f.c.DestroyTexture(t);

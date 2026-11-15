@@ -63,11 +63,14 @@ namespace vri::d3d12
         DXGI_FORMAT srvFormat         = DXGI_FORMAT_UNKNOWN; // typed format for the SRV (R32_FLOAT for sampled D32)
         uint32_t    width = 0, height = 0, depth = 1;
         uint32_t    mipNum = 1, layerNum = 1;
-        uint32_t    texelSize       = 0;
-        uint32_t    sampleCount     = 1;     // >1 => multisample (TEXTURE2DMS views)
-        bool        isRenderTarget  = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
-        bool        isDepthStencil  = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
-        D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+        uint32_t    texelSize      = 0;
+        uint32_t    sampleCount    = 1;     // >1 => multisample (TEXTURE2DMS views)
+        bool        isRenderTarget = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
+        bool        isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
+        // Created with VriTextureUsage_ConcurrentQueues: every command list returns it to COMMON,
+        // the state each queue can transition from (see CommandBufferD3D12::concurrentTextures).
+        bool                  concurrent = false;
+        D3D12_RESOURCE_STATES state      = D3D12_RESOURCE_STATE_COMMON;
         // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
         // at BindTextureMemory via CreatePlacedResource from the saved desc + optional clear value.
         D3D12_RESOURCE_DESC placedDesc  = {};
@@ -182,6 +185,10 @@ namespace vri::d3d12
         // offset alignment for buffer->texture copies; kept alive until the GPU consumes them
         // (cleared at the next BeginCommandBuffer, after the caller has waited on the fence).
         std::vector<ComPtr<ID3D12Resource>> tempUploads;
+        // Concurrent-queue textures this list moved out of COMMON. EndCommandBuffer returns them to
+        // COMMON: a list on another queue type may not name the states this one used (a compute
+        // list cannot transition from PIXEL_SHADER_RESOURCE), and reads promote from COMMON.
+        std::vector<TextureD3D12*> concurrentTextures;
     };
 
     struct FenceD3D12

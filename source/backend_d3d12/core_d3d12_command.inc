@@ -59,11 +59,16 @@
                 vb = {}; // stale bindings/strides must not leak across recordings
             c->vbDirty = false;
             c->tempUploads.clear(); // prior frame's bounce buffers are done (caller waited on the fence)
+            c->concurrentTextures.clear();
             return VriResult_Success;
         }
         VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer* cmd)
         {
-            return SUCCEEDED(CB(cmd)->list->Close()) ? VriResult_Success : VriResult_Failure;
+            CommandBufferD3D12* c = CB(cmd);
+            for (TextureD3D12* t : c->concurrentTextures)
+                Transition(c, t, D3D12_RESOURCE_STATE_COMMON);
+            c->concurrentTextures.clear();
+            return SUCCEEDED(c->list->Close()) ? VriResult_Success : VriResult_Failure;
         }
 
         // ---- barriers --------------------------------------------------
@@ -78,7 +83,7 @@
                 if (!tb.texture)
                     continue;
                 TextureD3D12*               t     = reinterpret_cast<TextureD3D12*>(tb.texture);
-                const D3D12_RESOURCE_STATES after = ToState(tb.after.layout, tb.after.access);
+                const D3D12_RESOURCE_STATES after = ForList(c, ToState(tb.after.layout, tb.after.access));
                 if (after == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && t->state == after)
                     UavBarrier(c, t->resource.Get());
                 else

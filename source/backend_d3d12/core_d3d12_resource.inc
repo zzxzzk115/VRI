@@ -245,6 +245,7 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     t->sampleCount    = rd.SampleDesc.Count;
     t->isRenderTarget = (desc->usage & VriTextureUsage_ColorAttachment) != 0;
     t->isDepthStencil = (desc->usage & VriTextureUsage_DepthStencilAttachment) != 0;
+    t->concurrent     = (desc->usage & VriTextureUsage_ConcurrentQueues) != 0;
     // Explicit-memory path: create the texture UNBOUND and defer the placed-resource creation
     // to BindTextureMemory (stash the desc + optional fast-clear value).
     if (desc->memoryLocation == VriMemoryLocation_Undefined)

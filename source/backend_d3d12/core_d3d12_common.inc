@@ -118,6 +118,21 @@
             b.Transition.StateAfter  = after;
             c->list->ResourceBarrier(1, &b);
             t->state = after;
+            if (t->concurrent && after != D3D12_RESOURCE_STATE_COMMON &&
+                std::find(c->concurrentTextures.begin(), c->concurrentTextures.end(), t) == c->concurrentTextures.end())
+                c->concurrentTextures.push_back(t);
+        }
+
+        // Compute lists accept no graphics-only states: a read-only texture there is a
+        // non-pixel shader resource.
+        D3D12_RESOURCE_STATES ForList(const CommandBufferD3D12* c, D3D12_RESOURCE_STATES state)
+        {
+            if (c->allocator->listType != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+                return state;
+            const D3D12_RESOURCE_STATES stripped = state & ~D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            return stripped != state && stripped == D3D12_RESOURCE_STATE_COMMON ?
+                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE :
+                       stripped;
         }
 
         // Orders unordered-access writes before later unordered-access reads or writes of `resource`;
