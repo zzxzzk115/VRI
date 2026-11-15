@@ -280,11 +280,13 @@ namespace vri::d3d12
     // backend). At CmdSetDescriptorSet the recorded views are bound as root arguments.
     struct DescriptorSetD3D12
     {
-        DeviceD3D12*                                         device   = nullptr;
-        DescriptorPoolD3D12*                                 pool     = nullptr;
-        const PipelineLayoutD3D12*                           layout   = nullptr;
-        uint32_t                                             setIndex = 0;
-        std::unordered_map<uint32_t, const DescriptorD3D12*> bound; // binding -> view
+        DeviceD3D12*               device   = nullptr;
+        DescriptorPoolD3D12*       pool     = nullptr;
+        const PipelineLayoutD3D12* layout   = nullptr;
+        uint32_t                   setIndex = 0;
+        // Root CBV / UAV binding -> GPU address, captured at UpdateDescriptorRanges like a table
+        // descriptor is copied, so the view may be destroyed once written.
+        std::unordered_map<uint32_t, D3D12_GPU_VIRTUAL_ADDRESS> rootAddresses;
         // base of this set's blocks in the pool's shader-visible heaps (SRV + sampler).
         D3D12_CPU_DESCRIPTOR_HANDLE srvCpu     = {};
         D3D12_GPU_DESCRIPTOR_HANDLE srvGpu     = {};

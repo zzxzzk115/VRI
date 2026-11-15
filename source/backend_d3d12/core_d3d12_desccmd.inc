@@ -234,10 +234,14 @@ void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
         if (idx >= setBindings.size() || updates[r].descriptorNum == 0)
             continue;
         const LayoutBindingD3D12* lb = setBindings[idx];
-        s->bound[lb->binding] =
-            reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]); // root CBVs bind [0] at draw
-        if (lb->type == VriDescriptorType_ConstantBuffer)
+        if (lb->type == VriDescriptorType_ConstantBuffer || lb->type == VriDescriptorType_StorageBuffer)
+        {
+            // Root descriptors bind descriptor [0] by GPU address at CmdSetDescriptorSet.
+            const auto* v = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]);
+            if (v && v->buffer)
+                s->rootAddresses[lb->binding] = v->buffer->resource->GetGPUVirtualAddress() + v->bufferOffset;
             continue;
+        }
         // A range may carry an array of descriptors (descriptor indexing / bindless):
         // write each into consecutive heap slots from heapOffset + baseDescriptor.
         for (uint32_t k = 0; k < updates[r].descriptorNum; ++k)
@@ -360,11 +364,10 @@ void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, cons
     {
         if (b.set != setIndex)
             continue;
-        auto it = s->bound.find(b.binding);
-        if (it == s->bound.end() || !it->second || !it->second->buffer)
+        const auto it = s->rootAddresses.find(b.binding);
+        if (it == s->rootAddresses.end())
             continue;
-        const D3D12_GPU_VIRTUAL_ADDRESS va =
-            it->second->buffer->resource->GetGPUVirtualAddress() + it->second->bufferOffset;
+        const D3D12_GPU_VIRTUAL_ADDRESS va = it->second;
         if (b.type == VriDescriptorType_ConstantBuffer)
         {
             if (compute)

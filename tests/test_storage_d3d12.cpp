@@ -717,3 +717,47 @@ TEST_CASE("D3D12: descriptor sets from different pools bind together")
     for (VriTexture* t : {target, a, b})
         f.c.DestroyTexture(t);
 }
+
+TEST_CASE("D3D12: views may be destroyed once written into a descriptor set")
+{
+    const VriDescriptorRangeDesc ranges[2] {{0, 1, VriDescriptorType_StructuredBuffer, VriShaderStage_Compute},
+                                            {1, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 2, g_structuredReadDxbcCS, sizeof(g_structuredReadDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    const Texel   elements[2] {{9.0f, 9.0f, 9.0f, 9.0f}, {0.25f, 0.5f, 0.75f, 1.0f}};
+    VriBufferDesc bd {};
+    bd.size            = sizeof(elements);
+    bd.structureStride = sizeof(Texel);
+    bd.usage           = VriBufferUsage_StorageBuffer;
+    bd.memoryLocation  = VriMemoryLocation_HostUpload;
+    VriBuffer* input   = nullptr;
+    REQUIRE(f.c.CreateBuffer(f.dev, &bd, &input) == VriResult_Success);
+    std::memcpy(f.c.MapBuffer(input, 0, sizeof(elements)), elements, sizeof(elements));
+    f.c.UnmapBuffer(input);
+    VriBufferViewDesc vd {};
+    vd.buffer                = input;
+    vd.viewType              = VriDescriptorType_StructuredBuffer;
+    VriDescriptor* inputView = nullptr;
+    REQUIRE(f.c.CreateBufferView(f.dev, &vd, &inputView) == VriResult_Success);
+    VriTexture*          t = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+    const VriDescriptor* views[2] {inputView, f.View(t, VriTextureViewType_2D, 0, 0, 1)};
+    f.Bind(views, 2);
+    // The set holds copies of the descriptors: the views go before the set is bound.
+    for (const VriDescriptor* view : views)
+        f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.Begin();
+    f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    f.Dispatch(2, 2, 1);
+    f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    const Texel texel = f.Read(t, 0, 0);
+    CHECK(texel.x == 0.25f);
+    CHECK(texel.z == 0.75f);
+    CHECK(f.errors == 0);
+    f.c.DestroyTexture(t);
+    f.c.DestroyBuffer(input);
+}
