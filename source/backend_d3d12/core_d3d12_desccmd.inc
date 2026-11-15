@@ -5,28 +5,23 @@ VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPo
     DeviceD3D12*         d = Dev(device);
     DescriptorPoolD3D12* p = new DescriptorPoolD3D12 {};
     p->device              = d;
-    // Shader-visible heaps for SRV/CBV/UAV + samplers (descriptor tables bind from
-    // these). Sized from the pool request with sane minimums; root CBVs use neither.
-    const uint32_t srvCap         = (desc->textureMaxNum + desc->structuredBufferMaxNum + desc->storageBufferMaxNum +
+    // Blocks of the device's shared shader-visible heaps for SRV/CBV/UAV + samplers (descriptor tables
+    // bind from these). Sized from the pool request with sane minimums; root CBVs use neither.
+    const uint32_t srvCap     = (desc->textureMaxNum + desc->structuredBufferMaxNum + desc->storageBufferMaxNum +
                              desc->storageTextureMaxNum + 16);
-    const uint32_t samplerCap     = (desc->samplerMaxNum + 16);
-    D3D12_DESCRIPTOR_HEAP_DESC hd = {};
-    hd.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    hd.NumDescriptors             = srvCap;
-    hd.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    if (FAILED(d->Device()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&p->srvHeap))))
+    const uint32_t samplerCap = (desc->samplerMaxNum + 16);
+    if (!d->AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, srvCap, p->srvBlock))
     {
         delete p;
-        d->ReportError("CreateDescriptorHeap (SRV) failed");
-        return VriResult_Failure;
+        d->ReportError("CreateDescriptorPool: the shared CBV/SRV/UAV heap is full");
+        return VriResult_OutOfMemory;
     }
-    hd.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
-    hd.NumDescriptors = samplerCap;
-    if (FAILED(d->Device()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&p->samplerHeap))))
+    if (!d->AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, samplerCap, p->samplerBlock))
     {
+        d->FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, p->srvBlock);
         delete p;
-        d->ReportError("CreateDescriptorHeap (sampler) failed");
-        return VriResult_Failure;
+        d->ReportError("CreateDescriptorPool: the shared sampler heap is full (2048 samplers per device)");
+        return VriResult_OutOfMemory;
     }
     p->srvSize     = d->Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     p->samplerSize = d->Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
@@ -41,8 +36,12 @@ void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool)
 }
 void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool)
 {
-    if (pool)
-        delete DPool(pool);
+    if (!pool)
+        return;
+    DescriptorPoolD3D12* p = DPool(pool);
+    p->device->FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, p->srvBlock);
+    p->device->FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, p->samplerBlock);
+    delete p;
 }
 VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
                                           const VriPipelineLayout* layout,
@@ -53,6 +52,15 @@ VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
     DescriptorPoolD3D12*       p  = DPool(pool);
     const PipelineLayoutD3D12* l  = PL(layout);
     const LayoutSetD3D12*      si = l->FindSet(setIndex);
+    const uint32_t srvNeed     = si ? si->srvCount * setNum : 0;
+    const uint32_t samplerNeed = si ? si->samplerCount * setNum : 0;
+    if (p->srvNext + srvNeed > p->srvBlock.count || p->samplerNext + samplerNeed > p->samplerBlock.count)
+    {
+        p->device->ReportError("AllocateDescriptorSets: the descriptor pool is full");
+        return VriResult_OutOfMemory;
+    }
+    ID3D12DescriptorHeap* srvHeap     = p->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    ID3D12DescriptorHeap* samplerHeap = p->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
     for (uint32_t i = 0; i < setNum; ++i)
     {
         DescriptorSetD3D12* s = new DescriptorSetD3D12 {};
@@ -62,18 +70,20 @@ VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
         s->setIndex           = setIndex;
         if (si && si->srvCount > 0) // sub-allocate this set's SRV block
         {
-            s->srvCpu = p->srvHeap->GetCPUDescriptorHandleForHeapStart();
-            s->srvCpu.ptr += static_cast<SIZE_T>(p->srvNext) * p->srvSize;
-            s->srvGpu = p->srvHeap->GetGPUDescriptorHandleForHeapStart();
-            s->srvGpu.ptr += static_cast<UINT64>(p->srvNext) * p->srvSize;
+            const uint32_t slot = p->srvBlock.offset + p->srvNext;
+            s->srvCpu           = srvHeap->GetCPUDescriptorHandleForHeapStart();
+            s->srvCpu.ptr += static_cast<SIZE_T>(slot) * p->srvSize;
+            s->srvGpu = srvHeap->GetGPUDescriptorHandleForHeapStart();
+            s->srvGpu.ptr += static_cast<UINT64>(slot) * p->srvSize;
             p->srvNext += si->srvCount;
         }
         if (si && si->samplerCount > 0)
         {
-            s->samplerCpu = p->samplerHeap->GetCPUDescriptorHandleForHeapStart();
-            s->samplerCpu.ptr += static_cast<SIZE_T>(p->samplerNext) * p->samplerSize;
-            s->samplerGpu = p->samplerHeap->GetGPUDescriptorHandleForHeapStart();
-            s->samplerGpu.ptr += static_cast<UINT64>(p->samplerNext) * p->samplerSize;
+            const uint32_t slot = p->samplerBlock.offset + p->samplerNext;
+            s->samplerCpu       = samplerHeap->GetCPUDescriptorHandleForHeapStart();
+            s->samplerCpu.ptr += static_cast<SIZE_T>(slot) * p->samplerSize;
+            s->samplerGpu = samplerHeap->GetGPUDescriptorHandleForHeapStart();
+            s->samplerGpu.ptr += static_cast<UINT64>(slot) * p->samplerSize;
             p->samplerNext += si->samplerCount;
         }
         outSets[i] = ToHandle(s);
@@ -339,7 +349,8 @@ void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, cons
     // Bind the pool's shader-visible heaps (needed for the SRV/sampler tables).
     if (s->pool && (si && (si->srvCount || si->samplerCount)))
     {
-        ID3D12DescriptorHeap* heaps[2] = {s->pool->srvHeap.Get(), s->pool->samplerHeap.Get()};
+        ID3D12DescriptorHeap* heaps[2] = {c->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV),
+                                          c->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)};
         c->list->SetDescriptorHeaps(2, heaps);
         c->boundSrvHeap     = heaps[0];
         c->boundSamplerHeap = heaps[1];

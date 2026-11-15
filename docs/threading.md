@@ -82,8 +82,10 @@ This is the one backend where the model is *stricter* than the general contract 
 
 - One `ID3D12CommandAllocator` per recording thread; `Reset()` must not race recording.
 - `ExecuteCommandLists` on a given queue must be serialized (no VRI lock).
-- The shader-visible descriptor heaps are bump-allocated per pool with no lock, so descriptor
-  allocation/reset on one pool is single-owner (the table's descriptor-pool rule).
+- The device owns one shader-visible CBV/SRV/UAV heap and one sampler heap, since a command list binds
+  one of each at a time. Creating and destroying a pool takes a block of them under a device lock; sets
+  are bump-allocated within the pool's block with no lock, so descriptor allocation/reset on one pool is
+  single-owner (the table's descriptor-pool rule). The sampler heap holds 2048 samplers for all pools.
 - Each `VriQueueType` maps to its own engine — Graphics→DIRECT, Compute→COMPUTE, Transfer→COPY
   (`source/backend_d3d12/device_d3d12.h`) — so the three queues run independently; cross-queue
   ordering is the caller's via timeline fences.

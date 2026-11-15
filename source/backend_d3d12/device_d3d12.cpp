@@ -11,9 +11,11 @@
 
 #include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <tuple>
 
 namespace vri::d3d12
 {
@@ -194,7 +196,70 @@ namespace vri::d3d12
             return VriResult_Failure;
         }
         m_dsvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+        for (auto [shared, type, size] :
+             {std::tuple {&m_viewHeap, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kViewHeapSize},
+              std::tuple {&m_samplerHeap, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, kSamplerHeapSize}})
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC visible = {};
+            visible.Type                       = type;
+            visible.NumDescriptors             = size;
+            visible.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            if (FAILED(m_device->CreateDescriptorHeap(&visible, IID_PPV_ARGS(&shared->heap))))
+            {
+                ReportError("CreateDescriptorHeap (shared shader-visible) failed");
+                return VriResult_Failure;
+            }
+            shared->free = {{0, size}};
+        }
         return VriResult_Success;
+    }
+
+    ID3D12DescriptorHeap* DeviceD3D12::ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE type) const
+    {
+        return (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? m_samplerHeap : m_viewHeap).heap.Get();
+    }
+
+    bool DeviceD3D12::AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t count, DescriptorBlockD3D12& out)
+    {
+        std::lock_guard lock(m_sharedHeapMutex);
+        auto&           free = (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? m_samplerHeap : m_viewHeap).free;
+        for (auto it = free.begin(); it != free.end(); ++it) // first fit
+        {
+            if (it->count < count)
+                continue;
+            out = {it->offset, count};
+            it->offset += count;
+            it->count -= count;
+            if (it->count == 0)
+                free.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    void DeviceD3D12::FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, DescriptorBlockD3D12 block)
+    {
+        if (block.count == 0)
+            return;
+        std::lock_guard lock(m_sharedHeapMutex);
+        auto&           free = (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? m_samplerHeap : m_viewHeap).free;
+        auto            it   = std::lower_bound(
+            free.begin(), free.end(), block, [](const DescriptorBlockD3D12& a, const DescriptorBlockD3D12& b) {
+                return a.offset < b.offset;
+            });
+        it = free.insert(it, block);
+        // Merge with the following and the preceding free block where they touch.
+        if (it + 1 != free.end() && it->offset + it->count == (it + 1)->offset)
+        {
+            it->count += (it + 1)->count;
+            free.erase(it + 1);
+        }
+        if (it != free.begin() && (it - 1)->offset + (it - 1)->count == it->offset)
+        {
+            (it - 1)->count += it->count;
+            free.erase(it);
+        }
     }
 
     D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocRtv()

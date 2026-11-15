@@ -10,6 +10,9 @@
 #include "core/device_base.h"
 #include "objects_d3d12.h"
 
+#include <mutex>
+#include <vector>
+
 namespace vri::d3d12
 {
     using Microsoft::WRL::ComPtr;
@@ -58,6 +61,13 @@ namespace vri::d3d12
                            D3D12_CPU_DESCRIPTOR_HANDLE&            outCpu,
                            ID3D12DescriptorHeap*&                  outGpuHeap);
 
+        // The shader-visible CBV/SRV/UAV and sampler heaps every descriptor pool takes a block of: a command
+        // list binds one heap of each type at a time, so tables of sets from different pools must share them.
+        // Allocation and release are thread-safe (pools are created on any thread).
+        ID3D12DescriptorHeap* ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE type) const;
+        bool AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t count, DescriptorBlockD3D12& out);
+        void FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, DescriptorBlockD3D12 block);
+
     private:
         VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
         void      FillDeviceDesc(IDXGIAdapter1* adapter);
@@ -72,24 +82,36 @@ namespace vri::d3d12
         ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
         ComPtr<ID3D12CommandSignature> m_dispatchSig;     // lazy, for indirect Dispatch
         std::unordered_map<uint64_t, ComPtr<ID3D12CommandSignature>>
-                                     m_drawSigs;               // indirect draw sigs, keyed by (indexed,stride)
-        ComPtr<ID3D12DescriptorHeap> m_rtvHeap;                // CPU-only RTV heap
-        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;                // CPU-only DSV heap
-        ComPtr<ID3D12DescriptorHeap> m_clearUavCpuHeap;        // non-shader-visible UAVs for ClearUAV (lazy)
-        ComPtr<ID3D12DescriptorHeap> m_clearUavGpuHeap;        // shader-visible UAVs for ClearUAV (lazy)
-        uint32_t                     m_clearUavSize       = 0; // CBV_SRV_UAV descriptor increment
-        uint32_t                     m_clearUavNext       = 0; // ring cursor across the clear heaps
-        static constexpr uint32_t    kClearUavSlots       = 1024;
-        uint32_t                     m_rtvSize            = 0; // descriptor increment
-        uint32_t                     m_rtvNext            = 0; // bump cursor
-        uint32_t                     m_dsvSize            = 0;
-        uint32_t                     m_dsvNext            = 0;
-        static constexpr uint32_t    kRtvHeapSize         = 256;
-        static constexpr uint32_t    kDsvHeapSize         = 64;
-        QueueD3D12           m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
-        uint64_t             m_enabledFeatures            = 0;  // granted VriFeatureBits
-        VriDeviceDesc        m_desc                       = {};
-        VriCallbackInterface m_callback                   = {};
+                                     m_drawSigs;         // indirect draw sigs, keyed by (indexed,stride)
+        ComPtr<ID3D12DescriptorHeap> m_rtvHeap;          // CPU-only RTV heap
+        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;          // CPU-only DSV heap
+        ComPtr<ID3D12DescriptorHeap> m_clearUavCpuHeap;  // non-shader-visible UAVs for ClearUAV (lazy)
+        ComPtr<ID3D12DescriptorHeap> m_clearUavGpuHeap;  // shader-visible UAVs for ClearUAV (lazy)
+        uint32_t                     m_clearUavSize = 0; // CBV_SRV_UAV descriptor increment
+        uint32_t                     m_clearUavNext = 0; // ring cursor across the clear heaps
+        static constexpr uint32_t    kClearUavSlots = 1024;
+        uint32_t                     m_rtvSize      = 0; // descriptor increment
+        uint32_t                     m_rtvNext      = 0; // bump cursor
+        uint32_t                     m_dsvSize      = 0;
+        uint32_t                     m_dsvNext      = 0;
+        static constexpr uint32_t    kRtvHeapSize   = 256;
+        static constexpr uint32_t    kDsvHeapSize   = 64;
+        // Shared shader-visible heaps with their free blocks, sorted by offset.
+        struct SharedHeap
+        {
+            ComPtr<ID3D12DescriptorHeap>      heap;
+            std::vector<DescriptorBlockD3D12> free;
+        };
+        SharedHeap                m_viewHeap;
+        SharedHeap                m_samplerHeap;
+        mutable std::mutex        m_sharedHeapMutex;
+        static constexpr uint32_t kViewHeapSize = 1u << 18;
+        // D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE: the most samplers a shader-visible heap can hold.
+        static constexpr uint32_t kSamplerHeapSize             = 2048;
+        QueueD3D12                m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
+        uint64_t                  m_enabledFeatures            = 0;  // granted VriFeatureBits
+        VriDeviceDesc             m_desc                       = {};
+        VriCallbackInterface      m_callback                   = {};
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

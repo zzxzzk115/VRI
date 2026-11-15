@@ -22,6 +22,7 @@
 #include "shaders/tests/storage_write_array_dxbc.h" // g_storageWriteArrayDxbcCS
 #include "shaders/tests/storage_write_dxbc.h"       // g_storageWriteDxbcCS
 #include "shaders/tests/structured_read_dxbc.h"     // g_structuredReadDxbcCS
+#include "shaders/tests/two_sets_dxbc.h"            // g_twoSetsDxbcCS
 
 namespace
 {
@@ -72,7 +73,8 @@ namespace
                     const void*                   cs,
                     size_t                        csSize,
                     VriQueueType                  queueType = VriQueueType_Graphics,
-                    uint32_t                      pushSize  = 0)
+                    uint32_t                      pushSize  = 0,
+                    const VriDescriptorSetDesc*   secondSet = nullptr)
         {
             VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
             dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
@@ -91,12 +93,14 @@ namespace
             REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
             REQUIRE(c.GetQueue(dev, queueType, 0, &queue) == VriResult_Success);
             REQUIRE(c.GetQueue(dev, VriQueueType_Graphics, 0, &graphics) == VriResult_Success);
-            VriDescriptorSetDesc sd {};
-            sd.ranges   = ranges;
-            sd.rangeNum = rangeNum;
+            VriDescriptorSetDesc sets[2] {};
+            sets[0].ranges   = ranges;
+            sets[0].rangeNum = rangeNum;
+            if (secondSet)
+                sets[1] = *secondSet;
             VriPipelineLayoutDesc ld {};
-            ld.descriptorSets   = &sd;
-            ld.descriptorSetNum = 1;
+            ld.descriptorSets   = sets;
+            ld.descriptorSetNum = secondSet ? 2u : 1u;
             ld.shaderStages     = VriShaderStage_Compute;
             const VriPushConstantDesc push {0, pushSize, VriShaderStage_Compute};
             ld.pushConstants   = pushSize ? &push : nullptr;
@@ -645,4 +649,71 @@ TEST_CASE("D3D12: a storage-texture clear leaves the other mips in the caller's 
     CHECK(f.errors == 0);
     f.c.DestroyTexture(source);
     f.c.DestroyTexture(target);
+}
+
+TEST_CASE("D3D12: descriptor sets from different pools bind together")
+{
+    const VriDescriptorRangeDesc first[2] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute},
+                                           {1, 1, VriDescriptorType_Texture, VriShaderStage_Compute}};
+    const VriDescriptorRangeDesc second[1] {{0, 1, VriDescriptorType_Texture, VriShaderStage_Compute}};
+    VriDescriptorSetDesc         secondSet {};
+    secondSet.registerSpace = 1;
+    secondSet.ranges        = second;
+    secondSet.rangeNum      = 1;
+    ComputeFixture f;
+    if (!f.Create(first, 2, g_twoSetsDxbcCS, sizeof(g_twoSetsDxbcCS), VriQueueType_Graphics, 0, &secondSet))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    // Set 1 comes from a pool of its own, as a material set does next to a frame set.
+    VriDescriptorPoolDesc poolDesc {};
+    poolDesc.descriptorSetMaxNum = 1;
+    poolDesc.textureMaxNum       = 1;
+    VriDescriptorPool* pool      = nullptr;
+    REQUIRE(f.c.CreateDescriptorPool(f.dev, &poolDesc, &pool) == VriResult_Success);
+    VriDescriptorSet* set1 = nullptr;
+    REQUIRE(f.c.AllocateDescriptorSets(pool, f.layout, 1, &set1, 1) == VriResult_Success);
+
+    VriTexture*   target = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+    VriTexture*   a      = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+    VriTexture*   b      = f.Texture(VriTextureType_2D, 16, 1, 1, 1);
+    VriClearColor one {};
+    one.f32[0] = 1.0f;
+    VriClearColor two {};
+    two.f32[2] = 2.0f;
+    f.Begin();
+    f.Barrier(a, VriLayout_Undefined, VriLayout_CopyDestination, 0, 0);
+    f.Barrier(b, VriLayout_Undefined, VriLayout_CopyDestination, 0, 0);
+    f.c.CmdClearStorageTexture(f.cmd, a, &one);
+    f.c.CmdClearStorageTexture(f.cmd, b, &two);
+    f.Barrier(a, VriLayout_CopyDestination, VriLayout_ShaderResource, 0, 0);
+    f.Barrier(b, VriLayout_CopyDestination, VriLayout_ShaderResource, 0, 0);
+    f.Barrier(target, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    const VriDescriptor* views0[2] {f.View(target, VriTextureViewType_2D, 0, 0, 1),
+                                    f.View(a, VriTextureViewType_2D, 0, 0, 1)};
+    const VriDescriptor* view1 = f.View(b, VriTextureViewType_2D, 0, 0, 1);
+    f.Bind(views0, 2);
+    VriDescriptorRangeUpdateDesc update {};
+    update.descriptors   = &view1;
+    update.descriptorNum = 1;
+    f.c.UpdateDescriptorRanges(set1, 0, 1, &update);
+    f.c.CmdSetPipeline(f.cmd, f.pipeline);
+    f.c.CmdSetPipelineLayout(f.cmd, f.layout);
+    f.c.CmdSetDescriptorSet(f.cmd, 0, f.set);
+    f.c.CmdSetDescriptorSet(f.cmd, 1, set1);
+    VriDispatchDesc groups {2, 2, 1};
+    f.c.CmdDispatch(f.cmd, &groups);
+    f.Barrier(target, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    const Texel texel = f.Read(target, 0, 0);
+    CHECK(texel.x == 1.0f);
+    CHECK(texel.z == 2.0f);
+    CHECK(f.errors == 0);
+    for (const VriDescriptor* view : views0)
+        f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view1));
+    f.c.DestroyDescriptorPool(pool);
+    for (VriTexture* t : {target, a, b})
+        f.c.DestroyTexture(t);
 }

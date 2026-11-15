@@ -135,13 +135,22 @@ namespace vri::d3d12
 
     // A descriptor pool owns two shader-visible heaps (CBV/SRV/UAV + sampler) that
     // descriptor sets sub-allocate from via a bump cursor.
+    // A range of descriptors in one of the device's shared shader-visible heaps.
+    struct DescriptorBlockD3D12
+    {
+        uint32_t offset = 0;
+        uint32_t count  = 0;
+    };
+
+    // A descriptor pool owns one block of each shared shader-visible heap (see
+    // DeviceD3D12::ShaderVisibleHeap); its sets bump-allocate within the blocks.
     struct DescriptorPoolD3D12
     {
-        DeviceD3D12*                 device = nullptr;
-        ComPtr<ID3D12DescriptorHeap> srvHeap;                      // shader-visible CBV/SRV/UAV
-        ComPtr<ID3D12DescriptorHeap> samplerHeap;                  // shader-visible SAMPLER
-        uint32_t                     srvSize = 0, samplerSize = 0; // descriptor increments
-        uint32_t                     srvNext = 0, samplerNext = 0; // bump cursors
+        DeviceD3D12*         device = nullptr;
+        DescriptorBlockD3D12 srvBlock;                     // in the CBV/SRV/UAV heap
+        DescriptorBlockD3D12 samplerBlock;                 // in the sampler heap
+        uint32_t             srvSize = 0, samplerSize = 0; // descriptor increments
+        uint32_t             srvNext = 0, samplerNext = 0; // bump cursors within the blocks
     };
 
     struct CommandAllocatorD3D12
