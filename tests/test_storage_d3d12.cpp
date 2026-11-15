@@ -549,3 +549,57 @@ TEST_CASE("D3D12: a structured buffer is readable through a descriptor table")
     f.c.DestroyTexture(t);
     f.c.DestroyBuffer(input);
 }
+
+TEST_CASE("D3D12: a readback copies only the region it names")
+{
+    const VriDescriptorRangeDesc ranges[1] {{0, 1, VriDescriptorType_StorageTexture, VriShaderStage_Compute}};
+    ComputeFixture               f;
+    if (!f.Create(ranges, 1, g_storageWrite3dDxbcCS, sizeof(g_storageWrite3dDxbcCS)))
+    {
+        MESSAGE("D3D12 unavailable - skipping");
+        return;
+    }
+    VriTexture*          t    = f.Texture(VriTextureType_3D, 4, 4, 1, 1);
+    const VriDescriptor* view = f.View(t, VriTextureViewType_3D, 0, 0, 1);
+    f.Bind(&view, 1);
+    f.Begin();
+    f.Barrier(t, VriLayout_Undefined, VriLayout_ShaderResourceStorage, 0, 0);
+    f.Dispatch(1, 1, 1);
+    f.Barrier(t, VriLayout_ShaderResourceStorage, VriLayout_CopySource, 0, 0);
+    f.Submit();
+    // Depth slice 3, texels (1, 2) to (2, 3): a 2x2x1 box into a buffer sized for it alone (two
+    // 256-byte rows), as a per-slice readback of a volume does.
+    VriBufferDesc bd {};
+    bd.size             = 2 * 256;
+    bd.usage            = VriBufferUsage_TransferDst;
+    bd.memoryLocation   = VriMemoryLocation_HostReadback;
+    VriBuffer* readback = nullptr;
+    REQUIRE(f.c.CreateBuffer(f.dev, &bd, &readback) == VriResult_Success);
+    REQUIRE(f.c.BeginCommandBuffer(f.readCmd) == VriResult_Success);
+    VriBufferTextureCopyDesc cp {};
+    cp.texture.layerNum = 1;
+    cp.texture.aspect   = VriImageAspect_Color;
+    cp.texture.x        = 1;
+    cp.texture.y        = 2;
+    cp.texture.z        = 3;
+    cp.texture.width    = 2;
+    cp.texture.height   = 2;
+    cp.texture.depth    = 1;
+    f.c.CmdReadbackTextureToBuffer(f.readCmd, readback, t, &cp);
+    f.Submit(f.readCmd, f.graphics);
+    const auto* bytes = static_cast<const uint8_t*>(f.c.MapBuffer(readback, 0, bd.size));
+    Texel       first {};
+    Texel       last {};
+    std::memcpy(&first, bytes, sizeof(Texel));
+    std::memcpy(&last, bytes + 256 + sizeof(Texel), sizeof(Texel));
+    f.c.UnmapBuffer(readback);
+    CHECK(first.x == 1.0f);
+    CHECK(first.y == 2.0f);
+    CHECK(first.z == 3.0f);
+    CHECK(last.x == 2.0f);
+    CHECK(last.y == 3.0f);
+    CHECK(f.errors == 0);
+    f.c.DestroyBuffer(readback);
+    f.c.DestroyDescriptor(const_cast<VriDescriptor*>(view));
+    f.c.DestroyTexture(t);
+}

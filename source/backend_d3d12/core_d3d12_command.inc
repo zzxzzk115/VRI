@@ -200,13 +200,37 @@
             BufferD3D12*        b = Buf(dst);
             // Subresource = mip + arrayLayer * mipNum (baseLayer selects the array slice), matching
             // the upload path - so a per-layer readback of an array target reads the right slice.
-            const UINT sub = (region ? region->texture.mip : 0) + (region ? region->texture.baseLayer : 0) * t->mipNum;
-            D3D12_RESOURCE_DESC                rd       = t->resource->GetDesc();
+            const UINT mip = region ? region->texture.mip : 0;
+            const UINT sub = mip + (region ? region->texture.baseLayer : 0) * t->mipNum;
+            // The region's box within the mip; zero extents mean the rest of the mip, as on Vulkan.
+            const UINT mipWidth  = (std::max)(1u, t->width >> mip);
+            const UINT mipHeight = (std::max)(1u, t->height >> mip);
+            const UINT mipDepth  = (std::max)(1u, t->depth >> mip);
+            D3D12_BOX  box       = {};
+            box.left             = region ? static_cast<UINT>(region->texture.x) : 0;
+            box.top              = region ? static_cast<UINT>(region->texture.y) : 0;
+            box.front            = region ? static_cast<UINT>(region->texture.z) : 0;
+            box.right  = box.left + (region && region->texture.width ? region->texture.width : mipWidth - box.left);
+            box.bottom = box.top + (region && region->texture.height ? region->texture.height : mipHeight - box.top);
+            box.back   = box.front + (region && region->texture.depth ? region->texture.depth : mipDepth - box.front);
+            if (box.right > mipWidth || box.bottom > mipHeight || box.back > mipDepth)
+            {
+                c->device->ReportError("texture-readback region out of bounds");
+                return;
+            }
+            // The footprint describes the box alone: the buffer holds only what is copied.
+            D3D12_RESOURCE_DESC rd = t->resource->GetDesc();
+            rd.Width               = box.right - box.left;
+            rd.Height              = box.bottom - box.top;
+            rd.DepthOrArraySize    = static_cast<UINT16>(box.back - box.front);
+            rd.MipLevels           = 1;
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp       = {};
             UINT                               rows     = 0;
             UINT64                             rowBytes = 0, total = 0;
             c->device->Device()->GetCopyableFootprints(
-                &rd, sub, 1, region ? region->bufferOffset : 0, &fp, &rows, &rowBytes, &total);
+                &rd, 0, 1, region ? region->bufferOffset : 0, &fp, &rows, &rowBytes, &total);
+            const bool whole = box.left == 0 && box.top == 0 && box.front == 0 && box.right == mipWidth &&
+                               box.bottom == mipHeight && box.back == mipDepth;
             Transition(c,
                        t,
                        D3D12_RESOURCE_STATE_COPY_SOURCE,
@@ -219,7 +243,8 @@
             srcLoc.pResource                   = t->resource.Get();
             srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
             srcLoc.SubresourceIndex            = sub;
-            c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+            // Depth-stencil copies must cover the whole subresource, so only a partial box is passed.
+            c->list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, whole ? nullptr : &box);
         }
 
         // ---- submission / fences --------------------------------------
