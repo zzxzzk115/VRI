@@ -308,9 +308,19 @@ VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc
     {
         v->cpu                            = d->AllocDsv();
         D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
-        dsv.Format             = v->texture->dsvFormat; // typed depth (resource may be TYPELESS for sampling)
-        dsv.ViewDimension      = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsv.Texture2D.MipSlice = desc->baseMip;
+        dsv.Format = v->texture->dsvFormat; // typed depth (resource may be TYPELESS for sampling)
+        if (v->texture->layerNum > 1) // a slice of an array: Texture2D views address slice 0 only
+        {
+            dsv.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+            dsv.Texture2DArray.MipSlice        = desc->baseMip;
+            dsv.Texture2DArray.FirstArraySlice = v->baseLayer;
+            dsv.Texture2DArray.ArraySize       = v->layerNum;
+        }
+        else
+        {
+            dsv.ViewDimension      = D3D12_DSV_DIMENSION_TEXTURE2D;
+            dsv.Texture2D.MipSlice = desc->baseMip;
+        }
         d->Device()->CreateDepthStencilView(v->texture->resource.Get(), &dsv, v->cpu);
     }
     else if (v->texture->isRenderTarget)
@@ -319,11 +329,12 @@ VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc
         D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
         rtv.Format                        = v->texture->format;
         // Array RTV for a layered target (viewType 2DArray, or > 1 layer): multiview
-        // (ViewInstancing) targets one array slice per view, so the RTV must span them.
+        // (ViewInstancing) targets one array slice per view, so the RTV must span them. A view of
+        // one slice of an array is an array RTV too: Texture2D RTVs address slice 0 only.
         uint32_t layers = desc->layerNum;
         if (layers == 0)
             layers = v->texture->layerNum > desc->baseLayer ? v->texture->layerNum - desc->baseLayer : 1;
-        const bool array = desc->viewType == VriTextureViewType_2DArray || layers > 1;
+        const bool array = desc->viewType == VriTextureViewType_2DArray || layers > 1 || v->texture->layerNum > 1;
         if (v->texture->sampleCount > 1)
         {
             if (array)
