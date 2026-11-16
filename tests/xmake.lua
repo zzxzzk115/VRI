@@ -65,6 +65,7 @@ target("vri-tests")
     add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
     add_files("test_explicitmemory_xbackend.cpp") -- explicit placed-resource memory (AllocateMemory + BindMemory)
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
+    add_files("test_atomic_int64_xbackend.cpp") -- 64-bit atomics on storage buffers (Vulkan, D3D12)
     add_files("test_clear_texture_metal.cpp")
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)
     add_files("test_multiview_xbackend.cpp") -- multiview single-pass layered rendering (viewMask)
@@ -91,6 +92,8 @@ target("vri-tests")
     if has_config("vri_backend_wgpu") then
         add_files("test_device_wgpu.cpp")
         add_files("test_triangle_wgpu.cpp")
+        add_files("test_compute_storage_wgpu.cpp")
+        add_files("test_compressed_copy_wgpu.cpp")
     end
     if has_config("vri_backend_gl") then
         add_files("test_device_gl.cpp")

@@ -368,6 +368,22 @@ namespace vri::d3d12
         }
         if ((requested & VriFeature_LowLatency) && fail("low-latency not implemented on D3D12"))
             return VriResult_Unsupported;
+        // 64-bit atomics on raw and structured buffers come with Shader Model 6.6; the shader also declares
+        // 64-bit integers, which need Int64ShaderOps. Typed (texture) and groupshared 64-bit atomics are separate
+        // D3D12_OPTIONS9 capabilities and are not part of this feature.
+        if (requested & VriFeature_ShaderAtomicInt64)
+        {
+            D3D12_FEATURE_DATA_SHADER_MODEL   sm = {D3D_SHADER_MODEL_6_6};
+            D3D12_FEATURE_DATA_D3D12_OPTIONS1 o1 = {};
+            const bool ok = SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &sm, sizeof(sm))) &&
+                            sm.HighestShaderModel >= D3D_SHADER_MODEL_6_6 &&
+                            SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &o1, sizeof(o1))) &&
+                            o1.Int64ShaderOps;
+            if (ok)
+                granted |= VriFeature_ShaderAtomicInt64;
+            else if (fail("64-bit buffer atomics not supported (needs Shader Model 6.6 and Int64ShaderOps)"))
+                return VriResult_Unsupported;
+        }
 
         // External memory/fence export: D3D12 shared handles (CreateSharedHandle) are always
         // available on Windows, so grant whenever requested.
@@ -460,6 +476,7 @@ namespace vri::d3d12
         m_desc.hasRayTracing           = (m_enabledFeatures & VriFeature_RayTracing) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasOpacityMicromap      = (m_enabledFeatures & VriFeature_OpacityMicromap) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasRayQuery             = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasShaderAtomicInt64    = (m_enabledFeatures & VriFeature_ShaderAtomicInt64) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasBindless             = (m_enabledFeatures & VriFeature_Bindless) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasPipelineStatistics   = VRI_TRUE; // D3D12 pipeline-statistics query heap is always available
