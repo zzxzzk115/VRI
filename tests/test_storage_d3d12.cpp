@@ -1,7 +1,9 @@
 // D3D12 storage textures written by compute shaders. These tests turn on GPU-based validation
 // before the device is created (it is a process-wide debug-layer setting, switched off again once
 // the device is destroyed) and fail on any error the debug layer reports through the message callback:
-// resource-state mistakes that drivers tolerate are only visible there.
+// resource-state mistakes that drivers tolerate are only visible there. Changing the setting while
+// another D3D12 device is alive in the process removes that device on WARP, so the tests then run
+// without it and say so.
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -14,6 +16,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <d3d12.h>
+#include <dxgi1_6.h>
 #include <wrl/client.h>
 
 #include "shaders/tests/mip_reduce_dxbc.h"          // g_mipReduceDxbcCS
@@ -48,8 +51,31 @@ namespace
             debug->SetEnableGPUBasedValidation(enable);
     }
 
-    // A D3D12 device with GPU-based validation and one compute pipeline over one descriptor set
-    // of `ranges`. Commands are recorded into `cmd` between Begin() and Submit().
+    // Whether any adapter already has a D3D12 device in this process: another test's that is still
+    // referenced, or the one wgpu creates on WARP. D3D12CreateDevice returns an adapter's existing
+    // device, so a reference count above ours shows one.
+    bool AnyDeviceAlive()
+    {
+        Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+        if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
+            return true;
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+        {
+            Microsoft::WRL::ComPtr<ID3D12Device> device;
+            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device))))
+            {
+                device->AddRef();
+                if (device->Release() > 1)
+                    return true;
+            }
+            adapter.Reset();
+        }
+        return false;
+    }
+
+    // A D3D12 device, with GPU-based validation unless another device is alive, and one compute pipeline over one
+    // descriptor set of `ranges`. Commands are recorded into `cmd` between Begin() and Submit().
     struct ComputeFixture
     {
         int                  errors = 0;
@@ -68,6 +94,7 @@ namespace
         VriCommandBuffer*    readCmd    = nullptr;
         VriFence*            fence      = nullptr;
         uint64_t             fenceValue = 0;
+        bool                 gbv        = false; // GPU-based validation, switched on by this fixture
 
         bool Create(const VriDescriptorRangeDesc* ranges,
                     uint32_t                      rangeNum,
@@ -83,11 +110,16 @@ namespace
             dc.enableValidation       = VRI_TRUE;
             dc.bestEffort             = VRI_TRUE;
             dc.callbackInterface      = &callback;
-            SetGpuBasedValidation(TRUE);
+            gbv                       = !AnyDeviceAlive();
+            if (gbv)
+                SetGpuBasedValidation(TRUE);
+            else
+                MESSAGE("another D3D12 device is alive in this process; GPU-based validation stays off");
             const VriResult created = vriCreateDevice(&dc, &dev);
             if (created != VriResult_Success)
             {
-                SetGpuBasedValidation(FALSE);
+                if (gbv)
+                    SetGpuBasedValidation(FALSE);
                 dev = nullptr;
                 return false;
             }
@@ -141,7 +173,8 @@ namespace
             c.DestroyPipeline(pipeline);
             c.DestroyPipelineLayout(layout);
             vriDestroyDevice(dev);
-            SetGpuBasedValidation(FALSE);
+            if (gbv)
+                SetGpuBasedValidation(FALSE);
         }
 
         VriTexture* Texture(VriTextureType type, uint32_t size, uint32_t depth, uint32_t mips, uint32_t layers)
