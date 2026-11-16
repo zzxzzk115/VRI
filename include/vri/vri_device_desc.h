@@ -150,6 +150,7 @@ typedef struct VriDeviceDesc
     uint32_t bindlessSamplerMaxNum;
 
     VriBool hasCooperativeVector;         /* enabled shader inference extension, not a general ML-runtime capability */
+    VriBool hasShaderAtomicInt64;         /* 64-bit integer atomics on storage buffers (VriFeature_ShaderAtomicInt64) */
     VriCoordinateConventions coordinates; /* Immutable authoring policy selected at creation. */
 } VriDeviceDesc;
 

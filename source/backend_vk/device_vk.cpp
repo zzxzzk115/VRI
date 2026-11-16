@@ -914,6 +914,20 @@ namespace vri::vk
                 return VriResult_Unsupported;
         }
 
+        // 64-bit atomics on storage buffers: core Vulkan 1.2 (shaderBufferInt64Atomics) together with the
+        // 64-bit integer type itself (shaderInt64), which every such shader declares.
+        if (requested & VriFeature_ShaderAtomicInt64)
+        {
+            if (baseSup.shaderInt64 && v12Sup.shaderBufferInt64Atomics)
+            {
+                features2.features.shaderInt64 = VK_TRUE;
+                f12.shaderBufferInt64Atomics   = VK_TRUE;
+                granted |= VriFeature_ShaderAtomicInt64;
+            }
+            else if (unsupported("64-bit buffer atomics not supported"))
+                return VriResult_Unsupported;
+        }
+
         if ((requested & VriFeature_LowLatency) && unsupported("low-latency not implemented"))
             return VriResult_Unsupported;
 
@@ -1065,6 +1079,7 @@ namespace vri::vk
         m_desc.hasRayQuery             = (m_enabledFeatures & VriFeature_RayQuery) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasExternalMemory       = (m_enabledFeatures & VriFeature_ExternalMemory) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCooperativeVector    = (m_enabledFeatures & VriFeature_CooperativeVector) ? VRI_TRUE : VRI_FALSE;
+        m_desc.hasShaderAtomicInt64    = (m_enabledFeatures & VriFeature_ShaderAtomicInt64) ? VRI_TRUE : VRI_FALSE;
         m_desc.hasPipelineStatistics   = m_hasPipelineStats ? VRI_TRUE : VRI_FALSE;
         m_desc.hasCalibratedTimestamps = m_hasCalibratedTimestamps ? VRI_TRUE : VRI_FALSE;
         m_desc.hasDrawIndirectCount    = m_hasDrawIndirectCount ? VRI_TRUE : VRI_FALSE;
