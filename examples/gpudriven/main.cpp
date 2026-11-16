@@ -131,12 +131,14 @@ int main(int, char**)
     BuildCube(verts, indices);
     const std::vector<Instance> instances = BuildInstances();
 
-    auto makeBuf = [&](uint64_t size, VriBufferUsageFlags usage, VriMemoryLocation loc) {
+    // `stride` > 0 for a buffer read as an HLSL StructuredBuffer: D3D12 needs the element size.
+    auto makeBuf = [&](uint64_t size, VriBufferUsageFlags usage, VriMemoryLocation loc, uint32_t stride = 0) {
         VriBufferDesc bd {};
-        bd.size           = size;
-        bd.usage          = usage;
-        bd.memoryLocation = loc;
-        VriBuffer* b      = nullptr;
+        bd.size            = size;
+        bd.structureStride = stride;
+        bd.usage           = usage;
+        bd.memoryLocation  = loc;
+        VriBuffer* b       = nullptr;
         if (c.CreateBuffer(app.dev, &bd, &b) != VriResult_Success)
             app.Fail("CreateBuffer failed");
         return b;
@@ -149,7 +151,8 @@ int main(int, char**)
                               VriMemoryLocation_Device);
     VriBuffer* instBuf = makeBuf(kInstances * sizeof(Instance),
                                  VriBufferUsage_StorageBuffer | VriBufferUsage_TransferDst,
-                                 VriMemoryLocation_Device);
+                                 VriMemoryLocation_Device,
+                                 sizeof(Instance));
     // survivors: written as a storage buffer by the CS, read as the per-instance vertex stream
     VriBuffer* visBuf        = makeBuf(kInstances * sizeof(Instance),
                                 VriBufferUsage_StorageBuffer | VriBufferUsage_VertexBuffer,

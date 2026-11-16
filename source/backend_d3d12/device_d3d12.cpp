@@ -11,9 +11,11 @@
 
 #include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <tuple>
 
 namespace vri::d3d12
 {
@@ -173,44 +175,109 @@ namespace vri::d3d12
 
     VriResult DeviceD3D12::CreateDescriptorHeaps()
     {
-        D3D12_DESCRIPTOR_HEAP_DESC rtv = {};
-        rtv.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-        rtv.NumDescriptors             = kRtvHeapSize;
-        rtv.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // CPU-only
-        if (FAILED(m_device->CreateDescriptorHeap(&rtv, IID_PPV_ARGS(&m_rtvHeap))))
+        for (auto [attachment, type, size] : {std::tuple {&m_rtvHeap, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kRtvHeapSize},
+                                              std::tuple {&m_dsvHeap, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, kDsvHeapSize}})
         {
-            ReportError("CreateDescriptorHeap (RTV) failed");
-            return VriResult_Failure;
+            D3D12_DESCRIPTOR_HEAP_DESC cpu = {};
+            cpu.Type                       = type;
+            cpu.NumDescriptors             = size;
+            cpu.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; // CPU-only
+            if (FAILED(m_device->CreateDescriptorHeap(&cpu, IID_PPV_ARGS(&attachment->heap))))
+            {
+                ReportError(type == D3D12_DESCRIPTOR_HEAP_TYPE_RTV ? "CreateDescriptorHeap (RTV) failed" :
+                                                                     "CreateDescriptorHeap (DSV) failed");
+                return VriResult_Failure;
+            }
+            attachment->increment = m_device->GetDescriptorHandleIncrementSize(type);
+            // Popped from the back, so the lowest slots are handed out first.
+            attachment->free.resize(size);
+            for (uint32_t slot = 0; slot < size; ++slot)
+                attachment->free[slot] = size - 1 - slot;
         }
-        m_rtvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-        D3D12_DESCRIPTOR_HEAP_DESC dsv = {};
-        dsv.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-        dsv.NumDescriptors             = kDsvHeapSize;
-        dsv.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        if (FAILED(m_device->CreateDescriptorHeap(&dsv, IID_PPV_ARGS(&m_dsvHeap))))
+        for (auto [shared, type, size] :
+             {std::tuple {&m_viewHeap, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kViewHeapSize},
+              std::tuple {&m_samplerHeap, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, kSamplerHeapSize}})
         {
-            ReportError("CreateDescriptorHeap (DSV) failed");
-            return VriResult_Failure;
+            D3D12_DESCRIPTOR_HEAP_DESC visible = {};
+            visible.Type                       = type;
+            visible.NumDescriptors             = size;
+            visible.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            if (FAILED(m_device->CreateDescriptorHeap(&visible, IID_PPV_ARGS(&shared->heap))))
+            {
+                ReportError("CreateDescriptorHeap (shared shader-visible) failed");
+                return VriResult_Failure;
+            }
+            shared->free = {{0, size}};
         }
-        m_dsvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
         return VriResult_Success;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocRtv()
+    ID3D12DescriptorHeap* DeviceD3D12::ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE type) const
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
-        h.ptr += static_cast<SIZE_T>(m_rtvNext % kRtvHeapSize) * m_rtvSize; // ring (Phase 1: few RTVs)
-        ++m_rtvNext;
-        return h;
+        return (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? m_samplerHeap : m_viewHeap).heap.Get();
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE DeviceD3D12::AllocDsv()
+    bool DeviceD3D12::AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t count, DescriptorBlockD3D12& out)
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE h = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-        h.ptr += static_cast<SIZE_T>(m_dsvNext % kDsvHeapSize) * m_dsvSize;
-        ++m_dsvNext;
-        return h;
+        std::lock_guard lock(m_sharedHeapMutex);
+        auto&           free = (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? m_samplerHeap : m_viewHeap).free;
+        for (auto it = free.begin(); it != free.end(); ++it) // first fit
+        {
+            if (it->count < count)
+                continue;
+            out = {it->offset, count};
+            it->offset += count;
+            it->count -= count;
+            if (it->count == 0)
+                free.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    void DeviceD3D12::FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, DescriptorBlockD3D12 block)
+    {
+        if (block.count == 0)
+            return;
+        std::lock_guard lock(m_sharedHeapMutex);
+        auto&           free = (type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? m_samplerHeap : m_viewHeap).free;
+        auto            it   = std::lower_bound(
+            free.begin(), free.end(), block, [](const DescriptorBlockD3D12& a, const DescriptorBlockD3D12& b) {
+                return a.offset < b.offset;
+            });
+        it = free.insert(it, block);
+        // Merge with the following and the preceding free block where they touch.
+        if (it + 1 != free.end() && it->offset + it->count == (it + 1)->offset)
+        {
+            it->count += (it + 1)->count;
+            free.erase(it + 1);
+        }
+        if (it != free.begin() && (it - 1)->offset + (it - 1)->count == it->offset)
+        {
+            (it - 1)->count += it->count;
+            free.erase(it);
+        }
+    }
+
+    bool DeviceD3D12::AllocateAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE& out)
+    {
+        std::lock_guard lock(m_attachmentHeapMutex);
+        AttachmentHeap& heap = depth ? m_dsvHeap : m_rtvHeap;
+        if (heap.free.empty())
+            return false;
+        out = heap.heap->GetCPUDescriptorHandleForHeapStart();
+        out.ptr += static_cast<SIZE_T>(heap.free.back()) * heap.increment;
+        heap.free.pop_back();
+        return true;
+    }
+
+    void DeviceD3D12::FreeAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE handle)
+    {
+        std::lock_guard lock(m_attachmentHeapMutex);
+        AttachmentHeap& heap = depth ? m_dsvHeap : m_rtvHeap;
+        heap.free.push_back(
+            static_cast<uint32_t>((handle.ptr - heap.heap->GetCPUDescriptorHandleForHeapStart().ptr) / heap.increment));
     }
 
     // D3D12 has no per-feature device-creation flag (features are pure capabilities),

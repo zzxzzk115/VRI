@@ -43,7 +43,38 @@
         }
         DescriptorSetD3D12* DSet(VriDescriptorSet* s) { return reinterpret_cast<DescriptorSetD3D12*>(s); }
 
-        D3D12_RESOURCE_STATES ToState(VriLayout layout)
+        // The resource dimension and extent of `desc`: 1D and 3D textures keep their dimension
+        // (a 3D texture's depth is its third extent); 2D textures, arrays and cubes are 2D array
+        // resources with one slice per layer.
+        void SetTextureExtent(D3D12_RESOURCE_DESC& rd, const VriTextureDesc* desc)
+        {
+            const UINT   height = desc->height ? desc->height : 1;
+            const UINT16 layers = static_cast<UINT16>(desc->layerNum ? desc->layerNum : 1);
+            rd.Width            = desc->width ? desc->width : 1;
+            switch (desc->type)
+            {
+                case VriTextureType_1D:
+                case VriTextureType_1DArray:
+                    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE1D;
+                    rd.Height           = 1;
+                    rd.DepthOrArraySize = layers;
+                    break;
+                case VriTextureType_3D:
+                    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+                    rd.Height           = height;
+                    rd.DepthOrArraySize = static_cast<UINT16>(desc->depth ? desc->depth : 1);
+                    break;
+                default:
+                    rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                    rd.Height           = height;
+                    rd.DepthOrArraySize = layers;
+                    break;
+            }
+        }
+
+        // `access` decides the General layout: storage access needs UNORDERED_ACCESS, which textures
+        // are never promoted to implicitly.
+        D3D12_RESOURCE_STATES ToState(VriLayout layout, VriAccessFlags access)
         {
             switch (layout)
             {
@@ -55,6 +86,8 @@
                     return D3D12_RESOURCE_STATE_DEPTH_READ;
                 case VriLayout_ShaderResource:
                     return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+                case VriLayout_ShaderResourceStorage:
+                    return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
                 case VriLayout_CopySource:
                     return D3D12_RESOURCE_STATE_COPY_SOURCE;
                 case VriLayout_CopyDestination:
@@ -62,7 +95,9 @@
                 case VriLayout_Present:
                     return D3D12_RESOURCE_STATE_PRESENT;
                 case VriLayout_General:
-                    return D3D12_RESOURCE_STATE_COMMON;
+                    return (access & (VriAccess_ShaderResourceStorageRead | VriAccess_ShaderResourceStorageWrite)) ?
+                               D3D12_RESOURCE_STATE_UNORDERED_ACCESS :
+                               D3D12_RESOURCE_STATE_COMMON;
                 default:
                     return D3D12_RESOURCE_STATE_COMMON;
             }
@@ -100,18 +135,104 @@
             }
         }
 
-        void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after)
+        // Mips [baseMip, baseMip + mipNum) of layers [baseLayer, baseLayer + layerNum).
+        struct SubresourceRange
         {
-            if (t->state == after)
-                return;
+            uint32_t baseMip   = 0;
+            uint32_t mipNum    = 0;
+            uint32_t baseLayer = 0;
+            uint32_t layerNum  = 0;
+        };
+
+        SubresourceRange WholeTexture(const TextureD3D12* t) { return {0, t->mipNum, 0, t->layerNum}; }
+
+        // An attachment view renders to one mip of its layers.
+        SubresourceRange ViewRange(const DescriptorD3D12* v) { return {v->mip, 1, v->baseLayer, v->layerNum}; }
+
+        bool InState(const TextureD3D12* t, const SubresourceRange& r, D3D12_RESOURCE_STATES state)
+        {
+            for (uint32_t layer = r.baseLayer; layer < r.baseLayer + r.layerNum; ++layer)
+                for (uint32_t mip = r.baseMip; mip < r.baseMip + r.mipNum; ++mip)
+                    if (t->states[mip + layer * t->mipNum] != state)
+                        return false;
+            return true;
+        }
+
+        // Moves the subresources of `r` to `after`. A whole texture in one state takes a single
+        // all-subresources barrier; otherwise each subresource that changes gets its own, for
+        // both planes of a depth-stencil format.
+        void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after, const SubresourceRange& r)
+        {
+            const bool whole = r.baseMip == 0 && r.mipNum == t->mipNum && r.baseLayer == 0 && r.layerNum == t->layerNum;
             D3D12_RESOURCE_BARRIER b = {};
             b.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             b.Transition.pResource   = t->resource.Get();
-            b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b.Transition.StateBefore = t->state;
             b.Transition.StateAfter  = after;
+            if (whole && InState(t, r, t->states[0]))
+            {
+                if (t->states[0] == after)
+                    return;
+                b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                b.Transition.StateBefore = t->states[0];
+                c->list->ResourceBarrier(1, &b);
+                t->ResetStates(after);
+            }
+            else
+            {
+                const bool planes = t->dsvFormat == DXGI_FORMAT_D24_UNORM_S8_UINT ||
+                                    t->dsvFormat == DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+                const UINT subresources = t->mipNum * t->layerNum;
+                std::vector<D3D12_RESOURCE_BARRIER> barriers;
+                for (uint32_t layer = r.baseLayer; layer < r.baseLayer + r.layerNum; ++layer)
+                    for (uint32_t mip = r.baseMip; mip < r.baseMip + r.mipNum; ++mip)
+                    {
+                        D3D12_RESOURCE_STATES& state = t->states[mip + layer * t->mipNum];
+                        if (state == after)
+                            continue;
+                        b.Transition.StateBefore = state;
+                        b.Transition.Subresource = mip + layer * t->mipNum;
+                        barriers.push_back(b);
+                        if (planes)
+                        {
+                            b.Transition.Subresource += subresources;
+                            barriers.push_back(b);
+                        }
+                        state = after;
+                    }
+                if (barriers.empty())
+                    return;
+                c->list->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
+            }
+            if (t->concurrent && after != D3D12_RESOURCE_STATE_COMMON &&
+                std::find(c->concurrentTextures.begin(), c->concurrentTextures.end(), t) == c->concurrentTextures.end())
+                c->concurrentTextures.push_back(t);
+        }
+
+        void Transition(CommandBufferD3D12* c, TextureD3D12* t, D3D12_RESOURCE_STATES after)
+        {
+            Transition(c, t, after, WholeTexture(t));
+        }
+
+        // Compute lists accept no graphics-only states: a read-only texture there is a
+        // non-pixel shader resource.
+        D3D12_RESOURCE_STATES ForList(const CommandBufferD3D12* c, D3D12_RESOURCE_STATES state)
+        {
+            if (c->allocator->listType != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+                return state;
+            const D3D12_RESOURCE_STATES stripped = state & ~D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            return stripped != state && stripped == D3D12_RESOURCE_STATE_COMMON ?
+                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE :
+                       stripped;
+        }
+
+        // Orders unordered-access writes before later unordered-access reads or writes of `resource`;
+        // a transition cannot, because both sides are in the same state.
+        void UavBarrier(CommandBufferD3D12* c, ID3D12Resource* resource)
+        {
+            D3D12_RESOURCE_BARRIER b = {};
+            b.Type                   = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+            b.UAV.pResource          = resource;
             c->list->ResourceBarrier(1, &b);
-            t->state = after;
         }
 
         void TransitionBuffer(CommandBufferD3D12* c, BufferD3D12* b, D3D12_RESOURCE_STATES after)

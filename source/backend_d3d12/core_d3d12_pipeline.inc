@@ -7,6 +7,7 @@
             DeviceD3D12*         d = Dev(device);
             PipelineLayoutD3D12* l = new PipelineLayoutD3D12 {};
             l->device              = d;
+            l->computeOnly         = desc->shaderStages == VriShaderStage_Compute;
             // Constant buffers -> root CBV (by GPU address). Textures (SRV) and samplers ->
             // one descriptor table per set per heap-type. D3D12 registers are per-type, so we
             // flatten per-type from 0 within the set (matching Slang's HLSL assignment): the
@@ -172,6 +173,81 @@
         {
             if (layout)
                 delete PL(layout);
+        }
+
+        // An attachment or vertex format without a DXGI equivalent fails pipeline creation instead
+        // of being replaced by another format.
+        bool PipelineFormatsMapped(DeviceD3D12* d, const VriGraphicsPipelineDesc* desc)
+        {
+            bool mapped = true;
+            for (uint32_t i = 0; i < desc->outputMerger.colorNum; ++i)
+                mapped = mapped && ToDxgiFormat(desc->outputMerger.colors[i].format).format != DXGI_FORMAT_UNKNOWN;
+            if (desc->outputMerger.depthStencilFormat != VriFormat_Unknown)
+                mapped = mapped && ToDxgiFormat(desc->outputMerger.depthStencilFormat).format != DXGI_FORMAT_UNKNOWN;
+            for (uint32_t i = 0; i < desc->vertexInput.attributeNum; ++i)
+                mapped = mapped && ToDxgiFormat(desc->vertexInput.attributes[i].format).format != DXGI_FORMAT_UNKNOWN;
+            if (!mapped)
+                d->ReportError("CreateGraphicsPipeline: unmapped DXGI attachment or vertex format");
+            return mapped;
+        }
+
+        struct InputSemantic
+        {
+            std::string name;
+            UINT        index = 0;
+        };
+
+        // The semantic of each input register of a vertex shader, read from its container's input
+        // signature part: ISGN (FXC, DXBC) or ISG1 (DXC, DXIL; one extra stream field first). Both
+        // containers share the DXBC header. D3DReflect would read DXBC only. Returns nothing for
+        // malformed bytecode.
+        std::vector<InputSemantic> ReadInputSignature(const void* bytecode, size_t size)
+        {
+            const auto* bytes = static_cast<const uint8_t*>(bytecode);
+            auto        u32   = [&](size_t offset) {
+                uint32_t v = 0;
+                if (offset <= size && size - offset >= 4)
+                    std::memcpy(&v, bytes + offset, 4);
+                return v;
+            };
+            if (!bytes || size < 32 || std::memcmp(bytes, "DXBC", 4) != 0)
+                return {};
+            const uint32_t partCount = u32(28);
+            for (uint32_t p = 0; p < partCount && 32 + 4 * size_t(p) < size; ++p)
+            {
+                const size_t part = u32(32 + 4 * size_t(p));
+                if (part > size || size - part < 8)
+                    return {};
+                const bool isg1 = std::memcmp(bytes + part, "ISG1", 4) == 0;
+                if (!isg1 && std::memcmp(bytes + part, "ISGN", 4) != 0)
+                    continue;
+                const size_t data     = part + 8;
+                const size_t dataSize = u32(part + 4);
+                const size_t stride   = isg1 ? 32 : 24;
+                const size_t field    = isg1 ? 4 : 0; // ISG1 elements start with the stream index
+                const size_t count    = u32(data);
+                if (dataSize > size - data || dataSize < 8 || count > (dataSize - 8) / stride)
+                    return {};
+                std::vector<InputSemantic> byRegister;
+                for (size_t i = 0; i < count; ++i)
+                {
+                    const size_t   element = data + 8 + i * stride;
+                    const size_t   name    = u32(element + field);
+                    const uint32_t index   = u32(element + field + 4);
+                    const uint32_t reg     = u32(element + field + 16);
+                    if (name >= dataSize || reg >= D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT)
+                        return {};
+                    const char*  text   = reinterpret_cast<const char*>(bytes + data + name);
+                    const size_t length = strnlen(text, dataSize - name);
+                    if (length == dataSize - name)
+                        return {}; // unterminated name
+                    if (reg >= byRegister.size())
+                        byRegister.resize(reg + 1);
+                    byRegister[reg] = {std::string(text, length), index};
+                }
+                return byRegister;
+            }
+            return {};
         }
 
         // Mesh-shader pipeline (MS [+ AS] + PS) via the pipeline-state-stream API
@@ -392,6 +468,8 @@
             DeviceD3D12*         d      = Dev(device);
             PipelineLayoutD3D12* layout = PL(desc->pipelineLayout);
 
+            if (!PipelineFormatsMapped(d, desc))
+                return VriResult_Unsupported;
             for (uint32_t i = 0; i < desc->shaderNum; ++i)
                 if (desc->shaders[i].stage == VriShaderStage_Mesh || desc->shaders[i].stage == VriShaderStage_Task)
                     return CreateMeshPipeline(d, desc, out);
@@ -415,32 +493,12 @@
             }
 
             // Input layout (per-attribute). VRI attributes are location-indexed, but D3D
-            // matches vertex inputs by semantic name+index. Reflect the VS input signature
+            // matches vertex inputs by semantic name+index. Read the VS input signature
             // (register N == VRI attribute/location N) so the layout uses the real
             // semantics (POSITION, COLOR0, ...) Slang emitted - no hardcoded convention.
-            struct SemInfo
-            {
-                std::string name;
-                UINT        index = 0;
-            };
-            std::vector<SemInfo> byRegister; // owns the semantic strings the layout points at
+            std::vector<InputSemantic> byRegister; // owns the semantic strings the layout points at
             if (pd.VS.pShaderBytecode && desc->vertexInput.attributeNum)
-            {
-                ComPtr<ID3D12ShaderReflection> refl;
-                if (SUCCEEDED(D3DReflect(pd.VS.pShaderBytecode, pd.VS.BytecodeLength, IID_PPV_ARGS(&refl))))
-                {
-                    D3D12_SHADER_DESC sd = {};
-                    refl->GetDesc(&sd);
-                    byRegister.resize(sd.InputParameters);
-                    for (UINT i = 0; i < sd.InputParameters; ++i)
-                    {
-                        D3D12_SIGNATURE_PARAMETER_DESC p = {};
-                        refl->GetInputParameterDesc(i, &p);
-                        if (p.Register < byRegister.size())
-                            byRegister[p.Register] = {p.SemanticName ? p.SemanticName : "TEXCOORD", p.SemanticIndex};
-                    }
-                }
-            }
+                byRegister = ReadInputSignature(pd.VS.pShaderBytecode, pd.VS.BytecodeLength);
             std::vector<D3D12_INPUT_ELEMENT_DESC> elems;
             std::vector<PipelineGraphicsVB>       vbStrides;
             for (uint32_t i = 0; i < desc->vertexInput.attributeNum; ++i)
@@ -465,7 +523,7 @@
                     e.SemanticName  = "TEXCOORD";
                     e.SemanticIndex = i;
                 }
-                e.Format               = ToDxgiVertexFormat(a.format);
+                e.Format               = ToDxgiFormat(a.format).format;
                 e.InputSlot            = slot;
                 e.AlignedByteOffset    = a.offset;
                 e.InputSlotClass       = perInstance ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA :

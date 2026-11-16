@@ -5,28 +5,23 @@ VriResult VRI_CALL CreateDescriptorPool(VriDevice* device, const VriDescriptorPo
     DeviceD3D12*         d = Dev(device);
     DescriptorPoolD3D12* p = new DescriptorPoolD3D12 {};
     p->device              = d;
-    // Shader-visible heaps for SRV/CBV/UAV + samplers (descriptor tables bind from
-    // these). Sized from the pool request with sane minimums; root CBVs use neither.
-    const uint32_t srvCap         = (desc->textureMaxNum + desc->structuredBufferMaxNum + desc->storageBufferMaxNum +
+    // Blocks of the device's shared shader-visible heaps for SRV/CBV/UAV + samplers (descriptor tables
+    // bind from these). Sized from the pool request with sane minimums; root CBVs use neither.
+    const uint32_t srvCap     = (desc->textureMaxNum + desc->structuredBufferMaxNum + desc->storageBufferMaxNum +
                              desc->storageTextureMaxNum + 16);
-    const uint32_t samplerCap     = (desc->samplerMaxNum + 16);
-    D3D12_DESCRIPTOR_HEAP_DESC hd = {};
-    hd.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    hd.NumDescriptors             = srvCap;
-    hd.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    if (FAILED(d->Device()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&p->srvHeap))))
+    const uint32_t samplerCap = (desc->samplerMaxNum + 16);
+    if (!d->AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, srvCap, p->srvBlock))
     {
         delete p;
-        d->ReportError("CreateDescriptorHeap (SRV) failed");
-        return VriResult_Failure;
+        d->ReportError("CreateDescriptorPool: the shared CBV/SRV/UAV heap is full");
+        return VriResult_OutOfMemory;
     }
-    hd.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
-    hd.NumDescriptors = samplerCap;
-    if (FAILED(d->Device()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&p->samplerHeap))))
+    if (!d->AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, samplerCap, p->samplerBlock))
     {
+        d->FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, p->srvBlock);
         delete p;
-        d->ReportError("CreateDescriptorHeap (sampler) failed");
-        return VriResult_Failure;
+        d->ReportError("CreateDescriptorPool: the shared sampler heap is full (2048 samplers per device)");
+        return VriResult_OutOfMemory;
     }
     p->srvSize     = d->Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     p->samplerSize = d->Device()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
@@ -41,8 +36,12 @@ void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool)
 }
 void VRI_CALL DestroyDescriptorPool(VriDescriptorPool* pool)
 {
-    if (pool)
-        delete DPool(pool);
+    if (!pool)
+        return;
+    DescriptorPoolD3D12* p = DPool(pool);
+    p->device->FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, p->srvBlock);
+    p->device->FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, p->samplerBlock);
+    delete p;
 }
 VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
                                           const VriPipelineLayout* layout,
@@ -53,6 +52,15 @@ VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
     DescriptorPoolD3D12*       p  = DPool(pool);
     const PipelineLayoutD3D12* l  = PL(layout);
     const LayoutSetD3D12*      si = l->FindSet(setIndex);
+    const uint32_t srvNeed     = si ? si->srvCount * setNum : 0;
+    const uint32_t samplerNeed = si ? si->samplerCount * setNum : 0;
+    if (p->srvNext + srvNeed > p->srvBlock.count || p->samplerNext + samplerNeed > p->samplerBlock.count)
+    {
+        p->device->ReportError("AllocateDescriptorSets: the descriptor pool is full");
+        return VriResult_OutOfMemory;
+    }
+    ID3D12DescriptorHeap* srvHeap     = p->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    ID3D12DescriptorHeap* samplerHeap = p->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
     for (uint32_t i = 0; i < setNum; ++i)
     {
         DescriptorSetD3D12* s = new DescriptorSetD3D12 {};
@@ -62,24 +70,153 @@ VriResult VRI_CALL AllocateDescriptorSets(VriDescriptorPool*       pool,
         s->setIndex           = setIndex;
         if (si && si->srvCount > 0) // sub-allocate this set's SRV block
         {
-            s->srvCpu = p->srvHeap->GetCPUDescriptorHandleForHeapStart();
-            s->srvCpu.ptr += static_cast<SIZE_T>(p->srvNext) * p->srvSize;
-            s->srvGpu = p->srvHeap->GetGPUDescriptorHandleForHeapStart();
-            s->srvGpu.ptr += static_cast<UINT64>(p->srvNext) * p->srvSize;
+            const uint32_t slot = p->srvBlock.offset + p->srvNext;
+            s->srvCpu           = srvHeap->GetCPUDescriptorHandleForHeapStart();
+            s->srvCpu.ptr += static_cast<SIZE_T>(slot) * p->srvSize;
+            s->srvGpu = srvHeap->GetGPUDescriptorHandleForHeapStart();
+            s->srvGpu.ptr += static_cast<UINT64>(slot) * p->srvSize;
             p->srvNext += si->srvCount;
         }
         if (si && si->samplerCount > 0)
         {
-            s->samplerCpu = p->samplerHeap->GetCPUDescriptorHandleForHeapStart();
-            s->samplerCpu.ptr += static_cast<SIZE_T>(p->samplerNext) * p->samplerSize;
-            s->samplerGpu = p->samplerHeap->GetGPUDescriptorHandleForHeapStart();
-            s->samplerGpu.ptr += static_cast<UINT64>(p->samplerNext) * p->samplerSize;
+            const uint32_t slot = p->samplerBlock.offset + p->samplerNext;
+            s->samplerCpu       = samplerHeap->GetCPUDescriptorHandleForHeapStart();
+            s->samplerCpu.ptr += static_cast<SIZE_T>(slot) * p->samplerSize;
+            s->samplerGpu = samplerHeap->GetGPUDescriptorHandleForHeapStart();
+            s->samplerGpu.ptr += static_cast<UINT64>(slot) * p->samplerSize;
             p->samplerNext += si->samplerCount;
         }
         outSets[i] = ToHandle(s);
     }
     return VriResult_Success;
 }
+// A texture view covers its own mips and layers. A view of one slice of an array resource needs
+// an array descriptor: D3D12's non-array descriptors always address slice 0.
+bool ArrayView(const DescriptorD3D12* v)
+{
+    return v->viewType == VriTextureViewType_1DArray || v->viewType == VriTextureViewType_2DArray ||
+           v->texture->layerNum > 1;
+}
+
+D3D12_UNORDERED_ACCESS_VIEW_DESC StorageViewDesc(const DescriptorD3D12* v)
+{
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+    uav.Format                           = v->texture->format;
+    if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+    {
+        uav.ViewDimension         = D3D12_UAV_DIMENSION_TEXTURE3D;
+        uav.Texture3D.MipSlice    = v->mip;
+        uav.Texture3D.FirstWSlice = 0;
+        uav.Texture3D.WSize       = UINT(-1); // every depth slice of the mip
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D && !ArrayView(v))
+    {
+        uav.ViewDimension      = D3D12_UAV_DIMENSION_TEXTURE1D;
+        uav.Texture1D.MipSlice = v->mip;
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D)
+    {
+        uav.ViewDimension                  = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
+        uav.Texture1DArray.MipSlice        = v->mip;
+        uav.Texture1DArray.FirstArraySlice = v->baseLayer;
+        uav.Texture1DArray.ArraySize       = v->layerNum;
+    }
+    else if (ArrayView(v))
+    {
+        uav.ViewDimension                  = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+        uav.Texture2DArray.MipSlice        = v->mip;
+        uav.Texture2DArray.FirstArraySlice = v->baseLayer;
+        uav.Texture2DArray.ArraySize       = v->layerNum;
+    }
+    else
+    {
+        uav.ViewDimension      = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uav.Texture2D.MipSlice = v->mip;
+    }
+    return uav;
+}
+
+D3D12_SHADER_RESOURCE_VIEW_DESC SampledViewDesc(const DescriptorD3D12* v)
+{
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Format                  = v->texture->srvFormat; // typed sampleable format (R32_FLOAT for a sampled D32)
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+    {
+        srv.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE3D;
+        srv.Texture3D.MostDetailedMip = v->mip;
+        srv.Texture3D.MipLevels       = v->mipNum;
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D && !ArrayView(v))
+    {
+        srv.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE1D;
+        srv.Texture1D.MostDetailedMip = v->mip;
+        srv.Texture1D.MipLevels       = v->mipNum;
+    }
+    else if (v->texture->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE1D)
+    {
+        srv.ViewDimension                  = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
+        srv.Texture1DArray.MostDetailedMip = v->mip;
+        srv.Texture1DArray.MipLevels       = v->mipNum;
+        srv.Texture1DArray.FirstArraySlice = v->baseLayer;
+        srv.Texture1DArray.ArraySize       = v->layerNum;
+    }
+    else if (v->viewType == VriTextureViewType_CubeArray) // samples cubes by direction and index
+    {
+        srv.ViewDimension                     = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+        srv.TextureCubeArray.MostDetailedMip  = v->mip;
+        srv.TextureCubeArray.MipLevels        = v->mipNum;
+        srv.TextureCubeArray.First2DArrayFace = v->baseLayer;
+        srv.TextureCubeArray.NumCubes         = v->layerNum / 6;
+    }
+    else if (v->viewType == VriTextureViewType_Cube) // samples a 6-layer resource by direction
+    {
+        srv.ViewDimension               = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        srv.TextureCube.MostDetailedMip = v->mip;
+        srv.TextureCube.MipLevels       = v->mipNum;
+    }
+    else if (ArrayView(v))
+    {
+        srv.ViewDimension                  = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        srv.Texture2DArray.MostDetailedMip = v->mip;
+        srv.Texture2DArray.MipLevels       = v->mipNum;
+        srv.Texture2DArray.FirstArraySlice = v->baseLayer;
+        srv.Texture2DArray.ArraySize       = v->layerNum;
+    }
+    else
+    {
+        srv.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srv.Texture2D.MostDetailedMip = v->mip;
+        srv.Texture2D.MipLevels       = v->mipNum;
+    }
+    return srv;
+}
+// A read-only buffer view: structured with the buffer's structureStride (an HLSL StructuredBuffer),
+// or raw 32-bit words when the buffer has none (a ByteAddressBuffer).
+D3D12_SHADER_RESOURCE_VIEW_DESC BufferViewDesc(const DescriptorD3D12* v)
+{
+    const uint64_t size = v->bufferSize ? v->bufferSize : v->buffer->size - v->bufferOffset;
+    const uint32_t stride = v->buffer->structureStride;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.ViewDimension                   = D3D12_SRV_DIMENSION_BUFFER;
+    srv.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    if (stride)
+    {
+        srv.Format                     = DXGI_FORMAT_UNKNOWN;
+        srv.Buffer.FirstElement        = v->bufferOffset / stride;
+        srv.Buffer.NumElements         = static_cast<UINT>(size / stride);
+        srv.Buffer.StructureByteStride = stride;
+    }
+    else
+    {
+        srv.Format              = DXGI_FORMAT_R32_TYPELESS;
+        srv.Buffer.FirstElement = v->bufferOffset / 4;
+        srv.Buffer.NumElements  = static_cast<UINT>(size / 4);
+        srv.Buffer.Flags        = D3D12_BUFFER_SRV_FLAG_RAW;
+    }
+    return srv;
+}
+
 void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
                                      uint32_t                            baseRange,
                                      uint32_t                            rangeNum,
@@ -97,10 +234,14 @@ void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
         if (idx >= setBindings.size() || updates[r].descriptorNum == 0)
             continue;
         const LayoutBindingD3D12* lb = setBindings[idx];
-        s->bound[lb->binding] =
-            reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]); // root CBVs bind [0] at draw
-        if (lb->type == VriDescriptorType_ConstantBuffer)
+        if (lb->type == VriDescriptorType_ConstantBuffer || lb->type == VriDescriptorType_StorageBuffer)
+        {
+            // Root descriptors bind descriptor [0] by GPU address at CmdSetDescriptorSet.
+            const auto* v = reinterpret_cast<const DescriptorD3D12*>(updates[r].descriptors[0]);
+            if (v && v->buffer)
+                s->rootAddresses[lb->binding] = v->buffer->resource->GetGPUVirtualAddress() + v->bufferOffset;
             continue;
+        }
         // A range may carry an array of descriptors (descriptor indexing / bindless):
         // write each into consecutive heap slots from heapOffset + baseDescriptor.
         for (uint32_t k = 0; k < updates[r].descriptorNum; ++k)
@@ -126,51 +267,46 @@ void VRI_CALL UpdateDescriptorRanges(VriDescriptorSet*                   set,
                 h.ptr += slot * s->pool->srvSize;
                 d->Device()->CreateShaderResourceView(nullptr, &srv, h);
             }
+            else if (lb->type == VriDescriptorType_StructuredBuffer && v->buffer) // buffer SRV in the table
+            {
+                const D3D12_SHADER_RESOURCE_VIEW_DESC srv = BufferViewDesc(v);
+                D3D12_CPU_DESCRIPTOR_HANDLE           h   = s->srvCpu;
+                h.ptr += slot * s->pool->srvSize;
+                d->Device()->CreateShaderResourceView(v->buffer->resource.Get(), &srv, h);
+            }
             else if (lb->type == VriDescriptorType_StorageTexture && v->texture) // UAV
             {
-                D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-                uav.Format                           = v->texture->format;
-                uav.ViewDimension                    = D3D12_UAV_DIMENSION_TEXTURE2D;
-                D3D12_CPU_DESCRIPTOR_HANDLE h        = s->srvCpu;
+                const D3D12_UNORDERED_ACCESS_VIEW_DESC uav = StorageViewDesc(v);
+                D3D12_CPU_DESCRIPTOR_HANDLE            h   = s->srvCpu;
                 h.ptr += slot * s->pool->srvSize;
                 d->Device()->CreateUnorderedAccessView(v->texture->resource.Get(), nullptr, &uav, h);
             }
             else if (v->texture) // SRV (sampled texture) into the set's CBV/SRV/UAV heap slot
             {
-                D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
-                srv.Format = v->texture->srvFormat; // typed sampleable format (R32_FLOAT for a sampled D32 depth)
-                srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                const bool isCube =
-                    v->viewType == VriTextureViewType_Cube || v->viewType == VriTextureViewType_CubeArray;
-                if (isCube) // a TextureCube SRV samples a 6-layer resource by direction
-                {
-                    srv.ViewDimension         = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                    srv.TextureCube.MipLevels = v->texture->mipNum;
-                }
-                else if (v->texture->layerNum > 1)
-                {
-                    srv.ViewDimension            = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                    srv.Texture2DArray.MipLevels = v->texture->mipNum;
-                    srv.Texture2DArray.ArraySize = v->texture->layerNum;
-                }
-                else
-                {
-                    srv.ViewDimension       = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    srv.Texture2D.MipLevels = v->texture->mipNum;
-                }
-                D3D12_CPU_DESCRIPTOR_HANDLE h = s->srvCpu;
+                const D3D12_SHADER_RESOURCE_VIEW_DESC srv = SampledViewDesc(v);
+                D3D12_CPU_DESCRIPTOR_HANDLE           h   = s->srvCpu;
                 h.ptr += slot * s->pool->srvSize;
                 d->Device()->CreateShaderResourceView(v->texture->resource.Get(), &srv, h);
             }
         }
     }
 }
+// Whether layouts, descriptor sets and constants bind on the compute root: always on a compute
+// list, otherwise by the bound pipeline, or by the layout while no pipeline is bound yet.
+bool ComputeBinding(const CommandBufferD3D12* c)
+{
+    if (c->allocator->listType == D3D12_COMMAND_LIST_TYPE_COMPUTE)
+        return true;
+    if (c->boundPipeline)
+        return c->boundPipeline->isCompute;
+    return c->boundLayout && c->boundLayout->computeOnly;
+}
 void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
 {
     CommandBufferD3D12* c   = CB(cmd);
     c->boundLayout          = PL(layout);
     ID3D12RootSignature* rs = PL(layout)->rootSig.Get();
-    if (c->boundPipeline && c->boundPipeline->isCompute)
+    if (ComputeBinding(c))
         c->list->SetComputeRootSignature(rs);
     else
         c->list->SetGraphicsRootSignature(rs);
@@ -213,11 +349,12 @@ void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, cons
     if (!s || !s->layout)
         return;
     const LayoutSetD3D12* si      = s->layout->FindSet(setIndex);
-    const bool            compute = c->boundPipeline && c->boundPipeline->isCompute;
+    const bool            compute = ComputeBinding(c);
     // Bind the pool's shader-visible heaps (needed for the SRV/sampler tables).
     if (s->pool && (si && (si->srvCount || si->samplerCount)))
     {
-        ID3D12DescriptorHeap* heaps[2] = {s->pool->srvHeap.Get(), s->pool->samplerHeap.Get()};
+        ID3D12DescriptorHeap* heaps[2] = {c->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV),
+                                          c->device->ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)};
         c->list->SetDescriptorHeaps(2, heaps);
         c->boundSrvHeap     = heaps[0];
         c->boundSamplerHeap = heaps[1];
@@ -227,11 +364,10 @@ void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, cons
     {
         if (b.set != setIndex)
             continue;
-        auto it = s->bound.find(b.binding);
-        if (it == s->bound.end() || !it->second || !it->second->buffer)
+        const auto it = s->rootAddresses.find(b.binding);
+        if (it == s->rootAddresses.end())
             continue;
-        const D3D12_GPU_VIRTUAL_ADDRESS va =
-            it->second->buffer->resource->GetGPUVirtualAddress() + it->second->bufferOffset;
+        const D3D12_GPU_VIRTUAL_ADDRESS va = it->second;
         if (b.type == VriDescriptorType_ConstantBuffer)
         {
             if (compute)
@@ -268,7 +404,10 @@ void VRI_CALL CmdSetConstants(VriCommandBuffer* cmd, uint32_t, const void* data,
     CommandBufferD3D12* c = CB(cmd);
     if (!c->boundLayout || !c->boundLayout->hasPush || !data || !size)
         return;
-    c->list->SetGraphicsRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
+    if (ComputeBinding(c))
+        c->list->SetComputeRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
+    else
+        c->list->SetGraphicsRoot32BitConstants(c->boundLayout->pushRootParam, (size + 3u) / 4u, data, 0);
 }
 // Record the bindings only; the actual IASetVertexBuffers happens at draw time (FlushVertexBuffers),
 // because the per-stream stride comes from the pipeline and the app may bind buffers before it.
@@ -337,11 +476,13 @@ void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
         d->indexNum, d->instanceNum ? d->instanceNum : 1, d->baseIndex, d->vertexOffset, d->baseInstance);
 }
 // Indirect draws via ExecuteIndirect + a DRAW/DRAW_INDEXED command signature (cached by stride).
-// The *Count variants pass the count buffer; the others pass null and a fixed drawNum.
+// The *Count variants pass the count buffer; the others pass null and a fixed drawNum. Like direct draws
+// they first bind the pending vertex buffers.
 void VRI_CALL
 CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(
         c->device->DrawSignature(false, stride), drawNum, Buf(buffer)->resource.Get(), offset, nullptr, 0);
 }
@@ -349,6 +490,7 @@ void VRI_CALL
 CmdDrawIndexedIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(
         c->device->DrawSignature(true, stride), drawNum, Buf(buffer)->resource.Get(), offset, nullptr, 0);
 }
@@ -361,6 +503,7 @@ void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
                                    uint32_t          stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(c->device->DrawSignature(false, stride),
                              maxDrawNum,
                              Buf(buffer)->resource.Get(),
@@ -377,6 +520,7 @@ void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
                                           uint32_t          stride)
 {
     CommandBufferD3D12* c = CB(cmd);
+    FlushVertexBuffers(c);
     c->list->ExecuteIndirect(c->device->DrawSignature(true, stride),
                              maxDrawNum,
                              Buf(buffer)->resource.Get(),
@@ -426,27 +570,32 @@ CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset,
 }
 void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
 {
-    CommandBufferD3D12*              c   = CB(cmd);
-    TextureD3D12*                    t   = Tex(texture);
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-    uav.Format                           = t->format;
-    if (t->layerNum > 1)
-    {
-        uav.ViewDimension            = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-        uav.Texture2DArray.ArraySize = t->layerNum;
-    }
-    else
-        uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    D3D12_GPU_DESCRIPTOR_HANDLE gpu {};
+    CommandBufferD3D12* c = CB(cmd);
+    TextureD3D12*       t = Tex(texture);
+    // Mip 0 of every layer (every depth slice of a 3D texture).
+    DescriptorD3D12 whole {};
+    whole.texture                              = t;
+    whole.viewType                             = VriTextureViewType_2D;
+    whole.layerNum                             = t->layerNum;
+    const D3D12_UNORDERED_ACCESS_VIEW_DESC uav = StorageViewDesc(&whole);
+    D3D12_GPU_DESCRIPTOR_HANDLE            gpu {};
     D3D12_CPU_DESCRIPTOR_HANDLE cpuView {};
     ID3D12DescriptorHeap*       gpuHeap = nullptr;
     c->device->ClearUavViews(t->resource.Get(), uav, gpu, cpuView, gpuHeap);
-    Transition(c, t, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    // D3D12 clears through a UAV, but the caller barriered the texture for a transfer-domain clear
+    // (CopyDestination): move only mip 0 to UNORDERED_ACCESS and give it back its states afterwards,
+    // so the caller's view of every subresource stays true.
+    std::vector<D3D12_RESOURCE_STATES> before(t->layerNum);
+    for (uint32_t layer = 0; layer < t->layerNum; ++layer)
+        before[layer] = t->states[layer * t->mipNum];
+    Transition(c, t, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {0, 1, 0, t->layerNum});
     c->list->SetDescriptorHeaps(1, &gpuHeap);
     if (IsIntegerDxgi(t->format))
         c->list->ClearUnorderedAccessViewUint(gpu, cpuView, t->resource.Get(), value->u32, 0, nullptr);
     else
         c->list->ClearUnorderedAccessViewFloat(gpu, cpuView, t->resource.Get(), value->f32, 0, nullptr);
+    for (uint32_t layer = 0; layer < t->layerNum; ++layer)
+        Transition(c, t, before[layer], {0, 1, layer, 1});
     if (c->boundSrvHeap)
     {
         ID3D12DescriptorHeap* h[2] = {c->boundSrvHeap, c->boundSamplerHeap};
@@ -455,50 +604,53 @@ void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture,
 }
 void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
 {
-    // Buffers implicitly promote from COMMON to COPY_DEST on a direct queue. Record that
-    // so a following read-state barrier (CmdBarrier -> TransitionBuffer) emits the correct
-    // StateBefore (COPY_DEST), instead of a stale COMMON that the debug layer rejects.
-    BufferD3D12* s = Buf(src);
-    BufferD3D12* d = Buf(dst);
-    CB(cmd)->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
-    if (d->heapType == D3D12_HEAP_TYPE_DEFAULT)
-        d->state = D3D12_RESOURCE_STATE_COPY_DEST;
+    // Implicit promotion to COPY_DEST covers only a buffer in COMMON; a buffer refreshed by a copy
+    // after being read is in a read state, so both sides are transitioned explicitly (upload and
+    // readback heaps keep their fixed states).
+    CommandBufferD3D12* c = CB(cmd);
+    BufferD3D12*        s = Buf(src);
+    BufferD3D12*        d = Buf(dst);
+    TransitionBuffer(c, s, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    TransitionBuffer(c, d, D3D12_RESOURCE_STATE_COPY_DEST);
+    c->list->CopyBufferRegion(d->resource.Get(), r->dstOffset, s->resource.Get(), r->srcOffset, r->size);
 }
 // Texture->texture copy. The app barriers src to CopySource and dst to CopyDestination, so
 // this just issues CopyTextureRegion between the selected subresources (subresource = mip +
-// baseLayer * mipNum, matching CmdUploadBufferToTexture). A zero-width src region copies the
-// whole subresource (pSrcBox = nullptr); a non-zero width copies that sub-box.
+// layer * mipNum, matching CmdUploadBufferToTexture), once per layer of src.layerNum (0 or 1 =
+// one layer). A zero-width src region copies the whole subresource (pSrcBox = nullptr); a
+// non-zero width copies that sub-box.
 void VRI_CALL CmdCopyTexture(VriCommandBuffer* cmd, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
 {
     CommandBufferD3D12* c = CB(cmd);
     TextureD3D12*       d = Tex(dst);
     TextureD3D12*       s = Tex(src);
 
-    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-    dstLoc.pResource                   = d->resource.Get();
-    dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex            = region ? region->dst.mip + region->dst.baseLayer * d->mipNum : 0;
-    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-    srcLoc.pResource                   = s->resource.Get();
-    srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLoc.SubresourceIndex            = region ? region->src.mip + region->src.baseLayer * s->mipNum : 0;
-
     const UINT dx = region ? static_cast<UINT>(region->dst.x) : 0;
     const UINT dy = region ? static_cast<UINT>(region->dst.y) : 0;
     const UINT dz = region ? static_cast<UINT>(region->dst.z) : 0;
+    D3D12_BOX  box = {};
     if (region && region->src.width)
     {
-        D3D12_BOX box = {};
-        box.left      = static_cast<UINT>(region->src.x);
-        box.top       = static_cast<UINT>(region->src.y);
-        box.front     = static_cast<UINT>(region->src.z);
-        box.right     = box.left + region->src.width;
-        box.bottom    = box.top + (region->src.height ? region->src.height : 1);
-        box.back      = box.front + (region->src.depth ? region->src.depth : 1);
-        c->list->CopyTextureRegion(&dstLoc, dx, dy, dz, &srcLoc, &box);
+        box.left   = static_cast<UINT>(region->src.x);
+        box.top    = static_cast<UINT>(region->src.y);
+        box.front  = static_cast<UINT>(region->src.z);
+        box.right  = box.left + region->src.width;
+        box.bottom = box.top + (region->src.height ? region->src.height : 1);
+        box.back   = box.front + (region->src.depth ? region->src.depth : 1);
     }
-    else
-        c->list->CopyTextureRegion(&dstLoc, dx, dy, dz, &srcLoc, nullptr);
+    const UINT layers = region && region->src.layerNum ? region->src.layerNum : 1;
+    for (UINT layer = 0; layer < layers; ++layer)
+    {
+        D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+        dstLoc.pResource                   = d->resource.Get();
+        dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = region ? region->dst.mip + (region->dst.baseLayer + layer) * d->mipNum : 0;
+        D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+        srcLoc.pResource                   = s->resource.Get();
+        srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLoc.SubresourceIndex = region ? region->src.mip + (region->src.baseLayer + layer) * s->mipNum : 0;
+        c->list->CopyTextureRegion(&dstLoc, dx, dy, dz, &srcLoc, region && region->src.width ? &box : nullptr);
+    }
 }
 void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
                                        VriTexture*                     dst,
@@ -576,7 +728,7 @@ void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
         c->device->ReportError("texture-upload source buffer too small");
         return;
     }
-    Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST);
+    Transition(c, t, D3D12_RESOURCE_STATE_COPY_DEST, {mip, 1, baseLayer, layers});
 
     D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
     dstLoc.pResource                   = t->resource.Get();

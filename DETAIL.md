@@ -27,6 +27,11 @@ The normal sequence remains device -> core interface -> queue/allocator -> resou
 record barriers and commands -> submit with a timeline signal -> wait before reuse or destruction.
 For descriptor updates, `baseRange` indexes the declared `ranges` array. It is **not** a shader binding number:
 range index 0 can declare `baseRegister = 7`; its descriptors are updated through range index 0.
+On Direct3D 12, constant buffers and storage buffers are root descriptors whose register is the range's
+`baseRegister`, in the set's `registerSpace`. The other ranges form descriptor tables in which each register class
+(`t` textures, structured buffers and acceleration structures; `u` storage textures; `s` samplers) is numbered from
+0 in range order. A shader shared with Vulkan pins these registers with `register()` beside `[[vk::binding]]`, as
+`shaders/examples/rt_gltf.slang` does.
 
 ## Coordinate conventions
 

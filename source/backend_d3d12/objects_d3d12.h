@@ -43,10 +43,11 @@ namespace vri::d3d12
     {
         DeviceD3D12*           device = nullptr;
         ComPtr<ID3D12Resource> resource;
-        uint64_t               size     = 0;
-        D3D12_HEAP_TYPE        heapType = D3D12_HEAP_TYPE_DEFAULT;
-        D3D12_RESOURCE_STATES  state    = D3D12_RESOURCE_STATE_COMMON;
-        void*                  mapped   = nullptr; // persistent CPU pointer for upload/readback heaps
+        uint64_t               size            = 0;
+        uint32_t               structureStride = 0; // element size of a structured buffer view; 0 = raw
+        D3D12_HEAP_TYPE        heapType        = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_STATES  state           = D3D12_RESOURCE_STATE_COMMON;
+        void*                  mapped          = nullptr; // persistent CPU pointer for upload/readback heaps
         // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
         // at BindBufferMemory via CreatePlacedResource from the saved desc.
         D3D12_RESOURCE_DESC placedDesc = {};
@@ -61,13 +62,20 @@ namespace vri::d3d12
         DXGI_FORMAT            format = DXGI_FORMAT_UNKNOWN; // resource format (TYPELESS for a sampled depth target)
         DXGI_FORMAT dsvFormat         = DXGI_FORMAT_UNKNOWN; // typed depth format for the DSV (== format if not depth)
         DXGI_FORMAT srvFormat         = DXGI_FORMAT_UNKNOWN; // typed format for the SRV (R32_FLOAT for sampled D32)
-        uint32_t    width = 0, height = 0, depth = 1;
-        uint32_t    mipNum = 1, layerNum = 1;
-        uint32_t    texelSize       = 0;
-        uint32_t    sampleCount     = 1;     // >1 => multisample (TEXTURE2DMS views)
-        bool        isRenderTarget  = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
-        bool        isDepthStencil  = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
-        D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_DIMENSION dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        uint32_t                 width = 0, height = 0, depth = 1;
+        uint32_t                 mipNum = 1, layerNum = 1;
+        uint32_t                 texelSize      = 0;
+        uint32_t                 sampleCount    = 1;     // >1 => multisample (TEXTURE2DMS views)
+        bool                     isRenderTarget = false; // created with ALLOW_RENDER_TARGET (RTV-capable)
+        bool                     isDepthStencil = false; // created with ALLOW_DEPTH_STENCIL (DSV-capable)
+        // Created with VriTextureUsage_ConcurrentQueues: every command list returns it to COMMON,
+        // the state each queue can transition from (see CommandBufferD3D12::concurrentTextures).
+        bool concurrent = false;
+        // Tracked state per subresource (mip + layer * mipNum; both planes of a depth-stencil
+        // format share it), so one mip can be read while another is written.
+        std::vector<D3D12_RESOURCE_STATES> states;
+        void ResetStates(D3D12_RESOURCE_STATES s) { states.assign(size_t(mipNum) * layerNum, s); }
         // Explicit-memory path: created UNBOUND (VriMemoryLocation_Undefined); the resource is made
         // at BindTextureMemory via CreatePlacedResource from the saved desc + optional clear value.
         D3D12_RESOURCE_DESC placedDesc  = {};
@@ -93,8 +101,12 @@ namespace vri::d3d12
         const BufferD3D12*          buffer       = nullptr;
         uint64_t                    bufferOffset = 0;
         uint64_t                    bufferSize   = 0;
-        D3D12_CPU_DESCRIPTOR_HANDLE cpu          = {}; // for RTV/DSV
-        uint32_t                    mip          = 0;
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu          = {};    // RTV or DSV slot, held until DestroyDescriptor
+        bool                        cpuIsDepth   = false; // `cpu` is in the DSV heap
+        uint32_t                    mip          = 0;     // first mip of a texture view
+        uint32_t                    mipNum       = 1;     // texture view: mips from `mip` (resolved, never 0)
+        uint32_t                    baseLayer    = 0;
+        uint32_t                    layerNum     = 1; // texture view: layers from baseLayer (resolved)
         VriTextureViewType          viewType     = VriTextureViewType_2D; // SRV dimension (cube vs 2d/2darray)
         VriSamplerDesc              sampler      = {}; // for Kind::Sampler (built into the sampler heap at update)
         D3D12_GPU_VIRTUAL_ADDRESS   accelAddress = 0;  // for an acceleration-structure SRV (TLAS)
@@ -124,14 +136,25 @@ namespace vri::d3d12
 
     // A descriptor pool owns two shader-visible heaps (CBV/SRV/UAV + sampler) that
     // descriptor sets sub-allocate from via a bump cursor.
+    // A range of descriptors in one of the device's shared shader-visible heaps.
+    struct DescriptorBlockD3D12
+    {
+        uint32_t offset = 0;
+        uint32_t count  = 0;
+    };
+
+    // A descriptor pool owns one block of each shared shader-visible heap (see
+    // DeviceD3D12::ShaderVisibleHeap); its sets bump-allocate within the blocks.
     struct DescriptorPoolD3D12
     {
-        DeviceD3D12*                 device = nullptr;
-        ComPtr<ID3D12DescriptorHeap> srvHeap;                      // shader-visible CBV/SRV/UAV
-        ComPtr<ID3D12DescriptorHeap> samplerHeap;                  // shader-visible SAMPLER
-        uint32_t                     srvSize = 0, samplerSize = 0; // descriptor increments
-        uint32_t                     srvNext = 0, samplerNext = 0; // bump cursors
+        DeviceD3D12*         device = nullptr;
+        DescriptorBlockD3D12 srvBlock;                     // in the CBV/SRV/UAV heap
+        DescriptorBlockD3D12 samplerBlock;                 // in the sampler heap
+        uint32_t             srvSize = 0, samplerSize = 0; // descriptor increments
+        uint32_t             srvNext = 0, samplerNext = 0; // bump cursors within the blocks
     };
+
+    struct CommandBufferD3D12;
 
     struct CommandAllocatorD3D12
     {
@@ -139,6 +162,8 @@ namespace vri::d3d12
         ComPtr<ID3D12CommandAllocator> allocator;
         D3D12_COMMAND_LIST_TYPE        listType =
             D3D12_COMMAND_LIST_TYPE_DIRECT; // engine the lists target (matches its queue)
+        // The command buffers created from this allocator; VRI has no per-buffer destroy, so they are freed with it.
+        std::vector<CommandBufferD3D12*> buffers;
     };
 
     struct PipelineD3D12;
@@ -182,6 +207,10 @@ namespace vri::d3d12
         // offset alignment for buffer->texture copies; kept alive until the GPU consumes them
         // (cleared at the next BeginCommandBuffer, after the caller has waited on the fence).
         std::vector<ComPtr<ID3D12Resource>> tempUploads;
+        // Concurrent-queue textures this list moved out of COMMON. EndCommandBuffer returns them to
+        // COMMON: a list on another queue type may not name the states this one used (a compute
+        // list cannot transition from PIXEL_SHADER_RESOURCE), and reads promote from COMMON.
+        std::vector<TextureD3D12*> concurrentTextures;
     };
 
     struct FenceD3D12
@@ -226,6 +255,8 @@ namespace vri::d3d12
         ComPtr<ID3D12RootSignature>     rootSig;
         std::vector<LayoutBindingD3D12> bindings;
         std::vector<LayoutSetD3D12>     sets;
+        // Declared for the compute stage only: bound on the compute root even before a pipeline is.
+        bool computeOnly = false;
         // Push constants -> a root 32-bit-constants parameter (SetGraphicsRoot32BitConstants).
         bool     hasPush       = false;
         uint32_t pushRootParam = 0;
@@ -254,11 +285,13 @@ namespace vri::d3d12
     // backend). At CmdSetDescriptorSet the recorded views are bound as root arguments.
     struct DescriptorSetD3D12
     {
-        DeviceD3D12*                                         device   = nullptr;
-        DescriptorPoolD3D12*                                 pool     = nullptr;
-        const PipelineLayoutD3D12*                           layout   = nullptr;
-        uint32_t                                             setIndex = 0;
-        std::unordered_map<uint32_t, const DescriptorD3D12*> bound; // binding -> view
+        DeviceD3D12*               device   = nullptr;
+        DescriptorPoolD3D12*       pool     = nullptr;
+        const PipelineLayoutD3D12* layout   = nullptr;
+        uint32_t                   setIndex = 0;
+        // Root CBV / UAV binding -> GPU address, captured at UpdateDescriptorRanges like a table
+        // descriptor is copied, so the view may be destroyed once written.
+        std::unordered_map<uint32_t, D3D12_GPU_VIRTUAL_ADDRESS> rootAddresses;
         // base of this set's blocks in the pool's shader-visible heaps (SRV + sampler).
         D3D12_CPU_DESCRIPTOR_HANDLE srvCpu     = {};
         D3D12_GPU_DESCRIPTOR_HANDLE srvGpu     = {};

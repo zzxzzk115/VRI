@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "shaders/tests/triangle_vbuf_dxbc.h" // g_triangleVbufDxbcVS + g_triangleVbufDxbcPS
+#include "shaders/tests/triangle_vbuf_dxil.h" // g_triangleVbufDxilVS + g_triangleVbufDxilPS
 
 namespace
 {
@@ -39,7 +40,10 @@ namespace
     const uint32_t kIndices[] = {0, 1, 2};
 } // namespace
 
-TEST_CASE("D3D12: vertex-buffer + indexed draw -> yellow triangle (phase 2)")
+// Draws the triangle with one vertex/fragment bytecode pair (DXBC or DXIL): the input layout's
+// semantics come from the vertex shader's input signature in either container. `indirect` draws
+// through CmdDrawIndexedIndirect, which must bind the vertex buffers like a direct draw.
+static void DrawYellowTriangle(const void* vs, size_t vsSize, const void* ps, size_t psSize, bool indirect = false)
 {
     VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
     dc.coordinates.clipSpaceY = VriClipSpaceY_Up;
@@ -109,12 +113,12 @@ TEST_CASE("D3D12: vertex-buffer + indexed draw -> yellow triangle (phase 2)")
 
     VriShaderDesc sh[2] {};
     sh[0].stage          = VriShaderStage_Vertex;
-    sh[0].bytecode       = g_triangleVbufDxbcVS;
-    sh[0].bytecodeSize   = sizeof(g_triangleVbufDxbcVS);
+    sh[0].bytecode       = vs;
+    sh[0].bytecodeSize   = vsSize;
     sh[0].entryPointName = "vertexMain";
     sh[1].stage          = VriShaderStage_Fragment;
-    sh[1].bytecode       = g_triangleVbufDxbcPS;
-    sh[1].bytecodeSize   = sizeof(g_triangleVbufDxbcPS);
+    sh[1].bytecode       = ps;
+    sh[1].bytecodeSize   = psSize;
     sh[1].entryPointName = "fragmentMain";
     VriVertexStreamDesc stream {};
     stream.stride      = 6 * sizeof(float);
@@ -192,9 +196,22 @@ TEST_CASE("D3D12: vertex-buffer + indexed draw -> yellow triangle (phase 2)")
     c.CmdSetVertexBuffers(cmd, 0, &vbb, 1);
     c.CmdSetIndexBuffer(cmd, ibuf, 0, VriIndexType_UInt32);
     VriDrawIndexedDesc di {};
-    di.indexNum    = 3;
-    di.instanceNum = 1;
-    c.CmdDrawIndexed(cmd, &di);
+    di.indexNum     = 3;
+    di.instanceNum  = 1;
+    VriBuffer* args = nullptr;
+    if (indirect)
+    {
+        VriBufferDesc ad {};
+        ad.size           = sizeof(di);
+        ad.usage          = VriBufferUsage_IndirectBuffer;
+        ad.memoryLocation = VriMemoryLocation_HostUpload;
+        REQUIRE(c.CreateBuffer(dev, &ad, &args) == VriResult_Success);
+        std::memcpy(c.MapBuffer(args, 0, sizeof(di)), &di, sizeof(di));
+        c.UnmapBuffer(args);
+        c.CmdDrawIndexedIndirect(cmd, args, 0, 1, sizeof(di));
+    }
+    else
+        c.CmdDrawIndexed(cmd, &di);
     c.CmdEndRendering(cmd);
     {
         VriTextureBarrierDesc tb {};
@@ -241,8 +258,28 @@ TEST_CASE("D3D12: vertex-buffer + indexed draw -> yellow triangle (phase 2)")
     c.DestroyPipelineLayout(layout);
     c.DestroyBuffer(vbuf);
     c.DestroyBuffer(ibuf);
+    if (args)
+        c.DestroyBuffer(args);
     c.DestroyBuffer(readback);
     c.DestroyDescriptor(colorView);
     c.DestroyTexture(color);
     vriDestroyDevice(dev);
+}
+
+TEST_CASE("D3D12: vertex-buffer + indexed draw -> yellow triangle (phase 2)")
+{
+    DrawYellowTriangle(
+        g_triangleVbufDxbcVS, sizeof(g_triangleVbufDxbcVS), g_triangleVbufDxbcPS, sizeof(g_triangleVbufDxbcPS));
+}
+
+TEST_CASE("D3D12: a DXIL vertex shader's input semantics map vertex attributes")
+{
+    DrawYellowTriangle(
+        g_triangleVbufDxilVS, sizeof(g_triangleVbufDxilVS), g_triangleVbufDxilPS, sizeof(g_triangleVbufDxilPS));
+}
+
+TEST_CASE("D3D12: an indexed indirect draw binds the vertex buffers")
+{
+    DrawYellowTriangle(
+        g_triangleVbufDxbcVS, sizeof(g_triangleVbufDxbcVS), g_triangleVbufDxbcPS, sizeof(g_triangleVbufDxbcPS), true);
 }

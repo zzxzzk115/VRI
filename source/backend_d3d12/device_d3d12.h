@@ -10,6 +10,9 @@
 #include "core/device_base.h"
 #include "objects_d3d12.h"
 
+#include <mutex>
+#include <vector>
+
 namespace vri::d3d12
 {
     using Microsoft::WRL::ComPtr;
@@ -36,9 +39,11 @@ namespace vri::d3d12
         // Route a backend diagnostic (D3D12 InfoQueue message) to the app's callback.
         void Diagnostic(VriMessageSeverity severity, const char* message) const;
 
-        // Bump-allocate one CPU render-target-view / depth-stencil-view descriptor.
-        D3D12_CPU_DESCRIPTOR_HANDLE AllocRtv();
-        D3D12_CPU_DESCRIPTOR_HANDLE AllocDsv();
+        // One CPU-only render-target-view (or, with `depth`, depth-stencil-view) descriptor, held by a texture view
+        // from its creation to its destruction. OMSetRenderTargets and the clears read these descriptors when they
+        // are recorded, so a destroyed view's slot is free at once. False when every slot is taken.
+        bool AllocateAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE& out);
+        void FreeAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE handle);
 
         // Lazily-created command signature for ExecuteIndirect(DispatchMesh) - must
         // outlive GPU execution, so it lives on the device (12-byte: 3x uint32 x,y,z).
@@ -58,6 +63,13 @@ namespace vri::d3d12
                            D3D12_CPU_DESCRIPTOR_HANDLE&            outCpu,
                            ID3D12DescriptorHeap*&                  outGpuHeap);
 
+        // The shader-visible CBV/SRV/UAV and sampler heaps every descriptor pool takes a block of: a command
+        // list binds one heap of each type at a time, so tables of sets from different pools must share them.
+        // Allocation and release are thread-safe (pools are created on any thread).
+        ID3D12DescriptorHeap* ShaderVisibleHeap(D3D12_DESCRIPTOR_HEAP_TYPE type) const;
+        bool AllocateShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t count, DescriptorBlockD3D12& out);
+        void FreeShaderVisible(D3D12_DESCRIPTOR_HEAP_TYPE type, DescriptorBlockD3D12 block);
+
     private:
         VriResult NegotiateFeatures(const VriDeviceCreationDesc& desc);
         void      FillDeviceDesc(IDXGIAdapter1* adapter);
@@ -72,24 +84,40 @@ namespace vri::d3d12
         ComPtr<ID3D12CommandSignature> m_dispatchMeshSig; // lazy, for indirect DispatchMesh
         ComPtr<ID3D12CommandSignature> m_dispatchSig;     // lazy, for indirect Dispatch
         std::unordered_map<uint64_t, ComPtr<ID3D12CommandSignature>>
-                                     m_drawSigs;               // indirect draw sigs, keyed by (indexed,stride)
-        ComPtr<ID3D12DescriptorHeap> m_rtvHeap;                // CPU-only RTV heap
-        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;                // CPU-only DSV heap
-        ComPtr<ID3D12DescriptorHeap> m_clearUavCpuHeap;        // non-shader-visible UAVs for ClearUAV (lazy)
-        ComPtr<ID3D12DescriptorHeap> m_clearUavGpuHeap;        // shader-visible UAVs for ClearUAV (lazy)
-        uint32_t                     m_clearUavSize       = 0; // CBV_SRV_UAV descriptor increment
-        uint32_t                     m_clearUavNext       = 0; // ring cursor across the clear heaps
-        static constexpr uint32_t    kClearUavSlots       = 1024;
-        uint32_t                     m_rtvSize            = 0; // descriptor increment
-        uint32_t                     m_rtvNext            = 0; // bump cursor
-        uint32_t                     m_dsvSize            = 0;
-        uint32_t                     m_dsvNext            = 0;
-        static constexpr uint32_t    kRtvHeapSize         = 256;
-        static constexpr uint32_t    kDsvHeapSize         = 64;
-        QueueD3D12           m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
-        uint64_t             m_enabledFeatures            = 0;  // granted VriFeatureBits
-        VriDeviceDesc        m_desc                       = {};
-        VriCallbackInterface m_callback                   = {};
+                                     m_drawSigs;         // indirect draw sigs, keyed by (indexed,stride)
+        ComPtr<ID3D12DescriptorHeap> m_clearUavCpuHeap;  // non-shader-visible UAVs for ClearUAV (lazy)
+        ComPtr<ID3D12DescriptorHeap> m_clearUavGpuHeap;  // shader-visible UAVs for ClearUAV (lazy)
+        uint32_t                     m_clearUavSize = 0; // CBV_SRV_UAV descriptor increment
+        uint32_t                     m_clearUavNext = 0; // ring cursor across the clear heaps
+        static constexpr uint32_t    kClearUavSlots = 1024;
+        // CPU-only RTV and DSV heaps with their unused slots.
+        struct AttachmentHeap
+        {
+            ComPtr<ID3D12DescriptorHeap> heap;
+            uint32_t                     increment = 0;
+            std::vector<uint32_t>        free;
+        };
+        AttachmentHeap            m_rtvHeap;
+        AttachmentHeap            m_dsvHeap;
+        mutable std::mutex        m_attachmentHeapMutex;
+        static constexpr uint32_t kRtvHeapSize = 4096;
+        static constexpr uint32_t kDsvHeapSize = 1024;
+        // Shared shader-visible heaps with their free blocks, sorted by offset.
+        struct SharedHeap
+        {
+            ComPtr<ID3D12DescriptorHeap>      heap;
+            std::vector<DescriptorBlockD3D12> free;
+        };
+        SharedHeap                m_viewHeap;
+        SharedHeap                m_samplerHeap;
+        mutable std::mutex        m_sharedHeapMutex;
+        static constexpr uint32_t kViewHeapSize = 1u << 18;
+        // D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE: the most samplers a shader-visible heap can hold.
+        static constexpr uint32_t kSamplerHeapSize             = 2048;
+        QueueD3D12                m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
+        uint64_t                  m_enabledFeatures            = 0;  // granted VriFeatureBits
+        VriDeviceDesc             m_desc                       = {};
+        VriCallbackInterface      m_callback                   = {};
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

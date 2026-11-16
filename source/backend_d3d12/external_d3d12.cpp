@@ -91,6 +91,11 @@ namespace vri::d3d12
                 return VriResult_InvalidArgument;
             DeviceD3D12*         d  = Dev(device);
             const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
+            if (fi.format == DXGI_FORMAT_UNKNOWN)
+            {
+                d->ReportError("CreateExportableTexture: unmapped DXGI format");
+                return VriResult_Unsupported;
+            }
 
             D3D12_HEAP_PROPERTIES hp = {};
             hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
@@ -120,17 +125,17 @@ namespace vri::d3d12
                 d->ReportError("CreateCommittedResource (exportable texture) failed");
                 return VriResult_Failure;
             }
-            t->device      = d;
-            t->format      = rd.Format;
-            t->dsvFormat   = fi.format;
-            t->srvFormat   = fi.format;
-            t->texelSize   = fi.texelSize;
-            t->width       = desc->width;
-            t->height      = desc->height ? desc->height : 1;
-            t->depth       = 1;
-            t->mipNum      = rd.MipLevels;
-            t->layerNum    = rd.DepthOrArraySize;
-            t->state       = D3D12_RESOURCE_STATE_COMMON;
+            t->device    = d;
+            t->format    = rd.Format;
+            t->dsvFormat = fi.format;
+            t->srvFormat = fi.format;
+            t->texelSize = fi.texelSize;
+            t->width     = desc->width;
+            t->height    = desc->height ? desc->height : 1;
+            t->depth     = 1;
+            t->mipNum    = rd.MipLevels;
+            t->layerNum  = rd.DepthOrArraySize;
+            t->ResetStates(D3D12_RESOURCE_STATE_COMMON);
             t->sampleCount = rd.SampleDesc.Count;
             *out           = ToHandle(t);
             return VriResult_Success;
