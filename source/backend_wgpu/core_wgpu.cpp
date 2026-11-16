@@ -9,6 +9,7 @@
 
 #include "core/synchronization.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -79,8 +80,41 @@ namespace vri::wgpu
                     return 8;
                 case VriFormat_RGBA32_SFLOAT:
                     return 16;
+                case VriFormat_BC1_UNORM:
+                case VriFormat_BC4_UNORM:
+                    return 8; // per 4x4 block
+                case VriFormat_BC2_UNORM:
+                case VriFormat_BC3_UNORM:
+                case VriFormat_BC5_UNORM:
+                case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC7_UNORM:
+                case VriFormat_ETC2_RGBA8_UNORM:
+                case VriFormat_ASTC_4x4_UNORM:
+                    return 16; // per 4x4 block
                 default:
                     return 4;
+            }
+        }
+
+        // The feature that enables a compressed format, or WGPUFeatureName_Force32 for an uncompressed one.
+        WGPUFeatureName CompressionFeature(VriFormat f)
+        {
+            switch (f)
+            {
+                case VriFormat_BC1_UNORM:
+                case VriFormat_BC2_UNORM:
+                case VriFormat_BC3_UNORM:
+                case VriFormat_BC4_UNORM:
+                case VriFormat_BC5_UNORM:
+                case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC7_UNORM:
+                    return WGPUFeatureName_TextureCompressionBC;
+                case VriFormat_ETC2_RGBA8_UNORM:
+                    return WGPUFeatureName_TextureCompressionETC2;
+                case VriFormat_ASTC_4x4_UNORM:
+                    return WGPUFeatureName_TextureCompressionASTC;
+                default:
+                    return WGPUFeatureName_Force32;
             }
         }
 
@@ -133,12 +167,20 @@ namespace vri::wgpu
         // ones ToWgpuFormat maps to Undefined, gave depth formats ColorAttachment|Blend,
         // and never set DepthStencil at all - so the usual "probe a depth format, else
         // fall back" pattern got no usable answer here. Report per format instead.
-        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice*, VriFormat format)
+        VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
             VriFormatSupportFlags r = VriFormatSupport_None;
 
+            // Compressed formats are only sampled, and only with the feature of their family.
+            const WGPUFeatureName compression = CompressionFeature(format);
+            if (compression != WGPUFeatureName_Force32)
+            {
+                return wgpuDeviceHasFeature(Dev(device)->Device(), compression) != 0 ? VriFormatSupport_Texture :
+                                                                                       VriFormatSupport_None;
+            }
+
             // Depth32FloatStencil8 is behind the optional depth32float-stencil8
-            // feature, and DeviceWGPU::Init requests only the timestamp ones - so
+            // feature, which DeviceWGPU::Init does not request - so
             // this device cannot create the format for ANY usage, however capable
             // the adapter is. It has to drop out here rather than lower down: a
             // caller probing for a sampled texture would act on a lone Texture bit
@@ -174,10 +216,22 @@ namespace vri::wgpu
                             r |= VriFormatSupport_Blend;
                             break;
                     }
-                    // No StorageTexture: CreatePipelineLayout pins every
-                    // storage-texture binding to RGBA8Unorm, so a view of any other
-                    // format fails bind-group validation. Advertising the bit needs
-                    // that layout to carry the range's real format first.
+                    // The mapped formats core WebGPU can store; a layout names the one it binds
+                    // through VriDescriptorRangeDesc::format. Read-write access is core for
+                    // the r32 formats only; the others need VriDescriptorRange_WriteOnly.
+                    switch (format)
+                    {
+                        case VriFormat_RGBA8_UNORM:
+                        case VriFormat_RGBA16_SFLOAT:
+                        case VriFormat_R32_UINT:
+                        case VriFormat_R32_SFLOAT:
+                        case VriFormat_RG32_SFLOAT:
+                        case VriFormat_RGBA32_SFLOAT:
+                            r |= VriFormatSupport_StorageTexture;
+                            break;
+                        default:
+                            break;
+                    }
                 }
             }
 
@@ -385,10 +439,13 @@ namespace vri::wgpu
             t->mipNum      = td.mipLevelCount;
             t->layerNum    = desc->type == VriTextureType_3D ? 1u : td.size.depthOrArrayLayers;
             t->texelSize   = TexelSize(desc->format);
+            t->blockDim    = CompressionFeature(desc->format) != WGPUFeatureName_Force32 ? 4u : 1u;
             t->owned       = true;
             {
-                VriObjectInfo info = MakeObjectInfo(VriObjectType_Texture);
-                uint64_t      size = static_cast<uint64_t>(t->width) * t->height * t->depth * t->texelSize;
+                VriObjectInfo  info = MakeObjectInfo(VriObjectType_Texture);
+                const uint32_t blocks =
+                    ((t->width + t->blockDim - 1) / t->blockDim) * ((t->height + t->blockDim - 1) / t->blockDim);
+                uint64_t size = static_cast<uint64_t>(blocks) * t->depth * t->texelSize;
                 if (t->mipNum > 1)
                     size += size / 3;
                 info.memoryBytes = size;
@@ -603,19 +660,41 @@ namespace vri::wgpu
                             break;
                         case VriDescriptorType_Texture:
                             // Depth texture sampled for comparison -> sampleType must be Depth (shadow map).
-                            e.texture.sampleType    = (range.flags & VriDescriptorRange_Comparison) ?
-                                                          WGPUTextureSampleType_Depth :
-                                                          WGPUTextureSampleType_Float;
-                            e.texture.viewDimension = range.viewType == VriTextureViewType_2DArray ?
-                                                          WGPUTextureViewDimension_2DArray :
-                                                      range.viewType == VriTextureViewType_Cube ?
-                                                          WGPUTextureViewDimension_Cube :
-                                                          WGPUTextureViewDimension_2D; // 0/1D/2D -> 2D
+                            // Depth textures read without comparison are unfilterable floats (a depth view is
+                            // accepted there), and so are 32-bit float ones unless the device has
+                            // float32-filterable; the mapped integer ones are uint.
+                            e.texture.sampleType = WGPUTextureSampleType_Float;
+                            if (range.flags & VriDescriptorRange_Comparison)
+                                e.texture.sampleType = WGPUTextureSampleType_Depth;
+                            else if (vri::FormatHasDepth(range.format) ||
+                                     (!d->HasFloat32Filterable() &&
+                                      (range.format == VriFormat_R32_SFLOAT || range.format == VriFormat_RG32_SFLOAT ||
+                                       range.format == VriFormat_RGBA32_SFLOAT)))
+                                e.texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+                            else if (range.format == VriFormat_R8_UINT || range.format == VriFormat_R32_UINT)
+                                e.texture.sampleType = WGPUTextureSampleType_Uint;
+                            if (range.viewType == VriTextureViewType_2DArray)
+                                e.texture.viewDimension = WGPUTextureViewDimension_2DArray;
+                            else if (range.viewType == VriTextureViewType_Cube)
+                                e.texture.viewDimension = WGPUTextureViewDimension_Cube;
+                            else if (range.viewType == VriTextureViewType_3D)
+                                e.texture.viewDimension = WGPUTextureViewDimension_3D;
+                            else
+                                e.texture.viewDimension = WGPUTextureViewDimension_2D; // 0/1D/2D -> 2D
                             break;
                         case VriDescriptorType_StorageTexture:
-                            e.storageTexture.access        = WGPUStorageTextureAccess_WriteOnly;
-                            e.storageTexture.format        = WGPUTextureFormat_RGBA8Unorm;
-                            e.storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+                            // Access, format and dimension must match the WGSL declaration exactly.
+                            e.storageTexture.access = (range.flags & VriDescriptorRange_WriteOnly) ?
+                                                          WGPUStorageTextureAccess_WriteOnly :
+                                                          WGPUStorageTextureAccess_ReadWrite;
+                            e.storageTexture.format = range.format == VriFormat_Unknown ? WGPUTextureFormat_RGBA8Unorm :
+                                                                                          ToWgpuFormat(range.format);
+                            if (range.viewType == VriTextureViewType_2DArray)
+                                e.storageTexture.viewDimension = WGPUTextureViewDimension_2DArray;
+                            else if (range.viewType == VriTextureViewType_3D)
+                                e.storageTexture.viewDimension = WGPUTextureViewDimension_3D;
+                            else
+                                e.storageTexture.viewDimension = WGPUTextureViewDimension_2D;
                             break;
                         case VriDescriptorType_Sampler:
                             e.sampler.type = (range.flags & VriDescriptorRange_Comparison) ?
@@ -625,6 +704,11 @@ namespace vri::wgpu
                         default:
                             break; // acceleration structure: not WebGPU core
                     }
+                    // WebGPU forbids writable storage in the vertex stage. Layouts written for the other
+                    // backends often name every stage, so drop the vertex bit where it can never apply.
+                    if (range.descriptorType == VriDescriptorType_StorageBuffer ||
+                        range.descriptorType == VriDescriptorType_StorageTexture)
+                        e.visibility &= ~WGPUShaderStage_Vertex;
                     entries.push_back(e);
                     rangeInfos.push_back({range.baseRegister, range.descriptorType, range.descriptorNum});
                 }
@@ -641,11 +725,11 @@ namespace vri::wgpu
             // after the descriptor-set groups. The WGSL injection points at this group index.
             if (desc->pushConstantNum > 0)
             {
-                WGPUBindGroupLayoutEntry e       = {};
-                e.binding                        = 0;
-                e.visibility                     = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
-                e.buffer.type                    = WGPUBufferBindingType_Uniform;
-                e.buffer.hasDynamicOffset        = true; // per-draw push values live at different ring offsets
+                WGPUBindGroupLayoutEntry e = {};
+                e.binding                  = 0;
+                e.visibility              = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
+                e.buffer.type             = WGPUBufferBindingType_Uniform;
+                e.buffer.hasDynamicOffset = true; // per-draw push values live at different ring offsets
                 WGPUBindGroupLayoutDescriptor ld = {};
                 ld.entryCount                    = 1;
                 ld.entries                       = &e;
@@ -854,13 +938,16 @@ namespace vri::wgpu
                                                  const VriComputePipelineDesc* desc,
                                                  VriPipeline**                 out)
         {
-            DeviceWGPU*                   d   = Dev(device);
-            WGPUShaderModule              mod = MakeWgslModule(d->Device(), desc->shader.bytecode);
-            WGPUComputePipelineDescriptor pd  = {};
-            pd.layout                         = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : nullptr;
-            pd.compute.module                 = mod;
-            pd.compute.entryPoint             = SV(desc->shader.entryPointName ? desc->shader.entryPointName : "main");
-            WGPUComputePipeline pipe          = wgpuDeviceCreateComputePipeline(d->Device(), &pd);
+            DeviceWGPU* d = Dev(device);
+            // A compute layout with push constants needs the same WGSL binding injection as a render one.
+            const PipelineLayoutWGPU*     pl        = desc->pipelineLayout ? PL(desc->pipelineLayout) : nullptr;
+            const int                     pushGroup = (pl && pl->hasPush) ? static_cast<int>(pl->pushGroup) : -1;
+            WGPUShaderModule              mod       = MakeWgslModule(d->Device(), desc->shader.bytecode, pushGroup);
+            WGPUComputePipelineDescriptor pd        = {};
+            pd.layout                               = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : nullptr;
+            pd.compute.module                       = mod;
+            pd.compute.entryPoint    = SV(desc->shader.entryPointName ? desc->shader.entryPointName : "main");
+            WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(d->Device(), &pd);
             if (mod)
                 wgpuShaderModuleRelease(mod);
             if (!pipe)
@@ -1340,10 +1427,132 @@ namespace vri::wgpu
         {
             CB(cmd)->device->ReportError("CmdClearStorageBuffer: unsupported on WebGPU");
         }
-        // WebGPU can only clear a texture via a render pass loadOp, not an out-of-pass command.
-        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture*, const VriClearColor*)
+        // IEEE half nearest to `value`, rounding ties up; enough for clear colors.
+        uint16_t ToHalf(float value)
         {
-            CB(cmd)->device->ReportError("CmdClearStorageTexture: unsupported on WebGPU");
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            const uint32_t sign     = (bits >> 16) & 0x8000u;
+            const uint32_t biased   = (bits >> 23) & 0xffu;
+            const int32_t  exponent = int32_t(biased) - 127 + 15;
+            uint32_t       mantissa = bits & 0x7fffffu;
+            if (biased == 0xffu)
+                return uint16_t(sign | 0x7c00u | (mantissa ? 0x200u : 0u));
+            if (exponent >= 31)
+                return uint16_t(sign | 0x7c00u);
+            if (exponent <= 0)
+            {
+                if (exponent < -10)
+                    return uint16_t(sign);
+                mantissa |= 0x800000u;
+                const uint32_t shift = uint32_t(14 - exponent);
+                return uint16_t(sign | ((mantissa >> shift) + ((mantissa >> (shift - 1)) & 1u)));
+            }
+            return uint16_t((sign | (uint32_t(exponent) << 10) | (mantissa >> 13)) + ((mantissa >> 12) & 1u));
+        }
+
+        // One texel of `format` holding `value`, for the formats WebGPU stores; empty for every other format.
+        std::vector<uint8_t> ClearTexel(WGPUTextureFormat format, const VriClearColor& value)
+        {
+            std::vector<uint8_t> texel;
+            const auto           raw = [&](uint32_t components) {
+                texel.resize(components * 4);
+                std::memcpy(texel.data(), value.u32, texel.size());
+            };
+            const auto half = [&](uint32_t components) {
+                for (uint32_t i = 0; i < components; ++i)
+                {
+                    const uint16_t h = ToHalf(value.f32[i]);
+                    texel.push_back(uint8_t(h & 0xffu));
+                    texel.push_back(uint8_t(h >> 8));
+                }
+            };
+            switch (format)
+            {
+                case WGPUTextureFormat_R32Float:
+                case WGPUTextureFormat_R32Uint:
+                case WGPUTextureFormat_R32Sint:
+                    raw(1);
+                    break;
+                case WGPUTextureFormat_RG32Float:
+                case WGPUTextureFormat_RG32Uint:
+                case WGPUTextureFormat_RG32Sint:
+                    raw(2);
+                    break;
+                case WGPUTextureFormat_RGBA32Float:
+                case WGPUTextureFormat_RGBA32Uint:
+                case WGPUTextureFormat_RGBA32Sint:
+                    raw(4);
+                    break;
+                case WGPUTextureFormat_R16Float:
+                    half(1);
+                    break;
+                case WGPUTextureFormat_RG16Float:
+                    half(2);
+                    break;
+                case WGPUTextureFormat_RGBA16Float:
+                    half(4);
+                    break;
+                case WGPUTextureFormat_RGBA8Unorm:
+                    for (uint32_t i = 0; i < 4; ++i)
+                    {
+                        float unit = value.f32[i];
+                        if (unit < 0.0f)
+                            unit = 0.0f;
+                        if (unit > 1.0f)
+                            unit = 1.0f;
+                        texel.push_back(uint8_t(unit * 255.0f + 0.5f));
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return texel;
+        }
+
+        // WebGPU clears a texture only through a render pass loadOp, so this copies mip 0 from a buffer of
+        // the value instead, which needs CopyDst usage (as vkCmdClearColorImage needs TransferDst).
+        void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
+        {
+            CommandBufferWGPU*         c     = CB(cmd);
+            const TextureWGPU*         t     = reinterpret_cast<const TextureWGPU*>(texture);
+            const std::vector<uint8_t> texel = ClearTexel(t->format, *value);
+            if (texel.empty())
+            {
+                c->device->ReportError("CmdClearStorageTexture: unsupported texture format on WebGPU");
+                return;
+            }
+            EndComputePass(c);
+            const uint32_t       slices = t->layerNum > 1 ? t->layerNum : t->depth;
+            const uint32_t       pitch  = (uint32_t(texel.size()) * t->width + 255u) & ~255u;
+            WGPUBufferDescriptor bd     = {};
+            bd.size                     = uint64_t(pitch) * t->height * slices;
+            bd.usage                    = WGPUBufferUsage_CopySrc;
+            bd.mappedAtCreation         = true;
+            WGPUBuffer temp             = wgpuDeviceCreateBuffer(c->device->Device(), &bd);
+            auto*      data = temp ? static_cast<uint8_t*>(wgpuBufferGetMappedRange(temp, 0, bd.size)) : nullptr;
+            if (!data)
+            {
+                if (temp)
+                    wgpuBufferRelease(temp);
+                c->device->ReportError("CmdClearStorageTexture: could not create the clear buffer");
+                return;
+            }
+            for (uint64_t row = 0; row < uint64_t(t->height) * slices; ++row)
+                for (uint32_t x = 0; x < t->width; ++x)
+                    std::memcpy(data + row * pitch + x * texel.size(), texel.data(), texel.size());
+            wgpuBufferUnmap(temp);
+
+            WGPUTexelCopyBufferInfo srcInfo  = {};
+            srcInfo.buffer                   = temp;
+            srcInfo.layout.bytesPerRow       = pitch;
+            srcInfo.layout.rowsPerImage      = t->height;
+            WGPUTexelCopyTextureInfo dstInfo = {};
+            dstInfo.texture                  = t->texture;
+            dstInfo.aspect                   = WGPUTextureAspect_All;
+            WGPUExtent3D ext                 = {t->width, t->height, slices};
+            wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
+            c->tempUploads.push_back(temp); // keep alive until the GPU consumes it
         }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* src, const VriBufferCopyDesc* r)
         {
@@ -1363,22 +1572,29 @@ namespace vri::wgpu
             const uint32_t     w = region->texture.width ? region->texture.width : t->width;
             const uint32_t     h = region->texture.height ? region->texture.height : t->height;
 
+            // As in CmdUploadBufferToTexture: layers of an array are origin.z and depthOrArrayLayers, too.
+            const bool     isArray  = t->layerNum > 1;
+            const uint32_t originZ  = isArray ? region->texture.baseLayer : static_cast<uint32_t>(region->texture.z);
+            const uint32_t extDepth = isArray ? (region->texture.layerNum ? region->texture.layerNum : 1u) :
+                                                (region->texture.depth ? region->texture.depth : 1u);
             WGPUTexelCopyTextureInfo srcInfo = {};
             srcInfo.texture                  = t->texture;
             srcInfo.mipLevel                 = region->texture.mip;
-            srcInfo.origin                   = {static_cast<uint32_t>(region->texture.x),
-                                                static_cast<uint32_t>(region->texture.y),
-                                                static_cast<uint32_t>(region->texture.z)};
-            srcInfo.aspect                   = WGPUTextureAspect_All;
+            srcInfo.origin                   = {
+                static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), originZ};
+            srcInfo.aspect = WGPUTextureAspect_All;
 
-            WGPUTexelCopyBufferInfo dstInfo = {};
-            dstInfo.buffer                  = Buf(dst)->buffer;
-            dstInfo.layout.offset           = region->bufferOffset;
-            dstInfo.layout.bytesPerRow =
-                region->bufferRowLength ? region->bufferRowLength * t->texelSize : w * t->texelSize;
-            dstInfo.layout.rowsPerImage = region->bufferImageHeight ? region->bufferImageHeight : h;
+            // As in CmdUploadBufferToTexture, compressed formats count rows and pitches in blocks.
+            const uint32_t          block     = t->blockDim;
+            const uint32_t          rowTexels = region->bufferRowLength ? region->bufferRowLength : w;
+            const uint32_t          imageRows = region->bufferImageHeight ? region->bufferImageHeight : h;
+            WGPUTexelCopyBufferInfo dstInfo   = {};
+            dstInfo.buffer                    = Buf(dst)->buffer;
+            dstInfo.layout.offset             = region->bufferOffset;
+            dstInfo.layout.bytesPerRow        = (rowTexels + block - 1) / block * t->texelSize;
+            dstInfo.layout.rowsPerImage       = (imageRows + block - 1) / block;
 
-            WGPUExtent3D ext = {w, h, region->texture.depth ? region->texture.depth : 1u};
+            WGPUExtent3D ext = {(w + block - 1) / block * block, (h + block - 1) / block * block, extDepth};
             wgpuCommandEncoderCopyTextureToBuffer(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
         }
 
@@ -1404,16 +1620,24 @@ namespace vri::wgpu
             dstInfo.mipLevel                 = region->texture.mip;
             dstInfo.origin                   = {
                 static_cast<uint32_t>(region->texture.x), static_cast<uint32_t>(region->texture.y), originZ};
-            dstInfo.aspect   = WGPUTextureAspect_All;
-            WGPUExtent3D ext = {w, h, extDepth};
+            dstInfo.aspect = WGPUTextureAspect_All;
+
+            // Compressed formats copy whole blocks: rows and pitches count blocks, and the extent of a mip
+            // smaller than a block, or not a multiple of it, is its physical size in blocks.
+            const uint32_t block     = t->blockDim;
+            const uint32_t blockRows = (h + block - 1) / block;
+            const uint32_t rowTexels = region->bufferRowLength ? region->bufferRowLength : w;
+            const uint32_t imageRows = region->bufferImageHeight ? region->bufferImageHeight : h;
+            WGPUExtent3D   ext       = {(w + block - 1) / block * block, blockRows * block, extDepth};
 
             // copyBufferToTexture requires bytesPerRow to be a multiple of 256. If the app's
             // staging is tightly packed and narrower than that, pack the rows into a temp buffer
             // at the aligned pitch first (per-row buffer copy), so any texture size just works.
-            const uint32_t          tightPitch = (region->bufferRowLength ? region->bufferRowLength : w) * t->texelSize;
+            const uint32_t          tightPitch   = (rowTexels + block - 1) / block * t->texelSize;
             const uint32_t          alignedPitch = (tightPitch + 255u) & ~255u;
+            const uint32_t          sourceRows   = (imageRows + block - 1) / block; // block rows per source slice
             WGPUTexelCopyBufferInfo srcInfo      = {};
-            srcInfo.layout.rowsPerImage          = region->bufferImageHeight ? region->bufferImageHeight : h;
+            srcInfo.layout.rowsPerImage          = sourceRows;
             if (tightPitch == alignedPitch)
             {
                 srcInfo.buffer             = Buf(src)->buffer;
@@ -1424,20 +1648,22 @@ namespace vri::wgpu
             else
             {
                 WGPUBufferDescriptor bd = {};
-                bd.size                 = uint64_t(alignedPitch) * h;
+                bd.size                 = uint64_t(alignedPitch) * blockRows * extDepth;
                 bd.usage                = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
                 WGPUBuffer temp         = wgpuDeviceCreateBuffer(c->device->Device(), &bd);
-                for (uint32_t r = 0; r < h; ++r)
-                    wgpuCommandEncoderCopyBufferToBuffer(c->encoder,
-                                                         Buf(src)->buffer,
-                                                         region->bufferOffset + uint64_t(r) * tightPitch,
-                                                         temp,
-                                                         uint64_t(r) * alignedPitch,
-                                                         tightPitch);
+                for (uint32_t slice = 0; slice < extDepth; ++slice)
+                    for (uint32_t r = 0; r < blockRows; ++r)
+                        wgpuCommandEncoderCopyBufferToBuffer(c->encoder,
+                                                             Buf(src)->buffer,
+                                                             region->bufferOffset +
+                                                                 (uint64_t(slice) * sourceRows + r) * tightPitch,
+                                                             temp,
+                                                             (uint64_t(slice) * blockRows + r) * alignedPitch,
+                                                             tightPitch);
                 srcInfo.buffer              = temp;
                 srcInfo.layout.offset       = 0;
                 srcInfo.layout.bytesPerRow  = alignedPitch;
-                srcInfo.layout.rowsPerImage = h;
+                srcInfo.layout.rowsPerImage = blockRows;
                 wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
                 c->tempUploads.push_back(temp); // keep alive until the GPU consumes it
             }
@@ -1448,21 +1674,40 @@ namespace vri::wgpu
                                      VriTexture*               src,
                                      const VriTextureCopyDesc* region)
         {
-            const TextureWGPU*       s  = reinterpret_cast<const TextureWGPU*>(src);
-            const TextureWGPU*       d  = reinterpret_cast<const TextureWGPU*>(dst);
-            WGPUTexelCopyTextureInfo si = {};
-            si.texture                  = s->texture;
-            si.aspect                   = WGPUTextureAspect_All;
-            WGPUTexelCopyTextureInfo di = {};
-            di.texture                  = d->texture;
-            di.aspect                   = WGPUTextureAspect_All;
-            if (region)
-            {
-                si.mipLevel = region->src.mip;
-                di.mipLevel = region->dst.mip;
-            }
-            WGPUExtent3D ext = {s->width, s->height, s->depth};
-            wgpuCommandEncoderCopyTextureToTexture(CB(cmd)->encoder, &si, &di, &ext);
+            CommandBufferWGPU* c = CB(cmd);
+            EndComputePass(c);
+            const TextureWGPU*         s           = reinterpret_cast<const TextureWGPU*>(src);
+            const TextureWGPU*         d           = reinterpret_cast<const TextureWGPU*>(dst);
+            const VriTextureRegionDesc source      = region ? region->src : VriTextureRegionDesc {};
+            const VriTextureRegionDesc destination = region ? region->dst : VriTextureRegionDesc {};
+            // As in CmdUploadBufferToTexture: array layers are origin.z and depthOrArrayLayers, as volume slices are.
+            // A zero size is the whole source mip, as in the Vulkan backend.
+            const bool               sourceArray      = s->layerNum > 1;
+            const bool               destinationArray = d->layerNum > 1;
+            const uint32_t           layers           = source.layerNum ? source.layerNum : 1u;
+            WGPUTexelCopyTextureInfo si               = {};
+            si.texture                                = s->texture;
+            si.aspect                                 = WGPUTextureAspect_All;
+            si.mipLevel                               = source.mip;
+            si.origin                                 = {static_cast<uint32_t>(source.x),
+                                                         static_cast<uint32_t>(source.y),
+                         sourceArray ? source.baseLayer : static_cast<uint32_t>(source.z)};
+            WGPUTexelCopyTextureInfo di               = {};
+            di.texture                                = d->texture;
+            di.aspect                                 = WGPUTextureAspect_All;
+            di.mipLevel                               = destination.mip;
+            di.origin                                 = {static_cast<uint32_t>(destination.x),
+                                                         static_cast<uint32_t>(destination.y),
+                         destinationArray ? destination.baseLayer : static_cast<uint32_t>(destination.z)};
+            // Compressed copies cover whole blocks, as in CmdUploadBufferToTexture.
+            const uint32_t     block  = s->blockDim;
+            const uint32_t     width  = source.width ? source.width : std::max(s->width >> source.mip, 1u);
+            const uint32_t     height = source.height ? source.height : std::max(s->height >> source.mip, 1u);
+            const WGPUExtent3D ext    = {
+                (width + block - 1) / block * block,
+                (height + block - 1) / block * block,
+                sourceArray ? layers : (source.depth ? source.depth : std::max(s->depth >> source.mip, 1u))};
+            wgpuCommandEncoderCopyTextureToTexture(c->encoder, &si, &di, &ext);
         }
 
         void VRI_CALL CmdBeginDebugGroup(VriCommandBuffer*, const char*) {}

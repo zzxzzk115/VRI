@@ -157,8 +157,9 @@ namespace vri::wgpu
         WGPUDeviceDescriptor deviceDesc                  = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
-        WGPUFeatureName requiredFeatures[2]              = {};
-        uint32_t        featureCount                     = 0;
+        // At most: two timestamp features, adapter-specific formats, float32-filterable, three compression families.
+        WGPUFeatureName requiredFeatures[7] = {};
+        uint32_t        featureCount        = 0;
         if (m_hasTimestamp)
         {
             requiredFeatures[featureCount++] = WGPUFeatureName_TimestampQuery;
@@ -166,9 +167,30 @@ namespace vri::wgpu
             requiredFeatures[featureCount++] =
                 static_cast<WGPUFeatureName>(WGPUNativeFeature_TimestampQueryInsideEncoders);
 #endif
-            deviceDesc.requiredFeatures     = requiredFeatures;
-            deviceDesc.requiredFeatureCount = featureCount;
         }
+#if !defined(__EMSCRIPTEN__)
+        // wgpu-native keeps read-write storage textures, even the r32 formats core WebGPU allows, behind this
+        // native feature; the browser has them in core.
+        const auto adapterFormats =
+            static_cast<WGPUFeatureName>(WGPUNativeFeature_TextureAdapterSpecificFormatFeatures);
+        if (wgpuAdapterHasFeature(m_adapter, adapterFormats) != 0)
+            requiredFeatures[featureCount++] = adapterFormats;
+#endif
+        // 32-bit float textures are filterable where the adapter allows it; without the feature they are only
+        // loaded, or sampled with a non-filtering sampler.
+        m_hasFloat32Filterable = wgpuAdapterHasFeature(m_adapter, WGPUFeatureName_Float32Filterable) != 0;
+        if (m_hasFloat32Filterable)
+            requiredFeatures[featureCount++] = WGPUFeatureName_Float32Filterable;
+        // Every compressed family the adapter has: desktop GPUs offer BC, mobile and Apple GPUs ETC2 and ASTC.
+        for (const WGPUFeatureName compression : {WGPUFeatureName_TextureCompressionBC,
+                                                  WGPUFeatureName_TextureCompressionETC2,
+                                                  WGPUFeatureName_TextureCompressionASTC})
+        {
+            if (wgpuAdapterHasFeature(m_adapter, compression) != 0)
+                requiredFeatures[featureCount++] = compression;
+        }
+        deviceDesc.requiredFeatures       = featureCount ? requiredFeatures : nullptr;
+        deviceDesc.requiredFeatureCount   = featureCount;
         WGPURequestDeviceCallbackInfo dcb = {};
         dcb.mode                          = kCallbackMode;
         dcb.callback                      = OnDevice;
@@ -221,14 +243,16 @@ namespace vri::wgpu
         }
         wgpuAdapterInfoFreeMembers(info);
 
+        // The device was created with the core default limits, which are lower than the adapter's.
         WGPULimits limits = {};
-        if (wgpuAdapterGetLimits(m_adapter, &limits) == WGPUStatus_Success)
+        if (wgpuDeviceGetLimits(m_device, &limits) == WGPUStatus_Success)
         {
-            m_desc.texture1DMaxDim               = limits.maxTextureDimension1D;
-            m_desc.texture2DMaxDim               = limits.maxTextureDimension2D;
-            m_desc.texture3DMaxDim               = limits.maxTextureDimension3D;
-            m_desc.textureArrayLayerMaxNum       = limits.maxTextureArrayLayers;
-            m_desc.attachmentColorMaxNum         = limits.maxColorAttachments;
+            m_desc.texture1DMaxDim         = limits.maxTextureDimension1D;
+            m_desc.texture2DMaxDim         = limits.maxTextureDimension2D;
+            m_desc.texture3DMaxDim         = limits.maxTextureDimension3D;
+            m_desc.textureArrayLayerMaxNum = limits.maxTextureArrayLayers;
+            // wgpu-native leaves this field 0; such a device has the core default of 8.
+            m_desc.attachmentColorMaxNum         = limits.maxColorAttachments != 0 ? limits.maxColorAttachments : 8;
             m_desc.bufferMaxSize                 = limits.maxBufferSize;
             m_desc.constantBufferOffsetAlignment = limits.minUniformBufferOffsetAlignment;
             m_desc.storageBufferOffsetAlignment  = limits.minStorageBufferOffsetAlignment;
@@ -239,6 +263,8 @@ namespace vri::wgpu
         // WebGPU compute is wired (CreateComputePipeline + compute pass / CmdDispatch),
         // on both native (wgpu-native) and the browser (emdawnwebgpu).
         m_desc.hasComputeShader = VRI_TRUE;
+        // CmdClearStorageTexture copies from a buffer: the formats WebGPU stores, on CopyDst textures.
+        m_desc.hasClearStorageTexture = VRI_TRUE;
         // WebGPU has no geometry or tessellation stages.
         m_desc.hasGeometryShader = VRI_FALSE;
         m_desc.hasTessellation   = VRI_FALSE;

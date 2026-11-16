@@ -561,6 +561,10 @@ namespace vri::vk
         // supported on desktop GPUs; gated on the queried bit anyway (some GLES-class drivers lack it).
         features2.features.samplerAnisotropy = baseSup.samplerAnisotropy;
         features2.features.imageCubeArray    = baseSup.imageCubeArray;
+        // The compressed families a GPU has; GetFormatSupport reports their formats from the driver.
+        features2.features.textureCompressionBC       = baseSup.textureCompressionBC;
+        features2.features.textureCompressionETC2     = baseSup.textureCompressionETC2;
+        features2.features.textureCompressionASTC_LDR = baseSup.textureCompressionASTC_LDR;
         // Implied by VK_KHR_format_feature_flags2 on 1.3, but a 1.2 driver (MoltenVK) must enable it
         // before shaders may read or write storage images declared without a format.
         features2.features.shaderStorageImageReadWithoutFormat  = baseSup.shaderStorageImageReadWithoutFormat;

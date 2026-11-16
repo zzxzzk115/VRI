@@ -72,6 +72,8 @@ namespace vri::mtl
             {VriFormat_BC5_UNORM,       MTLPixelFormatBC5_RGUnorm},
             {VriFormat_BC6H_UFLOAT,     MTLPixelFormatBC6H_RGBUfloat},
             {VriFormat_BC7_UNORM,       MTLPixelFormatBC7_RGBAUnorm},
+            {VriFormat_ETC2_RGBA8_UNORM, MTLPixelFormatEAC_RGBA8},
+            {VriFormat_ASTC_4x4_UNORM,  MTLPixelFormatASTC_4x4_LDR},
 
             {VriFormat_D16_UNORM,       MTLPixelFormatDepth16Unorm},
             {VriFormat_D32_SFLOAT,      MTLPixelFormatDepth32Float},
@@ -116,14 +118,14 @@ namespace vri::mtl
         {
             case VriFormat_BC1_UNORM: case VriFormat_BC2_UNORM: case VriFormat_BC3_UNORM:
             case VriFormat_BC4_UNORM: case VriFormat_BC5_UNORM: case VriFormat_BC6H_UFLOAT:
-            case VriFormat_BC7_UNORM:
+            case VriFormat_BC7_UNORM: case VriFormat_ETC2_RGBA8_UNORM: case VriFormat_ASTC_4x4_UNORM:
                 return 4;
             default:
                 return 1;
         }
     }
 
-    // Bytes per texel, or per compressed block for BC formats.
+    // Bytes per texel, or per compressed block for block-compressed formats.
     inline uint32_t TexelSize(VriFormat f)
     {
         switch (f)
@@ -132,6 +134,7 @@ namespace vri::mtl
                 return 8;
             case VriFormat_BC2_UNORM: case VriFormat_BC3_UNORM: case VriFormat_BC5_UNORM:
             case VriFormat_BC6H_UFLOAT: case VriFormat_BC7_UNORM:
+            case VriFormat_ETC2_RGBA8_UNORM: case VriFormat_ASTC_4x4_UNORM:
                 return 16;
             case VriFormat_R8_UNORM: case VriFormat_R8_SNORM: case VriFormat_R8_UINT:
             case VriFormat_R8_SINT:  case VriFormat_S8_UINT:

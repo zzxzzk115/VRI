@@ -76,7 +76,8 @@ namespace vri::wgpu
         uint32_t          depth;
         uint32_t          mipNum;
         uint32_t          layerNum;
-        uint32_t          texelSize; // bytes per pixel (uncompressed)
+        uint32_t          texelSize;    // bytes per pixel, or per block of a compressed format
+        uint32_t          blockDim = 1; // 4 for compressed formats
         bool              owned;
     };
 
