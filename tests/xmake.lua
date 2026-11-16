@@ -104,6 +104,7 @@ target("vri-tests")
             add_files("test_timed_wait_d3d12.cpp") -- host wait policy, no GPU required
             add_files("test_swapchain_d3d12.cpp") -- sRGB swapchain on a hidden Win32 window
             add_files("test_storage_d3d12.cpp")   -- compute storage textures under GPU-based validation
+            add_files("test_lifetime_d3d12.cpp")  -- destroying a device leaves no native object holding it
             add_syslinks("user32", "d3d12", "dxgi")
         end
         add_files("test_clear_d3d12.cpp")
@@ -115,7 +116,6 @@ target("vri-tests")
         add_files("test_copy_d3d12.cpp")      -- buffer copies into a buffer in a read state
         add_files("test_attachment_layers_d3d12.cpp") -- render-target views of single array layers
         add_files("test_attachment_views_d3d12.cpp")  -- every live attachment view has its own descriptor
-        add_files("test_lifetime_d3d12.cpp")         -- destroying a device leaves no native object holding it
         add_files("test_bc_upload_d3d12.cpp")
         add_files("test_depth_d3d12.cpp")
         add_files("test_msaa_d3d12.cpp")
