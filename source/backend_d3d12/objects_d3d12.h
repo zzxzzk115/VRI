@@ -154,12 +154,16 @@ namespace vri::d3d12
         uint32_t             srvNext = 0, samplerNext = 0; // bump cursors within the blocks
     };
 
+    struct CommandBufferD3D12;
+
     struct CommandAllocatorD3D12
     {
         DeviceD3D12*                   device = nullptr;
         ComPtr<ID3D12CommandAllocator> allocator;
         D3D12_COMMAND_LIST_TYPE        listType =
             D3D12_COMMAND_LIST_TYPE_DIRECT; // engine the lists target (matches its queue)
+        // The command buffers created from this allocator; VRI has no per-buffer destroy, so they are freed with it.
+        std::vector<CommandBufferD3D12*> buffers;
     };
 
     struct PipelineD3D12;
