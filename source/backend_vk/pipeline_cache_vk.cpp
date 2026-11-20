@@ -27,7 +27,7 @@ namespace vri::vk
             ci.initialDataSize           = initialSize;
             ci.pInitialData              = initialSize ? initialData : nullptr;
             VkPipelineCache cache        = VK_NULL_HANDLE;
-            if (vkCreatePipelineCache(d->Device(), &ci, nullptr, &cache) != VK_SUCCESS)
+            if (d->Vkd().vkCreatePipelineCache(d->Device(), &ci, nullptr, &cache) != VK_SUCCESS)
                 return VriResult_Failure;
             *out = ToHandle(new PipelineCacheVK {d, cache});
             return VriResult_Success;
@@ -38,7 +38,7 @@ namespace vri::vk
             if (!h)
                 return;
             PipelineCacheVK* p = PC(h);
-            vkDestroyPipelineCache(p->device->Device(), p->cache, nullptr);
+            p->device->Vkd().vkDestroyPipelineCache(p->device->Device(), p->cache, nullptr);
             delete p;
         }
 
@@ -50,13 +50,13 @@ namespace vri::vk
             if (!data) // size query
             {
                 size_t sz = 0;
-                if (vkGetPipelineCacheData(p->device->Device(), p->cache, &sz, nullptr) != VK_SUCCESS)
+                if (p->device->Vkd().vkGetPipelineCacheData(p->device->Device(), p->cache, &sz, nullptr) != VK_SUCCESS)
                     return VriResult_Failure;
                 *size = sz;
                 return VriResult_Success;
             }
             // *size is the caller's buffer capacity; vkGetPipelineCacheData writes the byte count back.
-            VkResult vr = vkGetPipelineCacheData(p->device->Device(), p->cache, size, data);
+            VkResult vr = p->device->Vkd().vkGetPipelineCacheData(p->device->Device(), p->cache, size, data);
             if (vr == VK_INCOMPLETE)
                 return VriResult_InvalidArgument; // buffer too small
             return vr == VK_SUCCESS ? VriResult_Success : VriResult_Failure;

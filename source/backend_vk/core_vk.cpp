@@ -144,7 +144,7 @@ namespace vri::vk
                 return VriFormatSupport_None;
 
             VkFormatProperties props = {};
-            vkGetPhysicalDeviceFormatProperties(Dev(device)->PhysicalDevice(), vk, &props);
+            Dev(device)->Vki().vkGetPhysicalDeviceFormatProperties(Dev(device)->PhysicalDevice(), vk, &props);
             const VkFormatFeatureFlags f = props.optimalTilingFeatures;
 
             VriFormatSupportFlags r = VriFormatSupport_None;
@@ -176,7 +176,7 @@ namespace vri::vk
                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
             VkPhysicalDeviceMemoryProperties2 props = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
             props.pNext                             = &budget;
-            vkGetPhysicalDeviceMemoryProperties2(d->PhysicalDevice(), &props);
+            d->Vki().vkGetPhysicalDeviceMemoryProperties2(d->PhysicalDevice(), &props);
             // Sum the device-local heaps for Device/DeviceUpload, the rest (system) otherwise.
             const bool wantDeviceLocal =
                 location == VriMemoryLocation_Device || location == VriMemoryLocation_DeviceUpload;
@@ -213,7 +213,7 @@ namespace vri::vk
             ci.queueFamilyIndex        = d->GetQueue(type)->familyIndex;
 
             VkCommandPool pool = VK_NULL_HANDLE;
-            if (vkCreateCommandPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
+            if (d->Vkd().vkCreateCommandPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
                 return VriResult_Failure;
 
             *out = ToHandle(new CommandAllocatorVK {d, pool, type});
@@ -223,7 +223,7 @@ namespace vri::vk
         void VRI_CALL ResetCommandAllocator(VriCommandAllocator* allocator)
         {
             CommandAllocatorVK* a = CA(allocator);
-            vkResetCommandPool(a->device->Device(), a->pool, 0);
+            a->device->Vkd().vkResetCommandPool(a->device->Device(), a->pool, 0);
         }
 
         void VRI_CALL DestroyCommandAllocator(VriCommandAllocator* allocator)
@@ -231,7 +231,7 @@ namespace vri::vk
             if (!allocator)
                 return;
             CommandAllocatorVK* a = CA(allocator);
-            vkDestroyCommandPool(a->device->Device(), a->pool, nullptr);
+            a->device->Vkd().vkDestroyCommandPool(a->device->Device(), a->pool, nullptr);
             delete a;
         }
 
@@ -244,7 +244,7 @@ namespace vri::vk
             ai.commandBufferCount          = 1;
 
             VkCommandBuffer cmd = VK_NULL_HANDLE;
-            if (vkAllocateCommandBuffers(a->device->Device(), &ai, &cmd) != VK_SUCCESS)
+            if (a->device->Vkd().vkAllocateCommandBuffers(a->device->Device(), &ai, &cmd) != VK_SUCCESS)
                 return VriResult_Failure;
 
             auto* buffer = new CommandBufferVK {a->device, cmd, nullptr, VK_PIPELINE_BIND_POINT_GRAPHICS};
@@ -259,12 +259,14 @@ namespace vri::vk
             c->boundLayout              = nullptr;
             VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
             bi.flags                    = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            return vkBeginCommandBuffer(c->cmd, &bi) == VK_SUCCESS ? VriResult_Success : VriResult_Failure;
+            return c->device->Vkd().vkBeginCommandBuffer(c->cmd, &bi) == VK_SUCCESS ? VriResult_Success :
+                                                                                      VriResult_Failure;
         }
 
         VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer* cmd)
         {
-            return vkEndCommandBuffer(CB(cmd)->cmd) == VK_SUCCESS ? VriResult_Success : VriResult_Failure;
+            return CB(cmd)->device->Vkd().vkEndCommandBuffer(CB(cmd)->cmd) == VK_SUCCESS ? VriResult_Success :
+                                                                                           VriResult_Failure;
         }
 
         // Bytes VMA actually reserved, which is the only figure worth reporting: recomputing a
@@ -307,7 +309,7 @@ namespace vri::vk
             if (desc->memoryLocation == VriMemoryLocation_Undefined)
             {
                 // Unbound: caller drives AllocateMemory + BindBufferMemory.
-                if (vkCreateBuffer(d->Device(), &bci, nullptr, &buffer) != VK_SUCCESS)
+                if (d->Vkd().vkCreateBuffer(d->Device(), &bci, nullptr, &buffer) != VK_SUCCESS)
                     return VriResult_Failure;
             }
             else
@@ -350,11 +352,11 @@ namespace vri::vk
             else if (b->dedicatedMemory)
             {
                 // Exportable external-memory path: dedicated VkDeviceMemory, not VMA-owned.
-                vkDestroyBuffer(b->device->Device(), b->buffer, nullptr);
-                vkFreeMemory(b->device->Device(), b->dedicatedMemory, nullptr);
+                b->device->Vkd().vkDestroyBuffer(b->device->Device(), b->buffer, nullptr);
+                b->device->Vkd().vkFreeMemory(b->device->Device(), b->dedicatedMemory, nullptr);
             }
             else if (b->buffer)
-                vkDestroyBuffer(b->device->Device(), b->buffer, nullptr);
+                b->device->Vkd().vkDestroyBuffer(b->device->Device(), b->buffer, nullptr);
             delete b;
         }
 
@@ -378,7 +380,7 @@ namespace vri::vk
             const BufferVK*           b    = Buf(buffer);
             VkBufferDeviceAddressInfo info = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
             info.buffer                    = b->buffer;
-            return vkGetBufferDeviceAddress(b->device->Device(), &info);
+            return b->device->Vkd().vkGetBufferDeviceAddress(b->device->Device(), &info);
         }
 
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
@@ -415,7 +417,7 @@ namespace vri::vk
 
             if (desc->memoryLocation == VriMemoryLocation_Undefined)
             {
-                if (vkCreateImage(d->Device(), &ici, nullptr, &image) != VK_SUCCESS)
+                if (d->Vkd().vkCreateImage(d->Device(), &ici, nullptr, &image) != VK_SUCCESS)
                     return VriResult_Failure;
             }
             else
@@ -463,11 +465,11 @@ namespace vri::vk
             else if (t->owned && t->dedicatedMemory)
             {
                 // Exportable external-memory path: dedicated VkDeviceMemory, not VMA-owned.
-                vkDestroyImage(t->device->Device(), t->image, nullptr);
-                vkFreeMemory(t->device->Device(), t->dedicatedMemory, nullptr);
+                t->device->Vkd().vkDestroyImage(t->device->Device(), t->image, nullptr);
+                t->device->Vkd().vkFreeMemory(t->device->Device(), t->dedicatedMemory, nullptr);
             }
             else if (t->owned && t->image)
-                vkDestroyImage(t->device->Device(), t->image, nullptr); // unbound (explicit memory)
+                t->device->Vkd().vkDestroyImage(t->device->Device(), t->image, nullptr); // unbound (explicit memory)
             delete t;
         }
 
@@ -501,11 +503,11 @@ namespace vri::vk
             *out         = VriMemoryDesc {};
             VkDevice dev = Dev(device)->Device();
             VkBuffer tmp = VK_NULL_HANDLE;
-            if (vkCreateBuffer(dev, &bci, nullptr, &tmp) != VK_SUCCESS)
+            if (Dev(device)->Vkd().vkCreateBuffer(dev, &bci, nullptr, &tmp) != VK_SUCCESS)
                 return;
             VkMemoryRequirements mr = {};
-            vkGetBufferMemoryRequirements(dev, tmp, &mr);
-            vkDestroyBuffer(dev, tmp, nullptr);
+            Dev(device)->Vkd().vkGetBufferMemoryRequirements(dev, tmp, &mr);
+            Dev(device)->Vkd().vkDestroyBuffer(dev, tmp, nullptr);
             out->size           = mr.size;
             out->alignment      = mr.alignment;
             out->location       = location;
@@ -548,11 +550,11 @@ namespace vri::vk
             *out         = VriMemoryDesc {};
             VkDevice dev = Dev(device)->Device();
             VkImage  tmp = VK_NULL_HANDLE;
-            if (vkCreateImage(dev, &ici, nullptr, &tmp) != VK_SUCCESS)
+            if (Dev(device)->Vkd().vkCreateImage(dev, &ici, nullptr, &tmp) != VK_SUCCESS)
                 return;
             VkMemoryRequirements mr = {};
-            vkGetImageMemoryRequirements(dev, tmp, &mr);
-            vkDestroyImage(dev, tmp, nullptr);
+            Dev(device)->Vkd().vkGetImageMemoryRequirements(dev, tmp, &mr);
+            Dev(device)->Vkd().vkDestroyImage(dev, tmp, nullptr);
             out->size           = mr.size;
             out->alignment      = mr.alignment;
             out->location       = location;
@@ -636,7 +638,7 @@ namespace vri::vk
             ci.subresourceRange.layerCount     = desc->layerNum ? desc->layerNum : VK_REMAINING_ARRAY_LAYERS;
 
             VkImageView view = VK_NULL_HANDLE;
-            if (vkCreateImageView(d->Device(), &ci, nullptr, &view) != VK_SUCCESS)
+            if (d->Vkd().vkCreateImageView(d->Device(), &ci, nullptr, &view) != VK_SUCCESS)
                 return VriResult_Failure;
 
             DescriptorVK* v = new DescriptorVK {};
@@ -724,7 +726,7 @@ namespace vri::vk
             }
 
             VkSampler sampler = VK_NULL_HANDLE;
-            if (vkCreateSampler(d->Device(), &ci, nullptr, &sampler) != VK_SUCCESS)
+            if (d->Vkd().vkCreateSampler(d->Device(), &ci, nullptr, &sampler) != VK_SUCCESS)
                 return VriResult_Failure;
 
             DescriptorVK* v = new DescriptorVK {};
@@ -742,11 +744,11 @@ namespace vri::vk
             DescriptorVK* v   = Desc(descriptor);
             VkDevice      dev = v->device->Device();
             if (v->imageView)
-                vkDestroyImageView(dev, v->imageView, nullptr);
+                v->device->Vkd().vkDestroyImageView(dev, v->imageView, nullptr);
             if (v->bufferView)
-                vkDestroyBufferView(dev, v->bufferView, nullptr);
+                v->device->Vkd().vkDestroyBufferView(dev, v->bufferView, nullptr);
             if (v->sampler)
-                vkDestroySampler(dev, v->sampler, nullptr);
+                v->device->Vkd().vkDestroySampler(dev, v->sampler, nullptr);
             delete v;
         }
 
@@ -818,10 +820,10 @@ namespace vri::vk
                 }
 
                 VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
-                if (vkCreateDescriptorSetLayout(d->Device(), &lci, nullptr, &setLayout) != VK_SUCCESS)
+                if (d->Vkd().vkCreateDescriptorSetLayout(d->Device(), &lci, nullptr, &setLayout) != VK_SUCCESS)
                 {
                     for (VkDescriptorSetLayout l : layout->setLayouts)
-                        vkDestroyDescriptorSetLayout(d->Device(), l, nullptr);
+                        d->Vkd().vkDestroyDescriptorSetLayout(d->Device(), l, nullptr);
                     delete layout;
                     return VriResult_Failure;
                 }
@@ -848,10 +850,10 @@ namespace vri::vk
             ci.pushConstantRangeCount     = static_cast<uint32_t>(pushRanges.size());
             ci.pPushConstantRanges        = pushRanges.data();
 
-            if (vkCreatePipelineLayout(d->Device(), &ci, nullptr, &layout->layout) != VK_SUCCESS)
+            if (d->Vkd().vkCreatePipelineLayout(d->Device(), &ci, nullptr, &layout->layout) != VK_SUCCESS)
             {
                 for (VkDescriptorSetLayout l : layout->setLayouts)
-                    vkDestroyDescriptorSetLayout(d->Device(), l, nullptr);
+                    d->Vkd().vkDestroyDescriptorSetLayout(d->Device(), l, nullptr);
                 delete layout;
                 return VriResult_Failure;
             }
@@ -867,18 +869,18 @@ namespace vri::vk
             PipelineLayoutVK* l   = PL(layout);
             VkDevice          dev = l->device->Device();
             for (VkDescriptorSetLayout s : l->setLayouts)
-                vkDestroyDescriptorSetLayout(dev, s, nullptr);
-            vkDestroyPipelineLayout(dev, l->layout, nullptr);
+                l->device->Vkd().vkDestroyDescriptorSetLayout(dev, s, nullptr);
+            l->device->Vkd().vkDestroyPipelineLayout(dev, l->layout, nullptr);
             delete l;
         }
 
-        VkShaderModule MakeShaderModule(VkDevice dev, const VriShaderDesc& s)
+        VkShaderModule MakeShaderModule(const DeviceVK* d, const VriShaderDesc& s)
         {
             VkShaderModuleCreateInfo ci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
             ci.codeSize                 = s.bytecodeSize;
             ci.pCode                    = static_cast<const uint32_t*>(s.bytecode);
             VkShaderModule m            = VK_NULL_HANDLE;
-            vkCreateShaderModule(dev, &ci, nullptr, &m);
+            d->Vkd().vkCreateShaderModule(d->Device(), &ci, nullptr, &m);
             return m;
         }
 
@@ -900,7 +902,7 @@ namespace vri::vk
                 const VriShaderDesc& s = desc->shaders[i];
                 if (s.stage == VriShaderStage_Mesh || s.stage == VriShaderStage_Task)
                     hasMeshStage = true;
-                VkShaderModule m = MakeShaderModule(dev, s);
+                VkShaderModule m = MakeShaderModule(d, s);
                 modules.push_back(m);
                 VkPipelineShaderStageCreateInfo si = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
                 si.stage                           = ToVkShaderStage(s.stage);
@@ -916,7 +918,7 @@ namespace vri::vk
                 {
                     for (VkShaderModule mm : modules)
                         if (mm)
-                            vkDestroyShaderModule(dev, mm, nullptr);
+                            d->Vkd().vkDestroyShaderModule(dev, mm, nullptr);
                     d->ReportError("CreateGraphicsPipeline: shader module creation failed");
                     return VriResult_Failure;
                 }
@@ -1076,10 +1078,11 @@ namespace vri::vk
             ci.layout              = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : VK_NULL_HANDLE;
 
             VkPipeline pipeline = VK_NULL_HANDLE;
-            VkResult   vr = vkCreateGraphicsPipelines(dev, PipeCache(desc->pipelineCache), 1, &ci, nullptr, &pipeline);
+            VkResult   vr =
+                d->Vkd().vkCreateGraphicsPipelines(dev, PipeCache(desc->pipelineCache), 1, &ci, nullptr, &pipeline);
 
             for (VkShaderModule m : modules)
-                vkDestroyShaderModule(dev, m, nullptr);
+                d->Vkd().vkDestroyShaderModule(dev, m, nullptr);
 
             if (vr != VK_SUCCESS)
                 return VriResult_Failure;
@@ -1094,7 +1097,7 @@ namespace vri::vk
         {
             DeviceVK*      d   = Dev(device);
             VkDevice       dev = d->Device();
-            VkShaderModule m   = MakeShaderModule(dev, desc->shader);
+            VkShaderModule m   = MakeShaderModule(d, desc->shader);
 
             VkComputePipelineCreateInfo ci = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
             ci.stage.sType                 = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1104,8 +1107,9 @@ namespace vri::vk
             ci.layout                      = desc->pipelineLayout ? PL(desc->pipelineLayout)->layout : VK_NULL_HANDLE;
 
             VkPipeline pipeline = VK_NULL_HANDLE;
-            VkResult   vr = vkCreateComputePipelines(dev, PipeCache(desc->pipelineCache), 1, &ci, nullptr, &pipeline);
-            vkDestroyShaderModule(dev, m, nullptr);
+            VkResult   vr =
+                d->Vkd().vkCreateComputePipelines(dev, PipeCache(desc->pipelineCache), 1, &ci, nullptr, &pipeline);
+            d->Vkd().vkDestroyShaderModule(dev, m, nullptr);
             if (vr != VK_SUCCESS)
                 return VriResult_Failure;
 
@@ -1118,7 +1122,7 @@ namespace vri::vk
             if (!pipeline)
                 return;
             PipelineVK* p = Pipe(pipeline);
-            vkDestroyPipeline(p->device->Device(), p->pipeline, nullptr);
+            p->device->Vkd().vkDestroyPipeline(p->device->Device(), p->pipeline, nullptr);
             delete p;
         }
 
@@ -1152,7 +1156,7 @@ namespace vri::vk
                 ci.flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 
             VkDescriptorPool pool = VK_NULL_HANDLE;
-            if (vkCreateDescriptorPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
+            if (d->Vkd().vkCreateDescriptorPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
                 return VriResult_Failure;
 
             *out = ToHandle(new DescriptorPoolVK {d, pool});
@@ -1162,7 +1166,7 @@ namespace vri::vk
         void VRI_CALL ResetDescriptorPool(VriDescriptorPool* pool)
         {
             DescriptorPoolVK* p = DPool(pool);
-            vkResetDescriptorPool(p->device->Device(), p->pool, 0);
+            p->device->Vkd().vkResetDescriptorPool(p->device->Device(), p->pool, 0);
             for (auto* set : p->sets)
                 delete set;
             p->sets.clear();
@@ -1173,7 +1177,7 @@ namespace vri::vk
             if (!pool)
                 return;
             DescriptorPoolVK* p = DPool(pool);
-            vkDestroyDescriptorPool(p->device->Device(), p->pool, nullptr);
+            p->device->Vkd().vkDestroyDescriptorPool(p->device->Device(), p->pool, nullptr);
             delete p;
         }
 
@@ -1208,7 +1212,7 @@ namespace vri::vk
             }
 
             std::vector<VkDescriptorSet> sets(setNum);
-            if (vkAllocateDescriptorSets(p->device->Device(), &ai, sets.data()) != VK_SUCCESS)
+            if (p->device->Vkd().vkAllocateDescriptorSets(p->device->Device(), &ai, sets.data()) != VK_SUCCESS)
                 return VriResult_Failure;
 
             for (uint32_t i = 0; i < setNum; ++i)
@@ -1303,7 +1307,7 @@ namespace vri::vk
                 writes.push_back(w);
             }
 
-            vkUpdateDescriptorSets(
+            s->device->Vkd().vkUpdateDescriptorSets(
                 s->device->Device(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
         }
 
@@ -1318,7 +1322,7 @@ namespace vri::vk
             ci.pNext                       = &type;
 
             VkSemaphore sem = VK_NULL_HANDLE;
-            if (vkCreateSemaphore(d->Device(), &ci, nullptr, &sem) != VK_SUCCESS)
+            if (d->Vkd().vkCreateSemaphore(d->Device(), &ci, nullptr, &sem) != VK_SUCCESS)
                 return VriResult_Failure;
 
             *out = ToHandle(new FenceVK {d, sem});
@@ -1330,7 +1334,7 @@ namespace vri::vk
             if (!fence)
                 return;
             FenceVK* f = Fen(fence);
-            vkDestroySemaphore(f->device->Device(), f->timeline, nullptr);
+            f->device->Vkd().vkDestroySemaphore(f->device->Device(), f->timeline, nullptr);
             delete f;
         }
 
@@ -1338,7 +1342,7 @@ namespace vri::vk
         {
             FenceVK* f     = Fen(fence);
             uint64_t value = 0;
-            vkGetSemaphoreCounterValue(f->device->Device(), f->timeline, &value);
+            f->device->Vkd().vkGetSemaphoreCounterValue(f->device->Device(), f->timeline, &value);
             return value;
         }
 
@@ -1351,7 +1355,7 @@ namespace vri::vk
             info.semaphoreCount   = 1;
             info.pSemaphores      = &f->timeline;
             info.pValues          = &value;
-            const VkResult status = vkWaitSemaphores(f->device->Device(), &info, timeoutNs);
+            const VkResult status = f->device->Vkd().vkWaitSemaphores(f->device->Device(), &info, timeoutNs);
             if (status == VK_SUCCESS)
                 return VriResult_Success;
             if (status == VK_TIMEOUT)
@@ -1455,7 +1459,7 @@ namespace vri::vk
                 v[i].minDepth = vps[i].minDepth;
                 v[i].maxDepth = vps[i].maxDepth;
             }
-            vkCmdSetViewport(CB(cmd)->cmd, 0, num, v.data());
+            CB(cmd)->device->Vkd().vkCmdSetViewport(CB(cmd)->cmd, 0, num, v.data());
         }
 
         void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* rects, uint32_t num)
@@ -1463,7 +1467,7 @@ namespace vri::vk
             std::vector<VkRect2D> r(num);
             for (uint32_t i = 0; i < num; ++i)
                 r[i] = {{rects[i].x, rects[i].y}, {rects[i].width, rects[i].height}};
-            vkCmdSetScissor(CB(cmd)->cmd, 0, num, r.data());
+            CB(cmd)->device->Vkd().vkCmdSetScissor(CB(cmd)->cmd, 0, num, r.data());
         }
 
         void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
@@ -1476,7 +1480,7 @@ namespace vri::vk
             CommandBufferVK* c = CB(cmd);
             PipelineVK*      p = Pipe(pipeline);
             c->boundBindPoint  = p->bindPoint;
-            vkCmdBindPipeline(c->cmd, p->bindPoint, p->pipeline);
+            c->device->Vkd().vkCmdBindPipeline(c->cmd, p->bindPoint, p->pipeline);
         }
 
         void VRI_CALL CmdSetDescriptorSet(VriCommandBuffer* cmd, uint32_t setIndex, const VriDescriptorSet* set)
@@ -1486,7 +1490,7 @@ namespace vri::vk
                 return;
             const DescriptorSetVK* s  = reinterpret_cast<const DescriptorSetVK*>(set);
             VkDescriptorSet        vs = s->set;
-            vkCmdBindDescriptorSets(
+            c->device->Vkd().vkCmdBindDescriptorSets(
                 c->cmd, c->boundBindPoint, PL(c->boundLayout)->layout, setIndex, 1, &vs, 0, nullptr);
         }
 
@@ -1498,7 +1502,7 @@ namespace vri::vk
             const PipelineLayoutVK* pl = PL(c->boundLayout);
             if (!pl->pushStages)
                 return; // layout declares no push-constant range
-            vkCmdPushConstants(c->cmd, pl->layout, pl->pushStages, 0, size, data);
+            c->device->Vkd().vkCmdPushConstants(c->cmd, pl->layout, pl->pushStages, 0, size, data);
         }
 
         void VRI_CALL CmdSetVertexBuffers(VriCommandBuffer*             cmd,
@@ -1513,31 +1517,34 @@ namespace vri::vk
                 buffers[i] = Buf(bindings[i].buffer)->buffer;
                 offsets[i] = bindings[i].offset;
             }
-            vkCmdBindVertexBuffers(CB(cmd)->cmd, baseSlot, num, buffers.data(), offsets.data());
+            CB(cmd)->device->Vkd().vkCmdBindVertexBuffers(CB(cmd)->cmd, baseSlot, num, buffers.data(), offsets.data());
         }
 
         void VRI_CALL CmdSetIndexBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, VriIndexType type)
         {
-            vkCmdBindIndexBuffer(CB(cmd)->cmd,
-                                 Buf(buffer)->buffer,
-                                 offset,
-                                 type == VriIndexType_UInt16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+            CB(cmd)->device->Vkd().vkCmdBindIndexBuffer(CB(cmd)->cmd,
+                                                        Buf(buffer)->buffer,
+                                                        offset,
+                                                        type == VriIndexType_UInt16 ? VK_INDEX_TYPE_UINT16 :
+                                                                                      VK_INDEX_TYPE_UINT32);
         }
 
         void VRI_CALL CmdDraw(VriCommandBuffer* cmd, const VriDrawDesc* d)
         {
-            vkCmdDraw(CB(cmd)->cmd, d->vertexNum, d->instanceNum, d->baseVertex, d->baseInstance);
+            CB(cmd)->device->Vkd().vkCmdDraw(
+                CB(cmd)->cmd, d->vertexNum, d->instanceNum, d->baseVertex, d->baseInstance);
         }
 
         void VRI_CALL CmdDrawIndexed(VriCommandBuffer* cmd, const VriDrawIndexedDesc* d)
         {
-            vkCmdDrawIndexed(CB(cmd)->cmd, d->indexNum, d->instanceNum, d->baseIndex, d->vertexOffset, d->baseInstance);
+            CB(cmd)->device->Vkd().vkCmdDrawIndexed(
+                CB(cmd)->cmd, d->indexNum, d->instanceNum, d->baseIndex, d->vertexOffset, d->baseInstance);
         }
 
         void VRI_CALL
         CmdDrawIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint32_t drawNum, uint32_t stride)
         {
-            vkCmdDrawIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset, drawNum, stride);
+            CB(cmd)->device->Vkd().vkCmdDrawIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset, drawNum, stride);
         }
         void VRI_CALL CmdDrawIndexedIndirect(VriCommandBuffer* cmd,
                                              VriBuffer*        buffer,
@@ -1545,7 +1552,7 @@ namespace vri::vk
                                              uint32_t          drawNum,
                                              uint32_t          stride)
         {
-            vkCmdDrawIndexedIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset, drawNum, stride);
+            CB(cmd)->device->Vkd().vkCmdDrawIndexedIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset, drawNum, stride);
         }
         // vkCmdDraw[Indexed]IndirectCount is core Vulkan 1.2 (VRI requests 1.3) - always available.
         void VRI_CALL CmdDrawIndirectCount(VriCommandBuffer* cmd,
@@ -1556,7 +1563,7 @@ namespace vri::vk
                                            uint32_t          maxDrawNum,
                                            uint32_t          stride)
         {
-            vkCmdDrawIndirectCount(
+            CB(cmd)->device->Vkd().vkCmdDrawIndirectCount(
                 CB(cmd)->cmd, Buf(buffer)->buffer, offset, Buf(countBuffer)->buffer, countOffset, maxDrawNum, stride);
         }
         void VRI_CALL CmdDrawIndexedIndirectCount(VriCommandBuffer* cmd,
@@ -1567,18 +1574,18 @@ namespace vri::vk
                                                   uint32_t          maxDrawNum,
                                                   uint32_t          stride)
         {
-            vkCmdDrawIndexedIndirectCount(
+            CB(cmd)->device->Vkd().vkCmdDrawIndexedIndirectCount(
                 CB(cmd)->cmd, Buf(buffer)->buffer, offset, Buf(countBuffer)->buffer, countOffset, maxDrawNum, stride);
         }
 
         void VRI_CALL CmdDispatch(VriCommandBuffer* cmd, const VriDispatchDesc* d)
         {
-            vkCmdDispatch(CB(cmd)->cmd, d->x, d->y, d->z);
+            CB(cmd)->device->Vkd().vkCmdDispatch(CB(cmd)->cmd, d->x, d->y, d->z);
         }
 
         void VRI_CALL CmdDispatchIndirect(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset)
         {
-            vkCmdDispatchIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset);
+            CB(cmd)->device->Vkd().vkCmdDispatchIndirect(CB(cmd)->cmd, Buf(buffer)->buffer, offset);
         }
 
         void VRI_CALL CmdBarrier(VriCommandBuffer* cmd, const VriBarrierGroupDesc* group)
@@ -1636,7 +1643,8 @@ namespace vri::vk
         void VRI_CALL
         CmdClearStorageBuffer(VriCommandBuffer* cmd, VriBuffer* buffer, uint64_t offset, uint64_t size, uint32_t value)
         {
-            vkCmdFillBuffer(CB(cmd)->cmd, Buf(buffer)->buffer, offset, size ? size : VK_WHOLE_SIZE, value);
+            CB(cmd)->device->Vkd().vkCmdFillBuffer(
+                CB(cmd)->cmd, Buf(buffer)->buffer, offset, size ? size : VK_WHOLE_SIZE, value);
         }
         void VRI_CALL CmdClearStorageTexture(VriCommandBuffer* cmd, VriTexture* texture, const VriClearColor* value)
         {
@@ -1645,7 +1653,7 @@ namespace vri::vk
             VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS};
             // vkCmdClearColorImage is a transfer-domain op, so the caller barriers the texture to the
             // CopyDestination state/layout (matching the storage-buffer clear's transfer contract).
-            vkCmdClearColorImage(
+            CB(cmd)->device->Vkd().vkCmdClearColorImage(
                 CB(cmd)->cmd, Tex(texture)->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cv, 1, &range);
         }
         void VRI_CALL CmdCopyBuffer(VriCommandBuffer*        cmd,
@@ -1654,7 +1662,7 @@ namespace vri::vk
                                     const VriBufferCopyDesc* region)
         {
             VkBufferCopy r = {region->srcOffset, region->dstOffset, region->size};
-            vkCmdCopyBuffer(CB(cmd)->cmd, Buf(src)->buffer, Buf(dst)->buffer, 1, &r);
+            CB(cmd)->device->Vkd().vkCmdCopyBuffer(CB(cmd)->cmd, Buf(src)->buffer, Buf(dst)->buffer, 1, &r);
         }
 
         VkBufferImageCopy MakeBufferImageCopy(const VriBufferTextureCopyDesc* r, const TextureVK* tex)
@@ -1698,13 +1706,13 @@ namespace vri::vk
             c.extent = {source.width ? source.width : std::max(s->extent.width >> source.mip, 1u),
                         source.height ? source.height : std::max(s->extent.height >> source.mip, 1u),
                         source.depth ? source.depth : std::max(s->extent.depth >> source.mip, 1u)};
-            vkCmdCopyImage(CB(cmd)->cmd,
-                           s->image,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           d->image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1,
-                           &c);
+            CB(cmd)->device->Vkd().vkCmdCopyImage(CB(cmd)->cmd,
+                                                  s->image,
+                                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                  d->image,
+                                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                  1,
+                                                  &c);
         }
 
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
@@ -1714,7 +1722,7 @@ namespace vri::vk
         {
             const TextureVK*  t = reinterpret_cast<const TextureVK*>(dst);
             VkBufferImageCopy c = MakeBufferImageCopy(region, t);
-            vkCmdCopyBufferToImage(
+            CB(cmd)->device->Vkd().vkCmdCopyBufferToImage(
                 CB(cmd)->cmd, Buf(src)->buffer, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
         }
 
@@ -1725,7 +1733,7 @@ namespace vri::vk
         {
             const TextureVK*  t = reinterpret_cast<const TextureVK*>(src);
             VkBufferImageCopy c = MakeBufferImageCopy(region, t);
-            vkCmdCopyImageToBuffer(
+            CB(cmd)->device->Vkd().vkCmdCopyImageToBuffer(
                 CB(cmd)->cmd, t->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Buf(dst)->buffer, 1, &c);
         }
 
@@ -1811,7 +1819,7 @@ namespace vri::vk
         {
             if (!queue)
                 return VriResult_InvalidArgument;
-            const VkResult result = vkQueueWaitIdle(Q(queue)->queue);
+            const VkResult result = Q(queue)->device->Vkd().vkQueueWaitIdle(Q(queue)->queue);
             if (result == VK_SUCCESS)
                 return VriResult_Success;
             return result == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
@@ -1820,7 +1828,7 @@ namespace vri::vk
         {
             if (!device)
                 return VriResult_InvalidArgument;
-            const VkResult result = vkDeviceWaitIdle(Dev(device)->Device());
+            const VkResult result = Dev(device)->Vkd().vkDeviceWaitIdle(Dev(device)->Device());
             if (result == VK_SUCCESS)
                 return VriResult_Success;
             return result == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;

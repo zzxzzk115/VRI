@@ -217,7 +217,7 @@ namespace vri::vk
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_PROPERTIES_NV};
         VkPhysicalDeviceProperties2 query {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         query.pNext = &properties;
-        vkGetPhysicalDeviceProperties2(m_physicalDevice, &query);
+        m_vki.vkGetPhysicalDeviceProperties2(m_physicalDevice, &query);
         m_cooperativeVectorDeviceProperties.maxCooperativeVectorComponents = properties.maxCooperativeVectorComponents;
         for (uint32_t stage = VriShaderStage_Vertex; stage <= VriShaderStage_Task; stage <<= 1)
         {

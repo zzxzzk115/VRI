@@ -91,7 +91,7 @@ namespace vri::vk
             ci.hinstance = window.handle.win32.hinstance ? static_cast<HINSTANCE>(window.handle.win32.hinstance) :
                                                            GetModuleHandleW(nullptr);
             ci.hwnd      = static_cast<HWND>(window.handle.win32.hwnd);
-            if (vkCreateWin32SurfaceKHR(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
+            if (d->Vki().vkCreateWin32SurfaceKHR(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
                 return VK_NULL_HANDLE;
 #elif defined(__APPLE__)
             // MoltenVK: cocoa.layer is a CAMetalLayer* (the SDL3/GLFW integration headers
@@ -100,7 +100,7 @@ namespace vri::vk
                 return VK_NULL_HANDLE;
             VkMetalSurfaceCreateInfoEXT ci = {VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT};
             ci.pLayer                      = static_cast<const CAMetalLayer*>(window.handle.cocoa.layer);
-            if (vkCreateMetalSurfaceEXT(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
+            if (d->Vki().vkCreateMetalSurfaceEXT(d->Instance(), &ci, nullptr, &surface) != VK_SUCCESS)
                 return VK_NULL_HANDLE;
 #elif defined(__ANDROID__)
             if (window.type != VriWindowSystem_Android || window.handle.android.window == nullptr)
@@ -152,13 +152,13 @@ namespace vri::vk
             VkPhysicalDevice phys = d->PhysicalDevice();
 
             VkSurfaceCapabilitiesKHR caps = {};
-            vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, sc->surface, &caps);
+            d->Vki().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, sc->surface, &caps);
 
             // format
             uint32_t formatCount = 0;
-            vkGetPhysicalDeviceSurfaceFormatsKHR(phys, sc->surface, &formatCount, nullptr);
+            d->Vki().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, sc->surface, &formatCount, nullptr);
             std::vector<VkSurfaceFormatKHR> formats(formatCount);
-            vkGetPhysicalDeviceSurfaceFormatsKHR(phys, sc->surface, &formatCount, formats.data());
+            d->Vki().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, sc->surface, &formatCount, formats.data());
 
             const VkFormat     wanted = ToVkFormat(format);
             VkSurfaceFormatKHR chosen =
@@ -175,9 +175,9 @@ namespace vri::vk
             // present mode: map the requested VriPresentMode -> VkPresentModeKHR, falling back to FIFO
             // (the only mode guaranteed present) with a warning if the surface lacks the requested one.
             uint32_t modeCount = 0;
-            vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, nullptr);
+            d->Vki().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, nullptr);
             std::vector<VkPresentModeKHR> modes(modeCount);
-            vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, modes.data());
+            d->Vki().vkGetPhysicalDeviceSurfacePresentModesKHR(phys, sc->surface, &modeCount, modes.data());
             const auto supported = [&](VkPresentModeKHR m) {
                 for (VkPresentModeKHR x : modes)
                     if (x == m)
@@ -253,11 +253,11 @@ namespace vri::vk
             ci.oldSwapchain   = sc->swapchain;
 
             VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
-            if (vkCreateSwapchainKHR(d->Device(), &ci, nullptr, &newSwapchain) != VK_SUCCESS)
+            if (d->Vkd().vkCreateSwapchainKHR(d->Device(), &ci, nullptr, &newSwapchain) != VK_SUCCESS)
                 return VriResult_Failure;
 
             if (sc->swapchain)
-                vkDestroySwapchainKHR(d->Device(), sc->swapchain, nullptr);
+                d->Vkd().vkDestroySwapchainKHR(d->Device(), sc->swapchain, nullptr);
             DestroyTextures(sc);
 
             sc->swapchain = newSwapchain;
@@ -267,9 +267,9 @@ namespace vri::vk
             sc->presentMode = mode;
 
             uint32_t count = 0;
-            vkGetSwapchainImagesKHR(d->Device(), sc->swapchain, &count, nullptr);
+            d->Vkd().vkGetSwapchainImagesKHR(d->Device(), sc->swapchain, &count, nullptr);
             std::vector<VkImage> images(count);
-            vkGetSwapchainImagesKHR(d->Device(), sc->swapchain, &count, images.data());
+            d->Vkd().vkGetSwapchainImagesKHR(d->Device(), sc->swapchain, &count, images.data());
 
             sc->textures.reserve(count);
             for (VkImage image : images)
@@ -312,24 +312,24 @@ namespace vri::vk
             }
 
             VkBool32 supported = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(
+            d->Vki().vkGetPhysicalDeviceSurfaceSupportKHR(
                 d->PhysicalDevice(), Q(desc->queue)->familyIndex, sc->surface, &supported);
             if (!supported)
             {
-                vkDestroySurfaceKHR(d->Instance(), sc->surface, nullptr);
+                d->Vki().vkDestroySurfaceKHR(d->Instance(), sc->surface, nullptr);
                 delete sc;
                 return VriResult_Unsupported;
             }
 
             VkFenceCreateInfo fci = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            vkCreateFence(d->Device(), &fci, nullptr, &sc->acquireFence);
+            d->Vkd().vkCreateFence(d->Device(), &fci, nullptr, &sc->acquireFence);
 
             VriResult r =
                 BuildSwapchain(sc, desc->width, desc->height, desc->format, desc->textureNum, desc->presentMode);
             if (r != VriResult_Success)
             {
-                vkDestroyFence(d->Device(), sc->acquireFence, nullptr);
-                vkDestroySurfaceKHR(d->Instance(), sc->surface, nullptr);
+                d->Vkd().vkDestroyFence(d->Device(), sc->acquireFence, nullptr);
+                d->Vki().vkDestroySurfaceKHR(d->Instance(), sc->surface, nullptr);
                 delete sc;
                 return r;
             }
@@ -344,14 +344,14 @@ namespace vri::vk
                 return;
             SwapChainVK* sc  = SC(swapChain);
             VkDevice     dev = sc->device->Device();
-            vkDeviceWaitIdle(dev);
+            sc->device->Vkd().vkDeviceWaitIdle(dev);
             DestroyTextures(sc);
             if (sc->swapchain)
-                vkDestroySwapchainKHR(dev, sc->swapchain, nullptr);
+                sc->device->Vkd().vkDestroySwapchainKHR(dev, sc->swapchain, nullptr);
             if (sc->acquireFence)
-                vkDestroyFence(dev, sc->acquireFence, nullptr);
+                sc->device->Vkd().vkDestroyFence(dev, sc->acquireFence, nullptr);
             if (sc->surface)
-                vkDestroySurfaceKHR(sc->device->Instance(), sc->surface, nullptr);
+                sc->device->Vki().vkDestroySurfaceKHR(sc->device->Instance(), sc->surface, nullptr);
             delete sc;
         }
 
@@ -378,17 +378,17 @@ namespace vri::vk
         {
             SwapChainVK* sc  = SC(swapChain);
             VkDevice     dev = sc->device->Device();
-            vkResetFences(dev, 1, &sc->acquireFence);
+            sc->device->Vkd().vkResetFences(dev, 1, &sc->acquireFence);
 
             uint32_t index = 0;
-            VkResult r =
-                vkAcquireNextImageKHR(dev, sc->swapchain, UINT64_MAX, VK_NULL_HANDLE, sc->acquireFence, &index);
+            VkResult r     = sc->device->Vkd().vkAcquireNextImageKHR(
+                dev, sc->swapchain, UINT64_MAX, VK_NULL_HANDLE, sc->acquireFence, &index);
             if (r == VK_ERROR_OUT_OF_DATE_KHR)
                 return VriResult_OutOfDate;
             if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR)
                 return VriResult_Failure;
 
-            vkWaitForFences(dev, 1, &sc->acquireFence, VK_TRUE, UINT64_MAX);
+            sc->device->Vkd().vkWaitForFences(dev, 1, &sc->acquireFence, VK_TRUE, UINT64_MAX);
             sc->currentIndex = index;
             *outIndex        = index;
             return VriResult_Success;
@@ -401,7 +401,7 @@ namespace vri::vk
             pi.swapchainCount   = 1;
             pi.pSwapchains      = &sc->swapchain;
             pi.pImageIndices    = &sc->currentIndex;
-            VkResult r          = vkQueuePresentKHR(sc->presentQueue, &pi);
+            VkResult r          = sc->device->Vkd().vkQueuePresentKHR(sc->presentQueue, &pi);
             if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
                 return VriResult_OutOfDate;
             return r == VK_SUCCESS ? VriResult_Success : VriResult_Failure;
@@ -410,7 +410,7 @@ namespace vri::vk
         VriResult VRI_CALL Resize(VriSwapChain* swapChain, uint32_t width, uint32_t height)
         {
             SwapChainVK* sc = SC(swapChain);
-            vkDeviceWaitIdle(sc->device->Device());
+            sc->device->Vkd().vkDeviceWaitIdle(sc->device->Device());
             return BuildSwapchain(
                 sc, width, height, sc->requestedFormat, sc->requestedTextureNum, sc->requestedPresentMode);
         }

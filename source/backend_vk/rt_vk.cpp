@@ -32,7 +32,7 @@ namespace vri::vk
         {
             VkBufferDeviceAddressInfo i = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
             i.buffer                    = b;
-            return vkGetBufferDeviceAddress(d->Device(), &i);
+            return d->Vkd().vkGetBufferDeviceAddress(d->Device(), &i);
         }
 
         bool MakeBuffer(DeviceVK* d, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buf, VmaAllocation& alloc)
@@ -193,7 +193,7 @@ namespace vri::vk
                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
             VkPhysicalDeviceProperties2 p2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
             p2.pNext                       = &asProps;
-            vkGetPhysicalDeviceProperties2(d->PhysicalDevice(), &p2);
+            d->Vki().vkGetPhysicalDeviceProperties2(d->PhysicalDevice(), &p2);
             const VkDeviceSize scratchAlign = asProps.minAccelerationStructureScratchOffsetAlignment;
 
             AccelerationStructureVK* a = new AccelerationStructureVK {};
@@ -264,7 +264,7 @@ namespace vri::vk
             AccelerationStructureVK* a = AS(as);
             a->device->Objects().Untrack(as);
             if (a->compactedSizePool)
-                vkDestroyQueryPool(a->device->Device(), a->compactedSizePool, nullptr);
+                a->device->Vkd().vkDestroyQueryPool(a->device->Device(), a->compactedSizePool, nullptr);
             a->device->Ext().DestroyAccelerationStructure(a->device->Device(), a->as, nullptr);
             vmaDestroyBuffer(a->device->Allocator(), a->buffer, a->bufferAlloc);
             if (a->scratch != VK_NULL_HANDLE)
@@ -305,7 +305,7 @@ namespace vri::vk
                 VkShaderModuleCreateInfo mi = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
                 mi.codeSize                 = s.bytecodeSize;
                 mi.pCode                    = static_cast<const uint32_t*>(s.bytecode);
-                vkCreateShaderModule(dev, &mi, nullptr, &modules[i]);
+                d->Vkd().vkCreateShaderModule(dev, &mi, nullptr, &modules[i]);
                 stages[i].stage  = ToVkShaderStage(s.stage);
                 stages[i].module = modules[i];
                 stages[i].pName  = s.entryPointName ? s.entryPointName : "main";
@@ -318,7 +318,7 @@ namespace vri::vk
             {
                 for (VkShaderModule m : modules)
                     if (m)
-                        vkDestroyShaderModule(dev, m, nullptr);
+                        d->Vkd().vkDestroyShaderModule(dev, m, nullptr);
                 return VriResult_Failure;
             }
 
@@ -357,7 +357,7 @@ namespace vri::vk
             const VkResult vr =
                 d->Ext().CreateRayTracingPipelines(dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline);
             for (VkShaderModule m : modules)
-                vkDestroyShaderModule(dev, m, nullptr);
+                d->Vkd().vkDestroyShaderModule(dev, m, nullptr);
             if (vr != VK_SUCCESS)
                 return VriResult_Failure;
 
@@ -414,16 +414,16 @@ namespace vri::vk
             mb.srcAccessMask   = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
             mb.dstAccessMask =
                 VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-            vkCmdPipelineBarrier(c->cmd,
-                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                 0,
-                                 1,
-                                 &mb,
-                                 0,
-                                 nullptr,
-                                 0,
-                                 nullptr);
+            c->device->Vkd().vkCmdPipelineBarrier(c->cmd,
+                                                  VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                                                  VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                                  0,
+                                                  1,
+                                                  &mb,
+                                                  0,
+                                                  nullptr,
+                                                  0,
+                                                  nullptr);
         }
 
         void VRI_CALL CmdTraceRays(VriCommandBuffer* cmd, const VriDispatchRaysDesc* desc)
@@ -460,19 +460,19 @@ namespace vri::vk
                 VkQueryPoolCreateInfo qci = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
                 qci.queryType             = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
                 qci.queryCount            = 1;
-                vkCreateQueryPool(d->Device(), &qci, nullptr, &a->compactedSizePool);
+                d->Vkd().vkCreateQueryPool(d->Device(), &qci, nullptr, &a->compactedSizePool);
             }
-            vkCmdResetQueryPool(cb, a->compactedSizePool, 0, 1);
+            CB(cmd)->device->Vkd().vkCmdResetQueryPool(cb, a->compactedSizePool, 0, 1);
             d->Ext().CmdWriteAccelerationStructuresProperties(
                 cb, 1, &a->as, VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, a->compactedSizePool, 0);
-            vkCmdCopyQueryPoolResults(cb,
-                                      a->compactedSizePool,
-                                      0,
-                                      1,
-                                      BUF(dstBuffer)->buffer,
-                                      dstOffset,
-                                      sizeof(uint64_t),
-                                      VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+            CB(cmd)->device->Vkd().vkCmdCopyQueryPoolResults(cb,
+                                                             a->compactedSizePool,
+                                                             0,
+                                                             1,
+                                                             BUF(dstBuffer)->buffer,
+                                                             dstOffset,
+                                                             sizeof(uint64_t),
+                                                             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
         }
 
         VriResult VRI_CALL CreateAccelerationStructureCompacted(VriDevice*                   device,

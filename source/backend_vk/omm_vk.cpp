@@ -22,7 +22,7 @@ namespace vri::vk
         {
             VkBufferDeviceAddressInfo i = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
             i.buffer                    = b;
-            return vkGetBufferDeviceAddress(d->Device(), &i);
+            return d->Vkd().vkGetBufferDeviceAddress(d->Device(), &i);
         }
 
         bool MakeBuffer(DeviceVK* d, VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buf, VmaAllocation& alloc)
@@ -63,7 +63,7 @@ namespace vri::vk
                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
             VkPhysicalDeviceProperties2 p2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
             p2.pNext                       = &asProps;
-            vkGetPhysicalDeviceProperties2(d->PhysicalDevice(), &p2);
+            d->Vki().vkGetPhysicalDeviceProperties2(d->PhysicalDevice(), &p2);
             const VkDeviceSize scratchAlign = asProps.minAccelerationStructureScratchOffsetAlignment;
 
             MicromapVK* m       = new MicromapVK {};
