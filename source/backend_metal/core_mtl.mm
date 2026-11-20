@@ -462,6 +462,15 @@ namespace vri::mtl
 
         void VRI_CALL UnmapBuffer(VriBuffer*) {} // Shared storage is coherent on Apple Silicon
 
+        VriResult VRI_CALL MapBufferAsync(VriBuffer*              buffer,
+                                          uint64_t                offset,
+                                          uint64_t                size,
+                                          VriBufferMappedCallback callback,
+                                          void*                   userData)
+        {
+            return core::MapBufferNow(MapBuffer, buffer, offset, size, callback, userData);
+        }
+
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer* buffer)
         {
             const BufferMTL* b = reinterpret_cast<const BufferMTL*>(buffer);
@@ -2216,6 +2225,7 @@ namespace vri::mtl
             t.GetFenceValue = GetFenceValue;
             t.Wait = Wait;
             t.WaitForFence                = WaitForFence;
+            t.MapBufferAsync              = MapBufferAsync;
             t.CmdBeginRendering = CmdBeginRendering;
             t.CmdEndRendering = CmdEndRendering;
             t.CmdSetViewports = CmdSetViewports;

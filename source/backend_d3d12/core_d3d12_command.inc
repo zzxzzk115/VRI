@@ -247,6 +247,38 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*               cmd,
     UINT64                             rowBytes = 0, total = 0;
     c->device->Device()->GetCopyableFootprints(
         &rd, 0, 1, region ? region->bufferOffset : 0, &fp, &rows, &rowBytes, &total);
+    // The buffer layout the caller asked for: rows bufferRowLength texels apart, slices
+    // bufferImageHeight rows apart. Zero keeps the tight layout at D3D12's 256-byte row pitch.
+    const UINT block = t->texelSize == 0 ? 4 : 1; // compressed formats copy 4x4 blocks
+    if (region && region->bufferRowLength)
+    {
+        const UINT64 blockBytes = rowBytes / ((fp.Footprint.Width + block - 1) / block);
+        const UINT64 pitch      = (UINT64(region->bufferRowLength) + block - 1) / block * blockBytes;
+        if (region->bufferRowLength < fp.Footprint.Width || region->bufferRowLength % block ||
+            pitch % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT || pitch > UINT32_MAX)
+        {
+            c->device->ReportError("texture-readback bufferRowLength must cover the region and give a row pitch "
+                                   "that is a multiple of 256 bytes");
+            return;
+        }
+        fp.Footprint.RowPitch = static_cast<UINT>(pitch);
+    }
+    if (region && region->bufferImageHeight)
+    {
+        if (region->bufferImageHeight < fp.Footprint.Height || region->bufferImageHeight % block)
+        {
+            c->device->ReportError("texture-readback bufferImageHeight must cover the region");
+            return;
+        }
+        fp.Footprint.Height = region->bufferImageHeight;
+    }
+    const UINT64 sliceBytes = UINT64(fp.Footprint.RowPitch) * ((fp.Footprint.Height + block - 1) / block);
+    const UINT64 needed = sliceBytes * (fp.Footprint.Depth - 1) + UINT64(fp.Footprint.RowPitch) * (rows - 1) + rowBytes;
+    if (fp.Offset > b->size || needed > b->size - fp.Offset)
+    {
+        c->device->ReportError("texture-readback destination buffer too small");
+        return;
+    }
     const bool whole = box.left == 0 && box.top == 0 && box.front == 0 && box.right == mipWidth &&
                        box.bottom == mipHeight && box.back == mipDepth;
     Transition(c,

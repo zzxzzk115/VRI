@@ -151,6 +151,14 @@ void* VRI_CALL MapBuffer(VriBuffer* buffer, uint64_t offset, uint64_t)
     return b->mapped ? static_cast<char*>(b->mapped) + offset : nullptr;
 }
 void VRI_CALL     UnmapBuffer(VriBuffer*) {} // persistent mapping; nothing to do
+VriResult VRI_CALL MapBufferAsync(VriBuffer*              buffer,
+                                  uint64_t                offset,
+                                  uint64_t                size,
+                                  VriBufferMappedCallback callback,
+                                  void*                   userData)
+{
+    return core::MapBufferNow(MapBuffer, buffer, offset, size, callback, userData);
+}
 uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
