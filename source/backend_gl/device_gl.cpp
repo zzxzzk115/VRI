@@ -20,12 +20,58 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 
 namespace vri::gl
 {
-    // OVR_multiview entry point (declared in gl_loader.h); loaded from the platform proc loader at
-    // device init, null when the extension is absent.
+    // OVR_multiview entry point (declared in gl_loader.h); loaded with glad by the first device, null
+    // when the extension is absent.
     PFN_FramebufferTextureMultiviewOVR g_FramebufferTextureMultiviewOVR = nullptr;
+
+#if !defined(VRI_GL_ES_HEADERS)
+    namespace
+    {
+        // glad keeps one process-wide set of GL entry points, which only the current context may call
+        // through. A WGL pointer is valid for contexts of the driver it came from, so a process can
+        // serve one GL driver: the first device loads the entry points (once, so no later device
+        // rewrites them while another thread calls them), and each later device checks that its own
+        // context resolves the same ones. Returns null on success, else why the context cannot be used.
+        const char* LoadGLFunctions(GLADloadproc load)
+        {
+            static std::mutex mutex;
+            static bool       loaded = false;
+            std::lock_guard   lock(mutex);
+            if (!loaded)
+            {
+                if (!gladLoadGLLoader(load))
+                    return "gladLoadGLLoader failed";
+                g_FramebufferTextureMultiviewOVR = reinterpret_cast<PFN_FramebufferTextureMultiviewOVR>(
+                    load("glFramebufferTextureMultiviewOVR")); // OVR_multiview (null if absent)
+                loaded = true;
+                return nullptr;
+            }
+            // Driver entry points (not opengl32/libGL exports) from each part of the command path.
+            const struct
+            {
+                const char* name;
+                void*       loaded;
+            } probes[] = {
+                {"glCreateShader", reinterpret_cast<void*>(glCreateShader)},
+                {"glGenBuffers", reinterpret_cast<void*>(glGenBuffers)},
+                {"glBindFramebuffer", reinterpret_cast<void*>(glBindFramebuffer)},
+                {"glBlitFramebuffer", reinterpret_cast<void*>(glBlitFramebuffer)},
+                {"glFenceSync", reinterpret_cast<void*>(glFenceSync)},
+            };
+            for (const auto& probe : probes)
+            {
+                if (load(probe.name) != probe.loaded)
+                    return "this context belongs to a different GL driver than the process's first GL device; "
+                           "one process can drive one GL driver";
+            }
+            return nullptr;
+        }
+    } // namespace
+#endif
 
     DeviceGL::~DeviceGL()
     {
@@ -344,13 +390,11 @@ namespace vri::gl
         // Desktop GL via EGL: the command path uses real GL entry points, so load glad through
         // eglGetProcAddress (EGL_KHR_get_all_proc_addresses returns core functions too). The
         // native-ES build links libGLESv2 directly and needs no loader.
-        if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(eglGetProcAddress)))
+        if (const char* failure = LoadGLFunctions(reinterpret_cast<GLADloadproc>(eglGetProcAddress)))
         {
-            ReportError("EGL: gladLoadGLLoader failed");
+            ReportError(failure);
             return false;
         }
-        g_FramebufferTextureMultiviewOVR = reinterpret_cast<PFN_FramebufferTextureMultiviewOVR>(
-            eglGetProcAddress("glFramebufferTextureMultiviewOVR")); // OVR_multiview (null if absent)
 #endif
         return true;
     }
@@ -455,13 +499,11 @@ namespace vri::gl
 #if !defined(__EMSCRIPTEN__)
         // On Emscripten the GLES3/WebGL2 symbols are provided directly; only native
         // platforms need a runtime loader.
-        if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
+        if (const char* failure = LoadGLFunctions(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
         {
-            ReportError("gladLoadGLLoader failed");
+            ReportError(failure);
             return VriResult_Failure;
         }
-        g_FramebufferTextureMultiviewOVR = reinterpret_cast<PFN_FramebufferTextureMultiviewOVR>(
-            glfwGetProcAddress("glFramebufferTextureMultiviewOVR")); // OVR_multiview (null if absent)
 #endif
 #endif // !VRI_GL_EGL (GLFW context bring-up)
 

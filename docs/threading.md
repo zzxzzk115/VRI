@@ -64,6 +64,10 @@ context.
   command stream, so multi-threaded recording is not available on this backend.
 - If you must drive GL from a different thread, you have to move the context there yourself (make it
   current on the new thread, clear it on the old). That is outside VRI's scope.
+- One process drives one GL driver. The GL entry points are loaded once, by the first GL device, and
+  shared by every context; a later device whose context resolves them from another driver (a WGL
+  context on a different GPU's driver, for instance) fails to create with an error instead of calling
+  into the first driver.
 
 This is the one backend where the model is *stricter* than the general contract above.
 
