@@ -16,8 +16,10 @@ target("vri-webgl-triangle")
     -- Emit a .html (+ .js + .wasm) so emrun can host it; --emrun pipes the page's
     -- stdout/exit code back to the terminal for a headless grade. WebGL2 + GLFW3
     -- port flags arrive transitively from the vri target (public ldflags).
+    -- ASYNCIFY: the suite waits on fences without a bound, and a WebGL sync object
+    -- signals only once the page yields to the browser.
     set_extension(".html")
-    add_ldflags("-sEXIT_RUNTIME=1", "-sALLOW_MEMORY_GROWTH=1", "--emrun", {force = true})
+    add_ldflags("-sEXIT_RUNTIME=1", "-sALLOW_MEMORY_GROWTH=1", "-sASYNCIFY", "--emrun", {force = true})
     -- Emscripten 6.0.2 flipped GROWABLE_ARRAYBUFFERS to default-on under
     -- ALLOW_MEMORY_GROWTH; on Chrome 149/150 that path breaks this page (hang
     -- after resources-created). Opt out until the resizable-ArrayBuffer path is
