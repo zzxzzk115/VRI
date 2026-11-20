@@ -232,6 +232,14 @@ void VRI_CALL UnmapBuffer(VriBuffer* buffer)
     glUnmapBuffer(b->target);
     glBindBuffer(b->target, 0);
 }
+VriResult VRI_CALL MapBufferAsync(VriBuffer*              buffer,
+                                  uint64_t                offset,
+                                  uint64_t                size,
+                                  VriBufferMappedCallback callback,
+                                  void*                   userData)
+{
+    return core::MapBufferNow(MapBuffer, buffer, offset, size, callback, userData);
+}
 uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
 // GL 4.1 (macOS) lacks immutable storage (glTexStorage*, GL 4.2+; always present on

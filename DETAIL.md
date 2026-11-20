@@ -74,6 +74,9 @@ commands already recorded. WebGPU publishes completed values from queue completi
 order. Its logical queue types share one native queue; dependency waits are host waits, not independent GPU
 queues. WebGL/WebGPU host waits yield to the browser through Emscripten Asyncify; in a program linked
 without it, an unbounded wait reports an error and a bounded one returns `VriResult_Timeout`.
+`MapBufferAsync` reads a browser WebGPU buffer back without a wait: the browser maps it once the work already
+submitted that uses it has finished, and the callback runs from the event loop. Every other backend maps on
+the calling thread and calls back before returning, so wait for the work (a fence) first, as for `MapBuffer`.
 
 `UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
 are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during

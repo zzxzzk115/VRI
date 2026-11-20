@@ -19,6 +19,7 @@ target("vri-tests")
     add_files("test_main.cpp")
     add_files("test_api_usage.cpp")
     add_files("test_device_async.cpp")       -- vriCreateDeviceAsync off the browser
+    add_files("test_map_async_xbackend.cpp") -- MapBufferAsync off the browser
     add_files("test_validation_state_xbackend.cpp") -- VriDeviceDesc::nativeValidation and its warning
     add_files("test_coordinates.cpp")
     add_files("test_coordinate_rendering.cpp")
