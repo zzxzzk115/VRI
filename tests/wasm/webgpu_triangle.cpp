@@ -8,6 +8,7 @@
 // Run:   emrun (headless Chrome with --enable-unsafe-webgpu) over the .html
 
 #include "tests/buffer_texture_copy_probe.h"
+#include "tests/compressed_format_probe.h"
 #include "tests/map_async_probe.h"
 #include "tests/wgpu_completion_probe.h"
 
@@ -49,6 +50,28 @@ namespace
         }
         vriDestroyDevice(device);
         return failure == 0;
+    }
+
+    // The sRGB and signed block-compressed formats the browser grants survive an upload/readback round trip.
+    bool CompressedProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        bool             ok = vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success;
+        for (const vri::test::CompressedFormat& f : vri::test::kAddedCompressedFormats)
+        {
+            if (!ok || (c.GetFormatSupport(device, f.format) & VriFormatSupport_Texture) == 0)
+                continue;
+            const int failure = vri::test::CheckCompressedRoundTrip(device, c, f);
+            std::printf("VRI_WEBGPU_STEP: %s round trip %s\n", f.name, failure ? "FAILED" : "ok");
+            ok = failure == 0;
+        }
+        vriDestroyDevice(device);
+        return ok;
     }
 
     // MapBufferAsync maps a GPU buffer from the browser event loop: the callback runs after the call
@@ -458,16 +481,19 @@ int main()
     std::fflush(stdout);
     const bool completion = CompletionProbe();
     const bool mapAsync   = MapAsyncProbe();
+    const bool compressed = CompressedProbe();
     const bool copies     = CopyProbe();
-    const bool pass       = ran && centerRed && compute && completion && mapAsync && copies;
-    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d copies=%d)\n",
-                pass ? "PASS" : "FAIL",
-                ran ? 1 : 0,
-                centerRed ? 1 : 0,
-                compute ? 1 : 0,
-                completion ? 1 : 0,
-                mapAsync ? 1 : 0,
-                copies ? 1 : 0);
+    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && copies;
+    std::printf(
+        "VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d copies=%d)\n",
+        pass ? "PASS" : "FAIL",
+        ran ? 1 : 0,
+        centerRed ? 1 : 0,
+        compute ? 1 : 0,
+        completion ? 1 : 0,
+        mapAsync ? 1 : 0,
+        compressed ? 1 : 0,
+        copies ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);

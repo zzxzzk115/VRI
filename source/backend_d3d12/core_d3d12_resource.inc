@@ -308,73 +308,12 @@ VriResult VRI_CALL CreateTextureView(VriDevice* device, const VriTextureViewDesc
     v->mipNum    = desc->mipNum ? desc->mipNum : v->texture->mipNum - desc->baseMip;
     v->baseLayer = desc->baseLayer;
     v->layerNum  = desc->layerNum ? desc->layerNum : v->texture->layerNum - desc->baseLayer;
-    // The view records the texture; it serves as an RTV (color attachment) and/or an
-    // SRV source (sampling - the SRV is created into a descriptor set's heap slot at
-    // UpdateDescriptorRanges). Pre-create the RTV only for RT-capable textures.
+    // The view records the texture; it serves as an attachment (its RTV/DSV is made the first time it
+    // is one, DeviceD3D12::AttachmentView) and/or an SRV source (the SRV is created into a descriptor
+    // set's heap slot at UpdateDescriptorRanges).
     v->kind       = DescriptorD3D12::Kind::TextureRtv;
     v->cpuIsDepth = v->texture->isDepthStencil;
-    if ((v->texture->isDepthStencil || v->texture->isRenderTarget) && !d->AllocateAttachmentView(v->cpuIsDepth, v->cpu))
-    {
-        d->ReportError(v->cpuIsDepth ? "CreateTextureView: every depth-stencil-view descriptor is held by a live view" :
-                                       "CreateTextureView: every render-target-view descriptor is held by a live view");
-        delete v;
-        *out = nullptr;
-        return VriResult_OutOfMemory;
-    }
-    if (v->texture->isDepthStencil) // depth-stencil view (used as the depth attachment)
-    {
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
-        dsv.Format = v->texture->dsvFormat; // typed depth (resource may be TYPELESS for sampling)
-        if (v->texture->layerNum > 1)       // a slice of an array: Texture2D views address slice 0 only
-        {
-            dsv.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-            dsv.Texture2DArray.MipSlice        = desc->baseMip;
-            dsv.Texture2DArray.FirstArraySlice = v->baseLayer;
-            dsv.Texture2DArray.ArraySize       = v->layerNum;
-        }
-        else
-        {
-            dsv.ViewDimension      = D3D12_DSV_DIMENSION_TEXTURE2D;
-            dsv.Texture2D.MipSlice = desc->baseMip;
-        }
-        d->Device()->CreateDepthStencilView(v->texture->resource.Get(), &dsv, v->cpu);
-    }
-    else if (v->texture->isRenderTarget)
-    {
-        D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
-        rtv.Format                        = v->texture->format;
-        // Array RTV for a layered target (viewType 2DArray, or > 1 layer): multiview
-        // (ViewInstancing) targets one array slice per view, so the RTV must span them. A view of
-        // one slice of an array is an array RTV too: Texture2D RTVs address slice 0 only.
-        uint32_t layers = desc->layerNum;
-        if (layers == 0)
-            layers = v->texture->layerNum > desc->baseLayer ? v->texture->layerNum - desc->baseLayer : 1;
-        const bool array = desc->viewType == VriTextureViewType_2DArray || layers > 1 || v->texture->layerNum > 1;
-        if (v->texture->sampleCount > 1)
-        {
-            if (array)
-            {
-                rtv.ViewDimension                    = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY;
-                rtv.Texture2DMSArray.FirstArraySlice = desc->baseLayer;
-                rtv.Texture2DMSArray.ArraySize       = layers;
-            }
-            else
-                rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
-        }
-        else if (array)
-        {
-            rtv.ViewDimension                  = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-            rtv.Texture2DArray.MipSlice        = desc->baseMip;
-            rtv.Texture2DArray.FirstArraySlice = desc->baseLayer;
-            rtv.Texture2DArray.ArraySize       = layers;
-        }
-        else
-        {
-            rtv.ViewDimension      = D3D12_RTV_DIMENSION_TEXTURE2D;
-            rtv.Texture2D.MipSlice = desc->baseMip;
-        }
-        d->Device()->CreateRenderTargetView(v->texture->resource.Get(), &rtv, v->cpu);
-    }
+
     *out = ToHandle(v);
     return VriResult_Success;
 }
