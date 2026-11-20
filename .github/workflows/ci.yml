@@ -57,6 +57,7 @@ jobs:
           sudo apt-get install -y \
             xorg-dev libgl1-mesa-dev libglu1-mesa-dev \
             mesa-vulkan-drivers libgl1-mesa-dri \
+            vulkan-validationlayers \
             xvfb
 
       - name: Select installed lavapipe ICD (Linux)

@@ -156,10 +156,11 @@ namespace vri::gl
         uint32_t                                       m_shaderVersion = 420;   // GLSL #version for SPIRV-Cross
         GlFeatures                                     m_features      = {};    // detected desktop-GL capability tiers
         std::unordered_map<FboKey, GLuint, FboKeyHash> m_fboCache;              // render-pass FBOs by attachment set
-        VriGraphicsAPI                                 m_api      = VriGraphicsAPI_OpenGL;
-        QueueGL                                        m_queue    = {};
-        VriDeviceDesc                                  m_desc     = {};
-        VriCallbackInterface                           m_callback = {};
+        VriGraphicsAPI                                 m_api         = VriGraphicsAPI_OpenGL;
+        QueueGL                                        m_queue       = {};
+        VriDeviceDesc                                  m_desc        = {};
+        VriCallbackInterface                           m_callback    = {};
+        bool                                           m_debugOutput = false; // KHR_debug reaches the app callback
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

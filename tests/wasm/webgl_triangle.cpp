@@ -25,6 +25,7 @@
 #include "shaders/tests/triangle_vbuf_spv.h" // g_triangleVbufSpv (vertex buffer + indexed draw)
 
 #include <cstdlib>
+#include <cstring>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -2154,6 +2155,31 @@ namespace
         return failure == 0;
     }
 
+    // WebGL has no debug output: validation asked for is reported missing, once, and the device says so.
+    void VRI_CALL CountValidationWarning(void* userArg, VriMessageSeverity severity, const char* message)
+    {
+        if (severity == VriMessageSeverity_Warning && std::strstr(message, "validation was requested"))
+            ++*static_cast<int*>(userArg);
+    }
+    bool ValidationStateProbe()
+    {
+        int                   warnings  = 0;
+        VriCallbackInterface  callbacks = {&warnings, CountValidationWarning};
+        VriDeviceCreationDesc dc        = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI                  = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation             = VRI_TRUE;
+        dc.callbackInterface            = &callbacks;
+        VriDevice* dev                  = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        const bool       ok = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                        c.GetDeviceDesc(dev)->nativeValidation == VRI_FALSE && warnings == 1;
+        std::printf("VRI_WEBGL_STEP: validation-state warnings=%d\n", warnings);
+        vriDestroyDevice(dev);
+        return ok;
+    }
+
     // A feature this backend does not grant: refused without bestEffort, absent from enabledFeatures with it.
     bool FeatureProbe(VriGraphicsAPI api)
     {
@@ -2585,8 +2611,9 @@ int main()
     const bool ranSecond  = SecondContextProbe(secondOk);
     const bool secondPass = ranSecond && secondOk;
 
-    const bool mapAsyncPass = MapAsyncProbe();
-    const bool featurePass  = FeatureProbe(VriGraphicsAPI_OpenGLES);
+    const bool mapAsyncPass   = MapAsyncProbe();
+    const bool validationPass = ValidationStateProbe();
+    const bool featurePass    = FeatureProbe(VriGraphicsAPI_OpenGLES);
 
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
@@ -2597,14 +2624,17 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && secondPass && mapAsyncPass && featurePass &&
-                      msaaPass && swapPass;
+                      instPass && scissorPass && computeNoPass && secondPass && mapAsyncPass && validationPass &&
+                      featurePass && msaaPass && swapPass;
     std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-                "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | features: %d | msaa: ran=%d edge=%d | "
-                "swapchain: ran=%d red=%d)\n",
-                pass ? "PASS" : "FAIL",
+                "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | validation-state: %d | features: %d | "
+                "msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)
+                ",
+                    pass ?
+                    "PASS" :
+                    "FAIL",
                 ranTri,
                 topRed,
                 botRed,
@@ -2631,6 +2661,7 @@ int main()
                 ranSecond,
                 secondOk,
                 mapAsyncPass,
+                validationPass,
                 featurePass,
                 ranMsaa,
                 msaaEdge,

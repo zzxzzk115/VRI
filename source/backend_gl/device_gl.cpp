@@ -579,8 +579,12 @@ namespace vri::gl
             glEnable(GL_DEBUG_OUTPUT);
             glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
             glDebugMessageCallback(GLDebugCallback, this);
+            m_debugOutput = true;
         }
 #endif
+        if (desc.enableValidation && !m_debugOutput)
+            ReportWarning("validation was requested, but this GL context has no debug output (KHR_debug); the "
+                          "device runs without driver validation messages");
 
         // GL core (and GLES) require a VAO bound for any draw. Non-DSA: gen+bind.
         glGenVertexArrays(1, &m_vao);
@@ -612,8 +616,9 @@ namespace vri::gl
         // Report the resolved profile, not just what was requested: an OpenGL request that
         // ran as ES (native-ES build / WebGL2 / an explicit ES context) reports OpenGLES, so
         // the app can label it honestly ("OpenGL ES" vs "OpenGL" / "WebGL") with the version.
-        m_desc.graphicsAPI = m_es ? VriGraphicsAPI_OpenGLES : VriGraphicsAPI_OpenGL;
-        m_desc.nativeAPI   = m_desc.graphicsAPI;
+        m_desc.graphicsAPI      = m_es ? VriGraphicsAPI_OpenGLES : VriGraphicsAPI_OpenGL;
+        m_desc.nativeAPI        = m_desc.graphicsAPI;
+        m_desc.nativeValidation = m_debugOutput ? VRI_TRUE : VRI_FALSE;
         // No VriFeatureBits feature exists on OpenGL: a best-effort request is granted nothing.
         m_desc.enabledFeatures = 0;
 
