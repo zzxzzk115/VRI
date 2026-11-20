@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "vulkan_vk.h"
 
 #include <vri/ext/vri_ext_swapchain.h>
 #include <vri/vri.h>

@@ -48,8 +48,10 @@ target("vri")
     --   Vulkan -> not wasm   |   D3D12 -> windows   |   GL/WebGPU -> all (incl. wasm)
     if has_config("vri_backend_vulkan") and not is_plat("wasm") then
         add_defines("VRI_BACKEND_VULKAN")
-        add_rules("vulkansdk")
-        add_packages("vulkan-headers", "vulkan-memory-allocator", {public = false})
+        add_packages("vulkan-headers", "vulkan-memory-allocator", "volk", {public = false})
+        if is_plat("linux", "bsd") then
+            add_syslinks("dl", {public = true}) -- volk opens libvulkan.so.1 with dlopen
+        end
         add_files("backend_vk/**.cpp")
         add_includedirs("backend_vk", {public = false})
     end

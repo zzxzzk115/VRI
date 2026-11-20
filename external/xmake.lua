@@ -16,6 +16,11 @@ if has_config("vri_backend_vulkan") and not is_plat("wasm") then
     -- package (v3.2.1) fails to compile against vulkan-headers 1.4.335
     -- (vk::ValidationFailedEXTError was removed in newer vulkan-hpp).
     add_requires("vulkan-memory-allocator v3.3.0")
+    -- volk loads every Vulkan entry point at run time, so VRI never links the loader: Android's
+    -- libvulkan.so exports Vulkan 1.1+ functions only from API 28-33, and a direct link would
+    -- leave a library built for a lower API with undefined symbols there. The implementation is
+    -- compiled into VRI (source/backend_vk/volk_impl.cpp) in the volk:: namespace.
+    add_requires("volk 1.4.335+0", {configs = {header_only = true}})
 end
 
 -- WebGPU backend (prebuilt wgpu-native C API)
