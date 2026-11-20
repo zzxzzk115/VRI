@@ -116,7 +116,7 @@ namespace vri::d3d12
         static constexpr uint32_t kSamplerHeapSize             = 2048;
         QueueD3D12                m_queues[VriQueueType_Count] = {}; // one per VriQueueType (DIRECT / COMPUTE / COPY)
         uint64_t                  m_enabledFeatures            = 0;  // granted VriFeatureBits
-        bool                      m_debugLayer                 = false; // the D3D12 debug layer is enabled
+        bool                      m_debugLayer                 = false; // the D3D12 debug layer validates this device
         VriDeviceDesc             m_desc                       = {};
         VriCallbackInterface      m_callback                   = {};
     };

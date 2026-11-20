@@ -89,7 +89,6 @@ namespace vri::d3d12
             {
                 dbg->EnableDebugLayer();
                 factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-                m_debugLayer = true;
             }
             else
             {
@@ -136,6 +135,12 @@ namespace vri::d3d12
         {
             ReportError("D3D12CreateDevice failed (no FL11_0 hardware or WARP adapter)");
             return VriResult_Unsupported;
+        }
+        // The debug layer is process-wide: once this or an earlier device, or the application, enabled it, it
+        // validates every device created afterwards, requested or not. A device it validates has an info queue.
+        {
+            ComPtr<ID3D12InfoQueue> infoQueue;
+            m_debugLayer = SUCCEEDED(m_device.As(&infoQueue));
         }
 
         if (desc.enableValidation)

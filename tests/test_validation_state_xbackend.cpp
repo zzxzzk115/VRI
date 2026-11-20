@@ -61,9 +61,13 @@ namespace
         Messages plainMessages;
         REQUIRE(Create(api, false, plain, plainMessages));
         CHECK(plainMessages.validationWarnings == 0);
+        // WebGPU always validates. The D3D12 debug layer, enabled above, stays on for the process, and
+        // Metal follows MTL_DEBUG_LAYER, set outside it; the device reports either as it is.
         if (api == VriGraphicsAPI_WebGPU)
             CHECK(plain == VRI_TRUE);
-        else if (api != VriGraphicsAPI_Metal) // Metal follows MTL_DEBUG_LAYER, set outside the program
+        else if (api == VriGraphicsAPI_D3D12)
+            CHECK(plain == requested);
+        else if (api != VriGraphicsAPI_Metal)
             CHECK(plain == VRI_FALSE);
     }
 } // namespace

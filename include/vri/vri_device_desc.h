@@ -161,7 +161,9 @@ typedef struct VriDeviceDesc
        layer, the D3D12 debug layer, GL debug output (KHR_debug), Metal API validation
        (MTL_DEBUG_LAYER), or WebGPU, which always validates. VriDeviceCreationDesc::enableValidation
        asks for it; when the layer is missing the device is still created, a warning names what
-       is missing, and this is VRI_FALSE. VRI's own validation layer is independent of it. */
+       is missing, and this is VRI_FALSE. The D3D12 debug layer and Metal API validation are process-wide:
+       once on, they validate devices that did not ask for them, and this reports that. VRI's own validation
+       layer is independent of it. */
     VriBool nativeValidation;
 } VriDeviceDesc;
 
