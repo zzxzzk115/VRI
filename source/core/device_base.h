@@ -12,8 +12,35 @@
 #include "interface_registry.h"
 #include "object_registry.h"
 
+#include <string>
+
 namespace vri::core
 {
+    // The names of the VriFeatureBits in `bits`, for a message ("RayTracing, Bindless").
+    inline std::string FeatureNames(uint64_t bits)
+    {
+        static const char* const kNames[] = {"RayTracing",
+                                             "MeshShader",
+                                             "LowLatency",
+                                             "Bindless",
+                                             "VariableShadingRate",
+                                             "OpacityMicromap",
+                                             "RayQuery",
+                                             "ExternalMemory",
+                                             "CooperativeVector",
+                                             "ShaderAtomicInt64"};
+        std::string              names;
+        for (uint64_t bit = 0; bit < 64; ++bit)
+        {
+            if (!(bits & (1ull << bit)))
+                continue;
+            if (!names.empty())
+                names += ", ";
+            names += bit < std::size(kNames) ? kNames[bit] : "bit " + std::to_string(bit);
+        }
+        return names;
+    }
+
     class DeviceBase
     {
     public:

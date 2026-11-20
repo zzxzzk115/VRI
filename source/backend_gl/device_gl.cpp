@@ -453,6 +453,13 @@ namespace vri::gl
     {
         if (desc.callbackInterface)
             m_callback = *desc.callbackInterface;
+        if (desc.enabledFeatures && desc.bestEffort == VRI_FALSE)
+        {
+            const std::string message =
+                "requested features are not supported by OpenGL: " + core::FeatureNames(desc.enabledFeatures);
+            ReportError(message.c_str());
+            return VriResult_Unsupported;
+        }
 
         m_api = desc.graphicsAPI;
 #if defined(VRI_GL_ES_HEADERS)
@@ -612,6 +619,8 @@ namespace vri::gl
         m_desc.graphicsAPI      = m_es ? VriGraphicsAPI_OpenGLES : VriGraphicsAPI_OpenGL;
         m_desc.nativeAPI        = m_desc.graphicsAPI;
         m_desc.nativeValidation = m_debugOutput ? VRI_TRUE : VRI_FALSE;
+        // No VriFeatureBits feature exists on OpenGL: a best-effort request is granted nothing.
+        m_desc.enabledFeatures = 0;
 
         const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         if (renderer)
