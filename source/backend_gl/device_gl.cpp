@@ -731,6 +731,7 @@ namespace vri::gl
             f.colorBufferHalfFloat = atLeast(3, 0);
             f.floatBlend           = atLeast(3, 0);
             f.imageLoadStore       = atLeast(4, 2); // glBindImageTexture (macOS GL 4.1 misses it)
+            f.copyImage            = atLeast(4, 3);
         }
         else
         {

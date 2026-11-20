@@ -2259,16 +2259,18 @@ namespace
             uint8_t    rgba[4] = {};
             const int  sampled = vri::test::SampleCompressed(dev, c, sample, rgba);
             const int  refused = vri::test::CheckCompressedReadbackRefused(dev, c, sample, errors);
+            const int  noCopy  = vri::test::CheckCompressedCopyRefused(dev, c, sample, errors);
             const bool match   = sampled == 0 && vri::test::MatchesDecode(sample, rgba);
-            std::printf("VRI_WEBGL_STEP: %s sampled %d,%d,%d,%d %s, readback refused %s\n",
+            std::printf("VRI_WEBGL_STEP: %s sampled %d,%d,%d,%d %s, readback refused %s, copy refused %s\n",
                         sample.name,
                         rgba[0],
                         rgba[1],
                         rgba[2],
                         rgba[3],
                         match ? "ok" : "WRONG",
-                        refused == 0 ? "ok" : "WRONG");
-            ok = match && refused == 0;
+                        refused == 0 ? "ok" : "WRONG",
+                        noCopy == 0 ? "ok" : "WRONG");
+            ok = match && refused == 0 && noCopy == 0;
         }
         vriDestroyDevice(dev);
         return ok;

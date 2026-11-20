@@ -864,13 +864,20 @@ void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, c
     glBindBuffer(rt, 0);
     glBindBuffer(wt, 0);
 }
-void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc*)
+void CopyCompressedTexture(const TextureGL* d, const TextureGL* s, const VriTextureCopyDesc* region);
+
+void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
 {
     // glCopyImageSubData is GL 4.3 / GLES 3.2; use a portable framebuffer
     // blit so the path also works on GLES 3.0 / WebGL2.
-    const TextureGL* s       = reinterpret_cast<const TextureGL*>(src);
-    const TextureGL* d       = reinterpret_cast<const TextureGL*>(dst);
-    GLuint           fbos[2] = {0, 0};
+    const TextureGL* s = reinterpret_cast<const TextureGL*>(src);
+    const TextureGL* d = reinterpret_cast<const TextureGL*>(dst);
+    if (s->blockBytes != 0 || d->blockBytes != 0) // not colour-renderable: no framebuffer blit
+    {
+        CopyCompressedTexture(d, s, region);
+        return;
+    }
+    GLuint fbos[2] = {0, 0};
     glGenFramebuffers(2, fbos);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
     glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s->target, s->id, 0);
@@ -940,6 +947,38 @@ public:
 private:
     bool m_pack;
 };
+
+// A copy between block-compressed textures, which cannot be framebuffer attachments. Desktop GL 4.3 copies their
+// blocks with glCopyImageSubData; GLES and WebGL have no copy for them, so there the copy is refused.
+void CopyCompressedTexture(const TextureGL* d, const TextureGL* s, const VriTextureCopyDesc* region)
+{
+    if (!s->device->Features().copyImage)
+    {
+        s->device->ReportError("CmdCopyTexture: a block-compressed texture cannot be copied on GLES or WebGL");
+        return;
+    }
+#if !defined(VRI_GL_ES_HEADERS)
+    const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
+    const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
+    const CopyRegionGL         sc   = ResolveCopyRegion(s, from);
+    const CopyRegionGL         dc   = ResolveCopyRegion(d, to);
+    glCopyImageSubData(s->id,
+                       s->target,
+                       static_cast<GLint>(from.mip),
+                       sc.x,
+                       sc.y,
+                       sc.z,
+                       d->id,
+                       d->target,
+                       static_cast<GLint>(to.mip),
+                       dc.x,
+                       dc.y,
+                       dc.z,
+                       sc.width,
+                       sc.height,
+                       sc.slices);
+#endif
+}
 
 // A block-compressed upload. glCompressedTexSubImage* takes whole blocks and, on ES and WebGL, no buffer
 // row length, so a padded buffer layout goes up one row of blocks at a time.

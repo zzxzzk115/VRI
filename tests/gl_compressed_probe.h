@@ -99,6 +99,27 @@ namespace vri::test
         return s;
     }
 
+    // An empty 4x4 texture of `format`, or a 3D one 4x4x4. Null on failure.
+    inline VriTexture* CreateCompressedTexture(VriDevice*              device,
+                                               const VriCoreInterface& c,
+                                               VriFormat               format,
+                                               VriTextureType          type = VriTextureType_2D)
+    {
+        VriTextureDesc td {};
+        td.type           = type;
+        td.format         = format;
+        td.width          = 4;
+        td.height         = 4;
+        td.depth          = type == VriTextureType_3D ? 4 : 1;
+        td.mipNum         = 1;
+        td.layerNum       = 1;
+        td.sampleNum      = 1;
+        td.usage          = VriTextureUsage_ShaderResource | VriTextureUsage_TransferDst | VriTextureUsage_TransferSrc;
+        td.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* texture = nullptr;
+        return c.CreateTexture(device, &td, &texture) == VriResult_Success ? texture : nullptr;
+    }
+
     // A 4x4 texture of `sample`'s block, uploaded from a buffer. Null on failure.
     inline VriTexture* UploadCompressedBlock(VriDevice*              device,
                                              const VriCoreInterface& c,
@@ -106,19 +127,8 @@ namespace vri::test
                                              const CompressedSample& sample,
                                              VriBuffer*&             upload)
     {
-        VriTextureDesc td {};
-        td.type           = VriTextureType_2D;
-        td.format         = sample.format;
-        td.width          = 4;
-        td.height         = 4;
-        td.depth          = 1;
-        td.mipNum         = 1;
-        td.layerNum       = 1;
-        td.sampleNum      = 1;
-        td.usage          = VriTextureUsage_ShaderResource | VriTextureUsage_TransferDst | VriTextureUsage_TransferSrc;
-        td.memoryLocation = VriMemoryLocation_Device;
-        VriTexture* texture = nullptr;
-        if (c.CreateTexture(device, &td, &texture) != VriResult_Success)
+        VriTexture* texture = CreateCompressedTexture(device, c, sample.format);
+        if (!texture)
             return nullptr;
         VriBufferDesc bd {};
         bd.size           = sample.blockBytes;
@@ -137,10 +147,14 @@ namespace vri::test
         return texture;
     }
 
-    // Uploads `sample`, samples it onto an RGBA8 target and reads the target's centre back into `rgba`.
+    // Uploads `sample`, samples it onto an RGBA8 target and reads the target's centre back into `rgba`. With
+    // `viaCopy` the uploaded texture is first copied (CmdCopyTexture) into a second one, which is sampled.
     // Returns 0 on success, else the failing line.
-    inline int
-    SampleCompressed(VriDevice* device, const VriCoreInterface& c, const CompressedSample& sample, uint8_t rgba[4])
+    inline int SampleCompressed(VriDevice*              device,
+                                const VriCoreInterface& c,
+                                const CompressedSample& sample,
+                                uint8_t                 rgba[4],
+                                bool                    viaCopy = false)
     {
         constexpr uint32_t kW    = 64;
         constexpr uint32_t kH    = 64;
@@ -176,10 +190,18 @@ namespace vri::test
         c.CreateCommandBuffer(alloc, &cmd);
         c.CreateFence(device, 0, &fence);
         c.BeginCommandBuffer(cmd);
-        VriBuffer*  upload  = nullptr;
-        VriTexture* sampled = UploadCompressedBlock(device, c, cmd, sample, upload);
-        if (!sampled)
+        VriBuffer*  upload   = nullptr;
+        VriTexture* uploaded = UploadCompressedBlock(device, c, cmd, sample, upload);
+        if (!uploaded)
             return __LINE__;
+        VriTexture* sampled = uploaded;
+        if (viaCopy)
+        {
+            sampled = CreateCompressedTexture(device, c, sample.format);
+            if (!sampled)
+                return __LINE__;
+            c.CmdCopyTexture(cmd, sampled, uploaded, nullptr);
+        }
         vd.texture             = sampled;
         VriDescriptor* texView = nullptr;
         c.CreateTextureView(device, &vd, &texView);
@@ -318,7 +340,9 @@ namespace vri::test
         c.DestroyFence(fence);
         c.DestroyCommandAllocator(alloc);
         c.DestroyBuffer(upload);
-        c.DestroyTexture(sampled);
+        if (sampled != uploaded)
+            c.DestroyTexture(sampled);
+        c.DestroyTexture(uploaded);
         c.DestroyTexture(color);
         return failure;
     }
@@ -330,6 +354,32 @@ namespace vri::test
             if (std::abs(int(rgba[i]) - int(sample.expected[i])) > tolerance)
                 return false;
         return true;
+    }
+
+    // A copy between compressed textures is refused with one error where GL has no copy for them (GLES, WebGL).
+    // `errors` counts the device's error messages. Returns 0 on success, else the failing line.
+    inline int CheckCompressedCopyRefused(VriDevice*              device,
+                                          const VriCoreInterface& c,
+                                          const CompressedSample& sample,
+                                          const int&              errors)
+    {
+        VriTexture* from = CreateCompressedTexture(device, c, sample.format);
+        VriTexture* to   = CreateCompressedTexture(device, c, sample.format);
+        if (!from || !to)
+            return __LINE__;
+        VriCommandAllocator* alloc = nullptr;
+        VriCommandBuffer*    cmd   = nullptr;
+        c.CreateCommandAllocator(device, VriQueueType_Graphics, &alloc);
+        c.CreateCommandBuffer(alloc, &cmd);
+        c.BeginCommandBuffer(cmd);
+        const int before = errors;
+        c.CmdCopyTexture(cmd, to, from, nullptr);
+        const int failure = errors == before + 1 ? 0 : __LINE__;
+        c.EndCommandBuffer(cmd);
+        c.DestroyCommandAllocator(alloc);
+        c.DestroyTexture(to);
+        c.DestroyTexture(from);
+        return failure;
     }
 
     // Reading a compressed texture back is refused with one error and leaves the buffer untouched. `errors`

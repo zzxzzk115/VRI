@@ -97,6 +97,8 @@ namespace vri::gl
         bool bptc = false; // BC6H-BC7: core in desktop GL 4.2, else EXT/ARB_texture_compression_bptc
         bool etc2 = false; // core in GLES 3.0 and desktop GL 4.3; WEBGL_compressed_texture_etc on WebGL
         bool astc = false; // KHR_texture_compression_astc_ldr, WEBGL_compressed_texture_astc
+        // glCopyImageSubData (desktop GL 4.3): copies texels, compressed blocks included, without a framebuffer.
+        bool copyImage = false;
     };
 
     class DeviceGL final : public core::DeviceBase

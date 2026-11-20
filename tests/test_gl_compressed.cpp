@@ -62,6 +62,15 @@ TEST_CASE("GL compressed formats: upload, sample against the reference decode, r
         INFO("got " << int(rgba[0]) << "," << int(rgba[1]) << "," << int(rgba[2]) << "," << int(rgba[3]));
         CHECK(vri::test::MatchesDecode(sample, rgba));
         CHECK(vri::test::CheckCompressedReadbackRefused(dev, c, sample, errors) == 0);
+        // Desktop GL 4.3 copies compressed blocks: the copy samples to the same decode.
+        uint8_t copied[4] = {};
+        CHECK(vri::test::SampleCompressed(dev, c, sample, copied, true) == 0);
+        INFO("copied " << int(copied[0]) << "," << int(copied[1]) << "," << int(copied[2]) << "," << int(copied[3]));
+        CHECK(vri::test::MatchesDecode(sample, copied));
+        // No compressed family is a 3D texture on GL.
+        const int before = errors;
+        CHECK(vri::test::CreateCompressedTexture(dev, c, sample.format, VriTextureType_3D) == nullptr);
+        CHECK(errors == before + 1);
     }
     MESSAGE("OpenGL compressed formats:" << (supported.empty() ? " none" : supported));
     vriDestroyDevice(dev);

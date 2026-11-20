@@ -320,6 +320,13 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
         *out = nullptr;
         return VriResult_Unsupported;
     }
+    // S3TC, RGTC and ETC2 have no 3D textures, and BPTC and ASTC have them only through further extensions.
+    if (compressed.internalFormat != 0 && desc->type == VriTextureType_3D)
+    {
+        Dev(device)->ReportError("CreateTexture: a block-compressed format cannot be a 3D texture on GL");
+        *out = nullptr;
+        return VriResult_Unsupported;
+    }
     // A compressed texture has no pixel format or type: glCompressedTexSubImage* fills it.
     const GLFormat gf =
         compressed.internalFormat != 0 ? GLFormat {compressed.internalFormat, 0, 0, 0} : ToGLFormat(desc->format);
