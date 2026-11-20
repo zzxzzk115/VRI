@@ -363,6 +363,15 @@ namespace vri::wgpu
             s->status = status;
         }
 
+        void* MappedRange(WGPUBuffer buffer, WGPUMapMode mode, uint64_t offset, uint64_t range)
+        {
+            // Dawn (emdawnwebgpu) requires the const accessor for read-mapped buffers;
+            // GetMappedRange asserts there. wgpu-native accepts either.
+            if (mode == WGPUMapMode_Read)
+                return const_cast<void*>(wgpuBufferGetConstMappedRange(buffer, offset, range));
+            return wgpuBufferGetMappedRange(buffer, offset, range);
+        }
+
         void* VRI_CALL MapBuffer(VriBuffer* buffer, uint64_t offset, uint64_t size)
         {
             BufferWGPU* b = Buf(buffer);
@@ -389,12 +398,7 @@ namespace vri::wgpu
                 PollDevice(b->device->Device());
             if (st.status != WGPUMapAsyncStatus_Success)
                 return nullptr;
-            const uint64_t range = size ? size : WGPU_WHOLE_MAP_SIZE;
-            // Dawn (emdawnwebgpu) requires the const accessor for read-mapped buffers;
-            // GetMappedRange asserts there. wgpu-native accepts either.
-            if (mode == WGPUMapMode_Read)
-                return const_cast<void*>(wgpuBufferGetConstMappedRange(b->buffer, offset, range));
-            return wgpuBufferGetMappedRange(b->buffer, offset, range);
+            return MappedRange(b->buffer, mode, offset, size ? size : WGPU_WHOLE_MAP_SIZE);
         }
 
         void VRI_CALL UnmapBuffer(VriBuffer* buffer)
@@ -410,6 +414,63 @@ namespace vri::wgpu
                 return;
             }
             wgpuBufferUnmap(b->buffer);
+        }
+
+#if defined(__EMSCRIPTEN__)
+        // One browser MapBufferAsync request, alive until its callback has run.
+        struct AsyncMap
+        {
+            DeviceWGPU*             device;
+            WGPUBuffer              buffer;
+            WGPUMapMode             mode;
+            uint64_t                offset;
+            uint64_t                range;
+            VriBufferMappedCallback callback;
+            void*                   userData;
+        };
+
+        void OnAsyncMap(WGPUMapAsyncStatus status, WGPUStringView message, void* ud1, void*)
+        {
+            const std::unique_ptr<AsyncMap> request(static_cast<AsyncMap*>(ud1));
+            if (status != WGPUMapAsyncStatus_Success)
+            {
+                std::string text = "MapBufferAsync: wgpuBufferMapAsync failed";
+                if (message.data && message.length)
+                    text.append(": ").append(
+                        message.data, message.length == WGPU_STRLEN ? std::strlen(message.data) : message.length);
+                request->device->ReportError(text.c_str());
+                request->callback(request->userData, VriResult_Failure, nullptr);
+                return;
+            }
+            void* data = MappedRange(request->buffer, request->mode, request->offset, request->range);
+            request->callback(request->userData, data ? VriResult_Success : VriResult_Failure, data);
+        }
+#endif
+
+        VriResult VRI_CALL MapBufferAsync(VriBuffer*              buffer,
+                                          uint64_t                offset,
+                                          uint64_t                size,
+                                          VriBufferMappedCallback callback,
+                                          void*                   userData)
+        {
+#if defined(__EMSCRIPTEN__)
+            // A GPU buffer in the browser maps from the event loop; a host-upload buffer hands back its
+            // CPU shadow at once, as everywhere else.
+            BufferWGPU* b = buffer ? Buf(buffer) : nullptr;
+            if (b && callback && !b->shadow)
+            {
+                const WGPUMapMode mode  = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
+                const uint64_t    range = size ? size : WGPU_WHOLE_MAP_SIZE;
+                auto* request           = new AsyncMap {b->device, b->buffer, mode, offset, range, callback, userData};
+                WGPUBufferMapCallbackInfo cb = {};
+                cb.mode                      = kCallbackMode;
+                cb.callback                  = OnAsyncMap;
+                cb.userdata1                 = request;
+                wgpuBufferMapAsync(b->buffer, mode, offset, range, cb);
+                return VriResult_Success;
+            }
+#endif
+            return core::MapBufferNow(MapBuffer, buffer, offset, size, callback, userData);
         }
 
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; } // not exposed by WebGPU
@@ -1920,6 +1981,7 @@ namespace vri::wgpu
             t.GetFenceValue               = GetFenceValue;
             t.Wait                        = Wait;
             t.WaitForFence                = WaitForFence;
+            t.MapBufferAsync              = MapBufferAsync;
             t.CmdBeginRendering           = CmdBeginRendering;
             t.CmdEndRendering             = CmdEndRendering;
             t.CmdSetViewports             = CmdSetViewports;

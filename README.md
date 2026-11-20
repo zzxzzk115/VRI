@@ -171,10 +171,11 @@ whether it links Emscripten's `-sASYNCIFY` (VRI does not add it):
 
 - Without Asyncify, create the device with `vriCreateDeviceAsync` (`vri::Device::createAsync` in
   C++); its callback runs from the event loop once the device exists. `vriCreateDevice` still
-  creates WebGL 2 devices and reports `VriResult_Unsupported` for WebGPU. A wait that would have to
-  block for the GPU (`QueueWaitIdle`, `DeviceWaitIdle`, an unbounded `WaitForFence`, mapping a
-  readback buffer) reports an error instead; a bounded fence wait returns `VriResult_Timeout`, so
-  poll fences on a later frame.
+  creates WebGL 2 devices and reports `VriResult_Unsupported` for WebGPU. Read a WebGPU buffer back
+  with `MapBufferAsync`, whose callback runs from the event loop once the buffer is mapped. A wait
+  that would have to block for the GPU (`QueueWaitIdle`, `DeviceWaitIdle`, an unbounded
+  `WaitForFence`, `MapBuffer` on a readback buffer) reports an error instead; a bounded fence wait
+  returns `VriResult_Timeout`, so poll fences on a later frame.
 - With Asyncify (the examples link it), `vriCreateDevice` and every wait work as on native
   platforms, yielding to the browser while they wait.
 
@@ -187,7 +188,8 @@ vriCreateDeviceAsync(&desc, [](void* app, VriResult result, VriDevice* device) {
 }, &app);
 ```
 
-Off the browser `vriCreateDeviceAsync` creates the device before it returns.
+Off the browser `vriCreateDeviceAsync` creates the device and `MapBufferAsync` maps the buffer
+before they return.
 
 ### Android
 

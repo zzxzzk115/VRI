@@ -75,6 +75,12 @@ VRI_API VriResult VRI_CALL vriGetInterface(const VriDevice* device, const char* 
 
 /* ---- core interface (function table) ---------------------------------- */
 
+/*
+ * Receives the result of MapBufferAsync. `data` points at the mapped range (the buffer's `offset`)
+ * when `result` is VriResult_Success and is NULL otherwise; it stays valid until UnmapBuffer.
+ */
+typedef void(VRI_CALL* VriBufferMappedCallback)(void* userData, VriResult result, void* data);
+
 typedef struct VriCoreInterface
 {
     /* queries */
@@ -271,6 +277,23 @@ typedef struct VriCoreInterface
     /* Bounded host wait on the same timeline as Wait(). Zero polls; UINT64_MAX
      * waits indefinitely. Timeout never changes the fence's completion value. */
     VriResult(VRI_CALL* WaitForFence)(VriFence* fence, uint64_t value, uint64_t timeoutNanoseconds);
+
+    /* Map a buffer range like MapBuffer and hand the pointer to `callback` instead of returning it.
+     * Mapping a GPU buffer in the browser's WebGPU completes only from the browser event loop, so a
+     * program linked without -sASYNCIFY reads buffers back this way (MapBuffer reports an error for
+     * them there). The browser maps the buffer once the GPU work already submitted that uses it has
+     * finished; elsewhere, as for MapBuffer, wait for that work (a fence) before mapping.
+     *
+     * `callback` runs exactly once: from the browser event loop for a browser WebGPU buffer other
+     * than a host-upload one, otherwise before MapBufferAsync returns, with the result MapBuffer
+     * gives. The buffer must stay alive and unmapped until the callback has run; release the mapping
+     * with UnmapBuffer. Returns VriResult_InvalidArgument, without calling `callback`, when `buffer`
+     * or `callback` is NULL. */
+    VriResult(VRI_CALL* MapBufferAsync)(VriBuffer*              buffer,
+                                        uint64_t                offset,
+                                        uint64_t                size,
+                                        VriBufferMappedCallback callback,
+                                        void*                   userData);
 } VriCoreInterface;
 
 VRI_EXTERN_C_END
