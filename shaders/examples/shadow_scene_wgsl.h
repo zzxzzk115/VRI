@@ -103,8 +103,9 @@ struct pixelInput_0
 fn fragmentMain( _S4 : pixelInput_0, @builtin(position) position_2 : vec4<f32>) -> pixelOutput_0
 {
     var ndc_0 : vec3<f32> = _S4.lightClip_1.xyz / vec3<f32>(_S4.lightClip_1.w);
-    var _S5 : vec2<f32> = vec2<f32>(0.5f);
-    var uv_1 : vec2<f32> = ndc_0.xy * _S5 + _S5;
+    var _S5 : f32 = ndc_0.x * 0.5f + 0.5f;
+    var _S6 : f32 = 0.5f - ndc_0.y * 0.5f;
+    var uv_1 : vec2<f32> = vec2<f32>(_S5, _S6);
     var ref_1 : f32;
     if((u_0.params_0.z) > 0.5f)
     {
@@ -115,12 +116,10 @@ fn fragmentMain( _S4 : pixelInput_0, @builtin(position) position_2 : vec4<f32>) 
         ref_1 = ndc_0.z * 0.5f + 0.5f;
     }
     var ref_2 : f32 = ref_1 - u_0.params_0.x;
-    var _S6 : f32 = uv_1.x;
     var _S7 : bool;
-    if(_S6 == (saturate(_S6)))
+    if(_S5 == (saturate(_S5)))
     {
-        var _S8 : f32 = uv_1.y;
-        _S7 = _S8 == (saturate(_S8));
+        _S7 = _S6 == (saturate(_S6));
     }
     else
     {
@@ -144,8 +143,8 @@ fn fragmentMain( _S4 : pixelInput_0, @builtin(position) position_2 : vec4<f32>) 
         shadow_0 = 1.0f;
     }
     var ambient_0 : f32 = u_0.params_0.w;
-    var _S9 : pixelOutput_0 = pixelOutput_0( vec4<f32>(vec3<f32>(0.85000002384185791f, 0.85000002384185791f, 0.87999999523162842f) * vec3<f32>((ambient_0 + (1.0f - ambient_0) * max(dot(normalize(_S4.worldNormal_1), normalize(u_0.lightDir_0.xyz)), 0.0f) * shadow_0)), 1.0f) );
-    return _S9;
+    var _S8 : pixelOutput_0 = pixelOutput_0( vec4<f32>(vec3<f32>(0.85000002384185791f, 0.85000002384185791f, 0.87999999523162842f) * vec3<f32>((ambient_0 + (1.0f - ambient_0) * max(dot(normalize(_S4.worldNormal_1), normalize(u_0.lightDir_0.xyz)), 0.0f) * shadow_0)), 1.0f) );
+    return _S8;
 }
 
 
