@@ -2061,6 +2061,59 @@ namespace
         return true;
     }
 
+    // The page has one WebGL context: while a GL device owns it, another GL device (asked for directly
+    // or reached through Auto, synchronously or not) reports Unsupported instead of aborting the
+    // program, and the context can be created again once its device is destroyed.
+    bool SecondContextProbe(bool& correct)
+    {
+        correct                  = false;
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = VriGraphicsAPI_OpenGLES;
+        dc.bestEffort            = VRI_TRUE;
+        VriDevice* first         = nullptr;
+        if (vriCreateDevice(&dc, &first) != VriResult_Success)
+            return false;
+
+        VriDevice*            second = nullptr;
+        const VriResult       direct = vriCreateDevice(&dc, &second);
+        VriDeviceCreationDesc autoDc = dc;
+        autoDc.graphicsAPI           = VriGraphicsAPI_Auto;
+        VriDevice*      viaAuto      = nullptr;
+        const VriResult autoResult   = vriCreateDevice(&autoDc, &viaAuto);
+        struct AsyncOutcome
+        {
+            bool       called = false;
+            VriResult  result = VriResult_Success;
+            VriDevice* device = nullptr;
+        } async;
+        vriCreateDeviceAsync(
+            &autoDc,
+            [](void* userData, VriResult result, VriDevice* device) {
+                auto* outcome   = static_cast<AsyncOutcome*>(userData);
+                outcome->called = true;
+                outcome->result = result;
+                outcome->device = device;
+            },
+            &async);
+        vriDestroyDevice(first);
+
+        VriDevice*      again       = nullptr;
+        const VriResult againResult = vriCreateDevice(&dc, &again);
+        if (again)
+            vriDestroyDevice(again);
+
+        std::printf("VRI_WEBGL_STEP: second-context direct=%d auto=%d async=%d/%d again=%d\n",
+                    static_cast<int>(direct),
+                    static_cast<int>(autoResult),
+                    async.called,
+                    static_cast<int>(async.result),
+                    static_cast<int>(againResult));
+        correct = direct == VriResult_Unsupported && second == nullptr && autoResult == VriResult_Unsupported &&
+                  viaAuto == nullptr && async.called && async.result == VriResult_Unsupported &&
+                  async.device == nullptr && againResult == VriResult_Success;
+        return true;
+    }
+
     // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
     // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
     // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
@@ -2466,6 +2519,10 @@ int main()
     const bool ranComputeNo  = RenderComputeUnsupportedProbe(computeNoOk);
     const bool computeNoPass = ranComputeNo && computeNoOk;
 
+    bool       secondOk   = false;
+    const bool ranSecond  = SecondContextProbe(secondOk);
+    const bool secondPass = ranSecond && secondOk;
+
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
     const bool msaaPass = ranMsaa && msaaEdge;
@@ -2475,11 +2532,11 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && msaaPass && swapPass;
+                      instPass && scissorPass && computeNoPass && secondPass && msaaPass && swapPass;
     std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-                "ran=%d ok=%d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
+                "ran=%d ok=%d | second-context: ran=%d ok=%d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ranTri,
                 topRed,
@@ -2504,6 +2561,8 @@ int main()
                 scissorOk,
                 ranComputeNo,
                 computeNoOk,
+                ranSecond,
+                secondOk,
                 ranMsaa,
                 msaaEdge,
                 ranSwap,
