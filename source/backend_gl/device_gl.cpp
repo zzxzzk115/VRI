@@ -17,10 +17,13 @@
 #include <emscripten.h>
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <set>
+#include <string>
 
 namespace vri::gl
 {
@@ -31,43 +34,77 @@ namespace vri::gl
 #if !defined(VRI_GL_ES_HEADERS)
     namespace
     {
+        // The current context's version and extensions: what glad loads entry points for.
+        struct GLCoverage
+        {
+            int                   version = 0; // major * 100 + minor
+            std::set<std::string> extensions;
+        };
+        GLCoverage CurrentCoverage()
+        {
+            GLCoverage c;
+            GLint      major = 0;
+            GLint      minor = 0;
+            GLint      count = 0;
+            glGetIntegerv(GL_MAJOR_VERSION, &major);
+            glGetIntegerv(GL_MINOR_VERSION, &minor);
+            glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+            c.version = major * 100 + minor;
+            for (GLint i = 0; i < count; ++i)
+                c.extensions.insert(reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i))));
+            return c;
+        }
+
         // glad keeps one process-wide set of GL entry points, which only the current context may call
-        // through. A WGL pointer is valid for contexts of the driver it came from, so a process can
-        // serve one GL driver: the first device loads the entry points (once, so no later device
-        // rewrites them while another thread calls them), and each later device checks that its own
-        // context resolves the same ones. Returns null on success, else why the context cannot be used.
+        // through, and loads those the loading context's version and extensions cover. A WGL pointer
+        // is valid for contexts of the driver it came from, so a process serves one GL driver: each
+        // later device first checks that its context resolves the loaded entry points to the same
+        // addresses, then loads again only when its context covers more (a desktop 4.6 context after
+        // an ES 3.2 one) - a reload stores the same addresses into the loaded pointers and fills in
+        // the new ones, and devices of one configuration never rewrite pointers another thread calls.
+        // Returns null on success, else why the context cannot be used.
         const char* LoadGLFunctions(GLADloadproc load)
         {
-            static std::mutex mutex;
-            static bool       loaded = false;
-            std::lock_guard   lock(mutex);
-            if (!loaded)
+            static std::mutex     mutex;
+            static bool           loaded = false;
+            static GLCoverage     coverage;
+            const std::lock_guard lock(mutex);
+            if (loaded)
             {
-                if (!gladLoadGLLoader(load))
-                    return "gladLoadGLLoader failed";
+                // Driver entry points (not opengl32/libGL exports) from each part of the command path.
+                const struct
+                {
+                    const char* name;
+                    void*       loaded;
+                } probes[] = {
+                    {"glCreateShader", reinterpret_cast<void*>(glCreateShader)},
+                    {"glGenBuffers", reinterpret_cast<void*>(glGenBuffers)},
+                    {"glBindFramebuffer", reinterpret_cast<void*>(glBindFramebuffer)},
+                    {"glBlitFramebuffer", reinterpret_cast<void*>(glBlitFramebuffer)},
+                    {"glFenceSync", reinterpret_cast<void*>(glFenceSync)},
+                };
+                for (const auto& probe : probes)
+                {
+                    if (load(probe.name) != probe.loaded)
+                        return "this context belongs to a different GL driver than the process's first GL device; "
+                               "one process can drive one GL driver";
+                }
+                GLCoverage current = CurrentCoverage();
+                bool       covered = current.version <= coverage.version;
+                for (const std::string& extension : current.extensions)
+                    covered = covered && coverage.extensions.count(extension) != 0;
+                if (covered)
+                    return nullptr;
+            }
+            if (!gladLoadGLLoader(load))
+                return "gladLoadGLLoader failed";
+            if (!g_FramebufferTextureMultiviewOVR)
                 g_FramebufferTextureMultiviewOVR = reinterpret_cast<PFN_FramebufferTextureMultiviewOVR>(
                     load("glFramebufferTextureMultiviewOVR")); // OVR_multiview (null if absent)
-                loaded = true;
-                return nullptr;
-            }
-            // Driver entry points (not opengl32/libGL exports) from each part of the command path.
-            const struct
-            {
-                const char* name;
-                void*       loaded;
-            } probes[] = {
-                {"glCreateShader", reinterpret_cast<void*>(glCreateShader)},
-                {"glGenBuffers", reinterpret_cast<void*>(glGenBuffers)},
-                {"glBindFramebuffer", reinterpret_cast<void*>(glBindFramebuffer)},
-                {"glBlitFramebuffer", reinterpret_cast<void*>(glBlitFramebuffer)},
-                {"glFenceSync", reinterpret_cast<void*>(glFenceSync)},
-            };
-            for (const auto& probe : probes)
-            {
-                if (load(probe.name) != probe.loaded)
-                    return "this context belongs to a different GL driver than the process's first GL device; "
-                           "one process can drive one GL driver";
-            }
+            GLCoverage current = CurrentCoverage();
+            coverage.version   = std::max(coverage.version, current.version);
+            coverage.extensions.insert(current.extensions.begin(), current.extensions.end());
+            loaded = true;
             return nullptr;
         }
     } // namespace
