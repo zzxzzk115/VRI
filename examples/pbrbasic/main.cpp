@@ -293,7 +293,7 @@ int main(int, char**)
         const float eye[3] = {std::sin(t) * R, R * 0.25f, std::cos(t) * R}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Ubo         u {};
         u.viewProj =
-            Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 200.0f), LookAt(eye, ctr, up)));
+            Transpose(Mul(Perspective(0.9f, float(app.width) / float(app.height), 0.1f, 200.0f), LookAt(eye, ctr, up)));
         u.camPos[0]          = eye[0];
         u.camPos[1]          = eye[1];
         u.camPos[2]          = eye[2];

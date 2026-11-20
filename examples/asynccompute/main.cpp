@@ -65,8 +65,8 @@ namespace
         // (Wait(g_computeFence, g_computeValue)).
         Params p {};
         p.time   = g_time;
-        p.width  = kWidth;
-        p.height = kHeight;
+        p.width  = app.width;
+        p.height = app.height;
         std::memcpy(c.MapBuffer(g_ustg, 0, sizeof(Params)), &p, sizeof(Params));
         c.UnmapBuffer(g_ustg);
 
@@ -108,8 +108,8 @@ namespace
         c.CmdSetPipelineLayout(g_computeCmd, g_computeLayout);
         c.CmdSetDescriptorSet(g_computeCmd, 0, g_computeSet[slot]);
         VriDispatchDesc disp {};
-        disp.x = (kWidth + 7) / 8;
-        disp.y = (kHeight + 7) / 8;
+        disp.x = (app.width + 7) / 8;
+        disp.y = (app.height + 7) / 8;
         disp.z = 1;
         c.CmdDispatch(g_computeCmd, &disp);
 
@@ -190,8 +190,8 @@ int main(int, char**)
         VriTextureDesc td {};
         td.type      = VriTextureType_2D;
         td.format    = VriFormat_RGBA8_UNORM;
-        td.width     = kWidth;
-        td.height    = kHeight;
+        td.width     = app.width;
+        td.height    = app.height;
         td.depth     = 1;
         td.mipNum    = 1;
         td.layerNum  = 1;

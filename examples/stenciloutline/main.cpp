@@ -296,7 +296,7 @@ int main(int, char**)
         SceneUbo    s {};
         const float eye[3] = {0.0f, 2.2f, 7.5f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Mat4        view  = LookAt(eye, ctr, up);
-        Mat4        proj  = Perspective(0.7f, float(kWidth) / float(kHeight), 0.1f, 100.0f);
+        Mat4        proj  = Perspective(0.7f, float(app.width) / float(app.height), 0.1f, 100.0f);
         s.viewProj        = Transpose(Mul(proj, view));
         const float ld[3] = {0.4f, 0.8f, 0.45f};
         const float len   = std::sqrt(ld[0] * ld[0] + ld[1] * ld[1] + ld[2] * ld[2]);

@@ -73,8 +73,8 @@ int main(int, char**)
         t += speed * app.dt;
         Params p {};
         p.time   = t;
-        p.width  = kWidth;
-        p.height = kHeight;
+        p.width  = app.width;
+        p.height = app.height;
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Params)), &p, sizeof(Params));
         app.c.UnmapBuffer(ustg);
     };
@@ -117,8 +117,8 @@ int main(int, char**)
         VriTextureDesc td {};
         td.type           = VriTextureType_2D;
         td.format         = VriFormat_RGBA8_UNORM;
-        td.width          = kWidth;
-        td.height         = kHeight;
+        td.width          = app.width;
+        td.height         = app.height;
         td.depth          = 1;
         td.mipNum         = 1;
         td.layerNum       = 1;
@@ -278,8 +278,8 @@ int main(int, char**)
             c.CmdSetPipelineLayout(cmd, computeLayout);
             c.CmdSetDescriptorSet(cmd, 0, computeSet);
             VriDispatchDesc disp {};
-            disp.x = (kWidth + 63) / 64; // numthreads(64,1,1): one workgroup per 64-px run
-            disp.y = kHeight;
+            disp.x = (app.width + 63) / 64; // numthreads(64,1,1): one workgroup per 64-px run
+            disp.y = app.height;
             disp.z = 1;
             c.CmdDispatch(cmd, &disp);
 

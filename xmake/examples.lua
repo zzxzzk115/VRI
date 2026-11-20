@@ -25,7 +25,8 @@ local _vri_examples = {
     {name = "raytracing"},
     {name = "pathtracer"},
     -- Desktop-only feature demos: these exercise capabilities the web backends
-    -- (WebGPU / WebGL 2) don't expose, so they are excluded from the wasm build.
+    -- (WebGPU / WebGL 2) and mobile GPUs don't expose, so they are excluded from the wasm and
+    -- Android builds.
     {name = "conservativeraster", desktop_only = true},
     {name = "bordercolor", desktop_only = true},
     {name = "geometryshader", desktop_only = true},
@@ -50,7 +51,7 @@ local _vri_examples = {
 }
 
 local function _vri_example_enabled(example)
-    if example.desktop_only and is_plat("wasm") then
+    if example.desktop_only and is_plat("wasm", "android") then
         return false
     end
     if example.requires_cuda and not has_config("vri_build_cuda_interop") then
@@ -83,3 +84,19 @@ function vri_include_examples()
         end
     end
 end
+
+-- Android: an example is a shared library that GameActivity loads (`xmake apk <target>` packages
+-- it). The host side - android_main, surface lifecycle, touch input, logcat - lives in
+-- examples/common/android_main.cpp. Each example lists the files it reads at run time with
+-- set_values("vri.android_assets", ...): a file lands at the APK assets root, a directory under
+-- its own name, matching the relative paths vriex::AssetPath() hands the loaders.
+rule("vri.android_example")
+    on_load(function (target)
+        target:set("kind", "shared")
+        target:add("packages", "game-activity")
+        target:add("files", path.join(os.projectdir(), "examples", "common", "android_main.cpp"))
+        -- GameActivity's Java side binds GameActivity_onCreate by name; nothing in the example
+        -- references it, so keep the linker from dropping it from the static archive.
+        target:add("ldflags", "-Wl,-u,GameActivity_onCreate", {force = true})
+    end)
+rule_end()

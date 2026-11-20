@@ -68,19 +68,11 @@ int main(int, char**)
 
     const bool useWgsl = app.useWgsl, useDxbc = app.useDxbc;
 
-    // load the .ktx texture (desktop: next to the exe; web: preloaded into MEMFS at root)
+    // load the .ktx texture (next to the exe / MEMFS root / APK assets: see common/asset_file.h)
     KtxImage tex;
-#if defined(__EMSCRIPTEN__)
-    if (!LoadKtxRgba("/metalplate01_rgba.ktx", tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
+    if (!LoadKtxRgba(vriex::AssetPath("metalplate01_rgba.ktx").c_str(), tex) &&
+        !LoadKtxRgba("metalplate01_rgba.ktx", tex))
         app.Fail("failed to load metalplate01_rgba.ktx");
-#else
-    {
-        const char* base = SDL_GetBasePath();
-        std::string path = (base ? std::string(base) : std::string()) + "metalplate01_rgba.ktx";
-        if (!LoadKtxRgba(path.c_str(), tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
-            app.Fail("failed to load metalplate01_rgba.ktx");
-    }
-#endif
 
     // device-local vertex/index buffers uploaded via staging (WebGPU forbids MAP_WRITE on usage buffers)
     VriBufferDesc vbd {};
@@ -356,7 +348,7 @@ int main(int, char**)
         const float eye[3] = {0, 0, 3.0f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Mat4        model = Mul(RotateY(angle), RotateX(angle * 0.5f));
         Mat4        view  = LookAt(eye, ctr, up);
-        Mat4        proj  = Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 100.0f);
+        Mat4        proj  = Perspective(0.9f, float(app.width) / float(app.height), 0.1f, 100.0f);
         Mat4        mvp   = Transpose(Mul(proj, Mul(view, model)));
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Mat4)), &mvp, sizeof(Mat4));
         app.c.UnmapBuffer(ustg);

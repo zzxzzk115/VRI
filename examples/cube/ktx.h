@@ -5,8 +5,10 @@
 // use the full libktx; here we parse by hand to avoid the dependency.
 #pragma once
 
+#include "../common/asset_file.h"
+
 #include <cstdint>
-#include <cstdio>
+#include <cstring>
 #include <vector>
 
 struct KtxImage
@@ -16,29 +18,22 @@ struct KtxImage
     std::vector<uint8_t> rgba; // width*height*4, base mip
 };
 
-// Loads the base mip of a KTX1 RGBA8 file. Returns false on any mismatch.
+// Loads the base mip of a KTX1 RGBA8 file (an APK asset on Android, see asset_file.h). Returns
+// false on any mismatch.
 inline bool LoadKtxRgba(const char* path, KtxImage& out)
 {
-    std::FILE* f = std::fopen(path, "rb");
-    if (!f)
+    std::vector<uint8_t> file;
+    if (!vriex::ReadAssetFile(path, file))
         return false;
-    struct Closer
-    {
-        std::FILE* f;
-        ~Closer() { std::fclose(f); }
-    } closer {f};
-
-    uint8_t id[12] = {};
-    if (std::fread(id, 1, 12, f) != 12)
+    // identifier (12 bytes), 13 u32 header fields, then key/value data and the base mip's imageSize
+    if (file.size() < 12 + 13 * 4)
         return false;
     static const uint8_t kKtx1[12] = {0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
-    for (int i = 0; i < 12; ++i)
-        if (id[i] != kKtx1[i])
-            return false;
+    if (std::memcmp(file.data(), kKtx1, 12) != 0)
+        return false;
 
     uint32_t h[13] = {}; // endianness .. bytesOfKeyValueData (13 u32 after the identifier)
-    if (std::fread(h, 4, 13, f) != 13)
-        return false;
+    std::memcpy(h, file.data() + 12, sizeof(h));
     // h[0]=endianness h[1]=glType h[2]=glTypeSize h[3]=glFormat h[4]=glInternalFormat
     // h[5]=glBaseInternalFormat h[6]=pixelWidth h[7]=pixelHeight ... h[12]=bytesOfKeyValueData
     const uint32_t glFormat            = h[3]; // GL_RGBA == 0x1908
@@ -51,20 +46,18 @@ inline bool LoadKtxRgba(const char* path, KtxImage& out)
     if (pixelWidth == 0 || pixelHeight == 0)
         return false;
 
-    if (std::fseek(f, static_cast<long>(bytesOfKeyValueData), SEEK_CUR) != 0)
+    const size_t sizeOffset = 12 + sizeof(h) + size_t(bytesOfKeyValueData);
+    if (file.size() < sizeOffset + 4)
         return false;
-
     uint32_t imageSize = 0;
-    if (std::fread(&imageSize, 4, 1, f) != 1)
-        return false;
+    std::memcpy(&imageSize, file.data() + sizeOffset, 4);
     const uint32_t expected = pixelWidth * pixelHeight * 4;
-    if (imageSize < expected)
+    if (imageSize < expected || file.size() - (sizeOffset + 4) < expected)
         return false;
 
     out.width  = pixelWidth;
     out.height = pixelHeight;
-    out.rgba.resize(expected);
-    if (std::fread(out.rgba.data(), 1, expected, f) != expected)
-        return false;
+    out.rgba.assign(file.begin() + std::ptrdiff_t(sizeOffset + 4),
+                    file.begin() + std::ptrdiff_t(sizeOffset + 4 + expected));
     return true;
 }

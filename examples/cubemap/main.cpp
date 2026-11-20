@@ -403,7 +403,7 @@ int main(int, char**)
         const float ang    = t * orbitSpeed;
         const float eye[3] = {std::cos(ang) * 4.0f, 1.6f, std::sin(ang) * 4.0f};
         Mat4        view   = LookAt(eye, ctr, up);
-        Mat4        proj   = Perspective(0.8f, float(kWidth) / float(kHeight), 0.1f, 100.0f);
+        Mat4        proj   = Perspective(0.8f, float(app.width) / float(app.height), 0.1f, 100.0f);
 
         // skybox: same view with translation removed so the box stays centred on the eye
         Mat4 viewNoT  = view;

@@ -301,7 +301,7 @@ int main(int argc, char** argv)
     // persistent radiance accumulator (one float4 per pixel; never re-initialised on the host - the
     // shader resets it when control.z says so). Device-local storage buffer.
     VriBufferDesc abd {};
-    abd.size            = uint64_t(kWidth) * kHeight * sizeof(float) * 4;
+    abd.size            = uint64_t(app.width) * app.height * sizeof(float) * 4;
     abd.usage           = VriBufferUsage_StorageBuffer;
     abd.memoryLocation  = VriMemoryLocation_Device;
     VriBuffer* accumBuf = nullptr;
@@ -331,8 +331,8 @@ int main(int argc, char** argv)
     VriTextureDesc otd {};
     otd.type           = VriTextureType_2D;
     otd.format         = VriFormat_RGBA8_UNORM;
-    otd.width          = kWidth;
-    otd.height         = kHeight;
+    otd.width          = app.width;
+    otd.height         = app.height;
     otd.depth          = 1;
     otd.mipNum         = 1;
     otd.layerNum       = 1;
@@ -611,7 +611,7 @@ int main(int argc, char** argv)
         const V3 wup = {0, 1, 0};
         const V3 right      = norm3(cross3(fwd, wup));
         const V3 up         = cross3(right, fwd);
-        const float tanHalf = std::tan(0.6f * 0.5f), aspect = float(kWidth) / float(kHeight);
+        const float tanHalf = std::tan(0.6f * 0.5f), aspect = float(app.width) / float(app.height);
         set4(cam.eye, eye);
         set4(cam.camRight, {right.x * tanHalf * aspect, right.y * tanHalf * aspect, right.z * tanHalf * aspect});
         set4(cam.camUp, {up.x * tanHalf, up.y * tanHalf, up.z * tanHalf});
@@ -665,8 +665,8 @@ int main(int argc, char** argv)
         c.CmdSetPipelineLayout(cmd, ptLayout);
         c.CmdSetDescriptorSet(cmd, 0, ptSet);
         VriDispatchDesc disp {};
-        disp.x = (kWidth + 7) / 8;
-        disp.y = (kHeight + 7) / 8;
+        disp.x = (app.width + 7) / 8;
+        disp.y = (app.height + 7) / 8;
         disp.z = 1;
         c.CmdDispatch(cmd, &disp);
 
@@ -697,8 +697,8 @@ int main(int argc, char** argv)
     std::printf("[pathtracer] megakernel path tracer (inline ray query) over '%s' (%zu primitives), %ux%u\n",
                 modelPath,
                 model.primitives.size(),
-                kWidth,
-                kHeight);
+                app.width,
+                app.height);
     std::fflush(stdout);
     app.SetupCapture();
     app.Run();

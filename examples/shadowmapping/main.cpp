@@ -406,7 +406,7 @@ int main(int, char**)
 
         const float eye[3] = {5.0f, 5.0f, 7.0f}, look[3] = {0, 0.4f, 0};
         Mat4        view = LookAt(eye, look, up);
-        Mat4        proj = Perspective(0.7f, float(kWidth) / float(kHeight), 0.1f, 100.0f);
+        Mat4        proj = Perspective(0.7f, float(app.width) / float(app.height), 0.1f, 100.0f);
         s.camViewProj    = Transpose(Mul(proj, view));
 
         const float len = std::sqrt(lpos[0] * lpos[0] + lpos[1] * lpos[1] + lpos[2] * lpos[2]);

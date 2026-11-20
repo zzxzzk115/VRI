@@ -79,8 +79,8 @@ int main(int, char**)
             VriTextureDesc td {};
             td.type           = VriTextureType_2D;
             td.format         = kColor;
-            td.width          = kWidth;
-            td.height         = kHeight;
+            td.width          = app.width;
+            td.height         = app.height;
             td.depth          = 1;
             td.mipNum         = 1;
             td.layerNum       = 1;
@@ -283,7 +283,7 @@ int main(int, char**)
         Push pc {};
         pc.rot[0] = std::cos(angle);
         pc.rot[1] = std::sin(angle);
-        pc.rot[2] = float(kHeight) / float(kWidth);
+        pc.rot[2] = float(app.height) / float(app.width);
 
         // The scene target: 4x MSAA color resolving into `resolved`, or `resolved` at 1x directly.
         std::vector<VriTextureBarrierDesc> pre;
@@ -328,13 +328,13 @@ int main(int, char**)
         VriAttachmentsDesc att {};
         att.colors            = &col;
         att.colorNum          = 1;
-        att.renderArea.width  = kWidth;
-        att.renderArea.height = kHeight;
+        att.renderArea.width  = app.width;
+        att.renderArea.height = app.height;
         att.layerNum          = 1;
         c.CmdBeginRendering(cmd, &att);
-        VriViewport vp {0, 0, float(kWidth), float(kHeight), 0, 1};
+        VriViewport vp {0, 0, float(app.width), float(app.height), 0, 1};
         c.CmdSetViewports(cmd, &vp, 1);
-        VriRect sc {0, 0, kWidth, kHeight};
+        VriRect sc {0, 0, app.width, app.height};
         c.CmdSetScissors(cmd, &sc, 1);
         c.CmdSetPipeline(cmd, msaaOn ? scene4x : scene1x);
         c.CmdSetPipelineLayout(cmd, sceneLayout);
