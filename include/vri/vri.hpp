@@ -11,6 +11,7 @@
 #include "vri.h"
 
 #include <expected>
+#include <memory>
 #include <utility>
 
 namespace vri
@@ -79,6 +80,26 @@ namespace vri
             if (r != VriResult_Success)
                 return std::unexpected(r);
             return Device(d);
+        }
+
+        // vriCreateDeviceAsync: `onCreated(std::expected<Device, Result>)` runs once, as described there.
+        template <class OnCreated>
+        [[nodiscard]] static Result createAsync(const VriDeviceCreationDesc& desc, OnCreated onCreated)
+        {
+            auto* handler = new OnCreated(std::move(onCreated));
+            const Result r = ::vriCreateDeviceAsync(
+                &desc,
+                [](void* userData, VriResult result, VriDevice* device) {
+                    const std::unique_ptr<OnCreated> h(static_cast<OnCreated*>(userData));
+                    if (result == VriResult_Success)
+                        (*h)(std::expected<Device, Result>(Device(device)));
+                    else
+                        (*h)(std::expected<Device, Result>(std::unexpected(result)));
+                },
+                handler);
+            if (r != VriResult_Success)
+                delete handler;
+            return r;
         }
 
     private:

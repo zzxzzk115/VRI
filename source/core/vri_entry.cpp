@@ -26,6 +26,8 @@
 #include "factory_mtl.h"
 #endif
 
+#include <memory>
+
 using vri::core::DeviceBase;
 
 namespace vri::core
@@ -47,20 +49,42 @@ namespace
     const DeviceBase* ToBase(const VriDevice* d) { return reinterpret_cast<const DeviceBase*>(d); }
     VriDevice*        ToHandle(DeviceBase* d) { return reinterpret_cast<VriDevice*>(d); }
 
+    void ReportCreationError(const VriDeviceCreationDesc& desc, const char* message)
+    {
+        if (desc.callbackInterface && desc.callbackInterface->MessageCallback)
+            desc.callbackInterface->MessageCallback(desc.callbackInterface->userArg, VriMessageSeverity_Error, message);
+    }
+
+    VriResult ValidateCreationDesc(const VriDeviceCreationDesc& desc)
+    {
+        if (desc.structSize != sizeof(VriDeviceCreationDesc))
+            return VriResult_InvalidArgument;
+        if (!vri::core::ValidConventions(desc.coordinates))
+        {
+            ReportCreationError(desc, "vriCreateDevice: invalid coordinate conventions");
+            return VriResult_InvalidArgument;
+        }
+        return VriResult_Success;
+    }
+
+    // Whether `api` implements every feature the caller insists on.
+    bool ImplementsRequiredFeatures(VriGraphicsAPI api, const VriDeviceCreationDesc& desc)
+    {
+        if (api != VriGraphicsAPI_Vulkan && api != VriGraphicsAPI_Software &&
+            (desc.enabledFeatures & VriFeature_CooperativeVector) && desc.bestEffort == VRI_FALSE)
+        {
+            ReportCreationError(desc, "cooperative vectors are not implemented by the requested backend");
+            return false;
+        }
+        return true;
+    }
+
     // Create a specific backend. Backends not compiled in fall through to Unsupported.
     DeviceBase* CreateBackend(VriGraphicsAPI api, const VriDeviceCreationDesc& desc, VriResult& result)
     {
         result = VriResult_Unsupported;
-        if (api != VriGraphicsAPI_Vulkan && api != VriGraphicsAPI_Software &&
-            (desc.enabledFeatures & VriFeature_CooperativeVector) && desc.bestEffort == VRI_FALSE)
-        {
-            if (desc.callbackInterface && desc.callbackInterface->MessageCallback)
-                desc.callbackInterface->MessageCallback(
-                    desc.callbackInterface->userArg,
-                    VriMessageSeverity_Error,
-                    "cooperative vectors are not implemented by the requested backend");
+        if (!ImplementsRequiredFeatures(api, desc))
             return nullptr;
-        }
         switch (api)
         {
 #if defined(VRI_BACKEND_VULKAN)
@@ -125,6 +149,80 @@ namespace
         count = static_cast<uint32_t>(sizeof(o) / sizeof(o[0]));
         return o;
     }
+
+    // The handle handed to the caller: the backend device, behind the VRI Validation layer when asked.
+    VriDevice* PublishDevice(DeviceBase* device, const VriDeviceCreationDesc& desc)
+    {
+        VriDevice* handle = ToHandle(device);
+        return desc.enableValidation ? vri::core::WrapValidationDevice(handle, desc) : handle;
+    }
+
+    // One vriCreateDeviceAsync call, alive until its callback has run.
+    struct AsyncCreation
+    {
+        VriDeviceCreationDesc    desc;
+        VriDeviceCreatedCallback callback;
+        void*                    userData;
+        const VriGraphicsAPI*    candidates;
+        uint32_t                 candidateNum;
+        uint32_t                 next;
+        VriResult                result;
+    };
+
+    void TryNextBackend(AsyncCreation* creation);
+
+    void FinishAsyncCreation(AsyncCreation* creation, DeviceBase* device)
+    {
+        const std::unique_ptr<AsyncCreation> owned(creation);
+        if (device)
+            creation->callback(creation->userData, VriResult_Success, PublishDevice(device, creation->desc));
+        else
+            creation->callback(creation->userData, creation->result, nullptr);
+    }
+
+#if defined(VRI_BACKEND_WGPU)
+    void OnWebGPUCreated(void* userData, VriResult result, DeviceBase* device)
+    {
+        auto* creation = static_cast<AsyncCreation*>(userData);
+        if (device)
+        {
+            FinishAsyncCreation(creation, device);
+            return;
+        }
+        creation->result = result;
+        TryNextBackend(creation);
+    }
+#endif
+
+    // Every backend but the browser's WebGPU creates its device synchronously; that one continues
+    // from OnWebGPUCreated once the browser has answered.
+    void TryNextBackend(AsyncCreation* creation)
+    {
+        while (creation->next < creation->candidateNum)
+        {
+            const VriGraphicsAPI  api  = creation->candidates[creation->next++];
+            VriDeviceCreationDesc desc = creation->desc;
+            desc.graphicsAPI           = api;
+#if defined(VRI_BACKEND_WGPU)
+            if (api == VriGraphicsAPI_WebGPU)
+            {
+                if (!ImplementsRequiredFeatures(api, desc))
+                {
+                    creation->result = VriResult_Unsupported;
+                    continue;
+                }
+                vri::wgpu::CreateDeviceAsync(desc, OnWebGPUCreated, creation);
+                return;
+            }
+#endif
+            if (DeviceBase* device = CreateBackend(api, desc, creation->result))
+            {
+                FinishAsyncCreation(creation, device);
+                return;
+            }
+        }
+        FinishAsyncCreation(creation, nullptr);
+    }
 } // namespace
 
 extern "C"
@@ -148,21 +246,10 @@ extern "C"
         if (desc == nullptr || outDevice == nullptr)
             return VriResult_InvalidArgument;
 
-        *outDevice = nullptr;
-        if (desc->structSize != sizeof(VriDeviceCreationDesc))
-        {
-            return VriResult_InvalidArgument;
-        }
-        if (!vri::core::ValidConventions(desc->coordinates))
-        {
-            if (desc->callbackInterface && desc->callbackInterface->MessageCallback)
-            {
-                desc->callbackInterface->MessageCallback(desc->callbackInterface->userArg,
-                                                         VriMessageSeverity_Error,
-                                                         "vriCreateDevice: invalid coordinate conventions");
-            }
-            return VriResult_InvalidArgument;
-        }
+        *outDevice            = nullptr;
+        const VriResult valid = ValidateCreationDesc(*desc);
+        if (valid != VriResult_Success)
+            return valid;
 
         DeviceBase* device = nullptr;
         VriResult   result = VriResult_Unsupported;
@@ -186,9 +273,39 @@ extern "C"
         if (device == nullptr)
             return result; // backend reported the precise reason (e.g. Unsupported)
 
-        VriDevice* handle = ToHandle(device);
         // Insert the VRI Validation layer if requested (debug builds default it on).
-        *outDevice = desc->enableValidation ? vri::core::WrapValidationDevice(handle, *desc) : handle;
+        *outDevice = PublishDevice(device, *desc);
+        return VriResult_Success;
+    }
+
+    VriResult VRI_CALL vriCreateDeviceAsync(const VriDeviceCreationDesc* desc,
+                                            VriDeviceCreatedCallback     callback,
+                                            void*                        userData)
+    {
+        if (desc == nullptr || callback == nullptr)
+            return VriResult_InvalidArgument;
+        const VriResult valid = ValidateCreationDesc(*desc);
+        if (valid != VriResult_Success)
+        {
+            callback(userData, valid, nullptr);
+            return VriResult_Success;
+        }
+
+        auto* creation     = new AsyncCreation {};
+        creation->desc     = *desc;
+        creation->callback = callback;
+        creation->userData = userData;
+        creation->result   = VriResult_Unsupported;
+        if (desc->graphicsAPI == VriGraphicsAPI_Auto)
+        {
+            creation->candidates = AutoOrder(creation->candidateNum);
+        }
+        else
+        {
+            creation->candidates   = &creation->desc.graphicsAPI;
+            creation->candidateNum = 1;
+        }
+        TryNextBackend(creation);
         return VriResult_Success;
     }
 

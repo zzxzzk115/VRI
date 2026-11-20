@@ -372,6 +372,12 @@ namespace vri::wgpu
                 b->mapLen    = size ? size : (b->size - offset);
                 return b->shadow + offset;
             }
+            if (!CanWait())
+            {
+                b->device->ReportError("MapBuffer: mapping a GPU buffer in the browser waits for the GPU, which "
+                                       "needs -sASYNCIFY");
+                return nullptr;
+            }
             const WGPUMapMode         mode = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
             MapState                  st   = {};
             WGPUBufferMapCallbackInfo cb   = {};
@@ -1155,6 +1161,15 @@ namespace vri::wgpu
                 if (!deadline.Remaining())
                     return VriResult_Timeout;
 #if defined(__EMSCRIPTEN__)
+                if (!CanWait())
+                {
+                    // The fence can only advance once the page returns to the browser event loop.
+                    if (timeoutNs != UINT64_MAX)
+                        return VriResult_Timeout;
+                    f->device->ReportError("WaitForFence: an unbounded wait in the browser needs -sASYNCIFY; poll "
+                                           "GetFenceValue on a later frame instead");
+                    return VriResult_Unsupported;
+                }
                 emscripten_sleep(1);
 #else
                 if (timeoutNs == UINT64_MAX)
@@ -1800,6 +1815,11 @@ namespace vri::wgpu
         {
             if (!queue)
                 return VriResult_InvalidArgument;
+            if (!CanWait())
+            {
+                Q(queue)->device->ReportError("QueueWaitIdle: waiting for the GPU in the browser needs -sASYNCIFY");
+                return VriResult_Unsupported;
+            }
             struct Completion
             {
                 std::atomic<bool>       done {false};

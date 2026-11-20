@@ -8,6 +8,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <utility>
 
 namespace vri::wgpu
 {
@@ -29,34 +31,6 @@ namespace vri::wgpu
                 n = dstSize - 1;
             std::memcpy(dst, sv.data, n);
             dst[n] = '\0';
-        }
-
-        struct AdapterRequest
-        {
-            bool        done    = false;
-            WGPUAdapter adapter = nullptr;
-        };
-
-        void OnAdapter(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView, void* ud1, void*)
-        {
-            auto* r = static_cast<AdapterRequest*>(ud1);
-            r->done = true;
-            if (status == WGPURequestAdapterStatus_Success)
-                r->adapter = adapter;
-        }
-
-        struct DeviceRequest
-        {
-            bool       done   = false;
-            WGPUDevice device = nullptr;
-        };
-
-        void OnDevice(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView, void* ud1, void*)
-        {
-            auto* r = static_cast<DeviceRequest*>(ud1);
-            r->done = true;
-            if (status == WGPURequestDeviceStatus_Success)
-                r->device = device;
         }
 
         // WebGPU validation errors are otherwise silent (they go to the browser devtools
@@ -111,33 +85,77 @@ namespace vri::wgpu
     {
         if (desc.callbackInterface)
             m_callback = *desc.callbackInterface;
+        if (!CanWait())
+        {
+            ReportWarning("a browser WebGPU device is created asynchronously: use vriCreateDeviceAsync, or link the "
+                          "program with -sASYNCIFY");
+            return VriResult_Unsupported;
+        }
+
+        struct Pending
+        {
+            bool      done   = false;
+            VriResult result = VriResult_Failure;
+        } pending;
+        InitAsync(
+            desc,
+            [](void* userData, VriResult result) {
+                auto* p   = static_cast<Pending*>(userData);
+                p->result = result;
+                p->done   = true;
+            },
+            &pending);
+        for (int i = 0; i < 100000 && !pending.done; ++i)
+            PumpInstance(m_instance);
+        if (!pending.done)
+        {
+            ReportError("the WebGPU adapter or device request did not complete");
+            return VriResult_Failure;
+        }
+        return pending.result;
+    }
+
+    void DeviceWGPU::InitAsync(const VriDeviceCreationDesc& desc, InitCallback done, void* userData)
+    {
+        if (desc.callbackInterface)
+            m_callback = *desc.callbackInterface;
+        m_initDone     = done;
+        m_initUserData = userData;
+        m_coordinates  = desc.coordinates;
 
         WGPUInstanceDescriptor instanceDesc = {};
         m_instance                          = wgpuCreateInstance(&instanceDesc);
         if (!m_instance)
         {
             ReportError("wgpuCreateInstance failed");
-            return VriResult_Failure;
+            FinishInit(VriResult_Failure);
+            return;
         }
 
-        // request adapter (async; pumped via ProcessEvents)
-        AdapterRequest            areq;
         WGPURequestAdapterOptions aopts    = {};
         aopts.powerPreference              = WGPUPowerPreference_HighPerformance;
         WGPURequestAdapterCallbackInfo acb = {};
         acb.mode                           = kCallbackMode;
         acb.callback                       = OnAdapter;
-        acb.userdata1                      = &areq;
+        acb.userdata1                      = this;
         wgpuInstanceRequestAdapter(m_instance, &aopts, acb);
-        for (int i = 0; i < 100000 && !areq.done; ++i)
-            PumpInstance(m_instance);
-        if (!areq.adapter)
-        {
-            ReportError("no WebGPU adapter");
-            return VriResult_Failure;
-        }
-        m_adapter = areq.adapter;
+    }
 
+    void DeviceWGPU::OnAdapter(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView, void* ud1, void*)
+    {
+        auto* self = static_cast<DeviceWGPU*>(ud1);
+        if (status != WGPURequestAdapterStatus_Success || !adapter)
+        {
+            self->ReportError("no WebGPU adapter");
+            self->FinishInit(VriResult_Failure);
+            return;
+        }
+        self->m_adapter = adapter;
+        self->RequestDevice();
+    }
+
+    void DeviceWGPU::RequestDevice()
+    {
         // Opt into timestamp queries when the adapter supports them (for the query interface).
         // VRI's CmdWriteTimestamp records at arbitrary encoder points, which wgpu-native gates
         // behind the native TimestampQueryInsideEncoders feature; the browser (emdawnwebgpu) has
@@ -152,8 +170,6 @@ namespace vri::wgpu
 #endif
         m_hasTimestamp = hasTsQuery && hasTsInside;
 
-        // request device
-        DeviceRequest        dreq;
         WGPUDeviceDescriptor deviceDesc                  = {};
         deviceDesc.uncapturedErrorCallbackInfo.callback  = OnUncapturedError;
         deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
@@ -194,24 +210,35 @@ namespace vri::wgpu
         WGPURequestDeviceCallbackInfo dcb = {};
         dcb.mode                          = kCallbackMode;
         dcb.callback                      = OnDevice;
-        dcb.userdata1                     = &dreq;
+        dcb.userdata1                     = this;
         wgpuAdapterRequestDevice(m_adapter, &deviceDesc, dcb);
-        for (int i = 0; i < 100000 && !dreq.done; ++i)
-            PumpInstance(m_instance);
-        if (!dreq.device)
-        {
-            ReportError("wgpuAdapterRequestDevice failed");
-            return VriResult_Failure;
-        }
-        m_device          = dreq.device;
-        m_queue           = wgpuDeviceGetQueue(m_device);
-        m_queueObj.device = this;
-        m_queueObj.queue  = m_queue;
+    }
 
-        FillDeviceDesc();
-        m_desc.coordinates = desc.coordinates;
-        FillRegistry();
-        return VriResult_Success;
+    void DeviceWGPU::OnDevice(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView, void* ud1, void*)
+    {
+        auto* self = static_cast<DeviceWGPU*>(ud1);
+        if (status != WGPURequestDeviceStatus_Success || !device)
+        {
+            self->ReportError("wgpuAdapterRequestDevice failed");
+            self->FinishInit(VriResult_Failure);
+            return;
+        }
+        self->m_device          = device;
+        self->m_queue           = wgpuDeviceGetQueue(device);
+        self->m_queueObj.device = self;
+        self->m_queueObj.queue  = self->m_queue;
+
+        self->FillDeviceDesc();
+        self->m_desc.coordinates = self->m_coordinates;
+        self->FillRegistry();
+        self->FinishInit(VriResult_Success);
+    }
+
+    void DeviceWGPU::FinishInit(VriResult result)
+    {
+        // Last statement: the callback may delete this device.
+        const InitCallback done = std::exchange(m_initDone, nullptr);
+        done(m_initUserData, result);
     }
 
     void DeviceWGPU::FillDeviceDesc()
@@ -291,5 +318,37 @@ namespace vri::wgpu
             return nullptr;
         }
         return device;
+    }
+
+    void CreateDeviceAsync(const VriDeviceCreationDesc& desc, DeviceCreatedCallback done, void* userData)
+    {
+#if defined(__EMSCRIPTEN__)
+        struct Creation
+        {
+            DeviceWGPU*           device;
+            DeviceCreatedCallback done;
+            void*                 userData;
+        };
+        auto* creation = new Creation {new DeviceWGPU(), done, userData};
+        creation->device->InitAsync(
+            desc,
+            [](void* ud, VriResult result) {
+                const std::unique_ptr<Creation> c(static_cast<Creation*>(ud));
+                if (result != VriResult_Success)
+                {
+                    delete c->device;
+                    c->done(c->userData, result, nullptr);
+                    return;
+                }
+                c->done(c->userData, VriResult_Success, c->device);
+            },
+            creation);
+#else
+        // wgpu-native runs its callbacks only while the instance's events are pumped, which the
+        // synchronous Init does.
+        VriResult         result = VriResult_Failure;
+        core::DeviceBase* device = CreateDevice(desc, result);
+        done(userData, result, device);
+#endif
     }
 } // namespace vri::wgpu

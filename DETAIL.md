@@ -72,7 +72,8 @@ Vulkan/D3D12/Metal use native timeline primitives. GL tracks `GLsync` objects in
 values at submission. It still records immediately on the current context; submission waits cannot reorder
 commands already recorded. WebGPU publishes completed values from queue completion callbacks, in submission
 order. Its logical queue types share one native queue; dependency waits are host waits, not independent GPU
-queues. WebGL/WebGPU host waits yield to the browser through Emscripten Asyncify.
+queues. WebGL/WebGPU host waits yield to the browser through Emscripten Asyncify; in a program linked
+without it, an unbounded wait reports an error and a bounded one returns `VriResult_Timeout`.
 
 `UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
 are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during
