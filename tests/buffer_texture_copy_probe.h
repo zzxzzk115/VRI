@@ -160,6 +160,16 @@ namespace vri::test
         return failure;
     }
 
+    // Whether the device can run `k`: the format must be a texture, and on GL, which reads a texture back through a
+    // framebuffer, a colour attachment too (R16F needs a colour-buffer extension on ES and WebGL).
+    inline bool CopyCaseSupported(VriDevice* device, const VriCoreInterface& c, const CopyCase& k)
+    {
+        const VriFormatSupportFlags flags = c.GetFormatSupport(device, k.format);
+        const VriGraphicsAPI        api   = c.GetDeviceDesc(device)->graphicsAPI;
+        const bool                  gl    = api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES;
+        return (flags & VriFormatSupport_Texture) != 0 && (!gl || (flags & VriFormatSupport_ColorAttachment) != 0);
+    }
+
     // An odd-width two-byte format (13-texel rows are 26 bytes, not a multiple of four) and a 3D texture.
     inline const CopyCase kCopyCases[] = {
         {VriTextureType_2D, VriFormat_R16_SFLOAT, 2, 13, 7, 1},

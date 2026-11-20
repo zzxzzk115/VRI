@@ -2194,6 +2194,11 @@ namespace
         bool             ok = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success;
         for (const vri::test::CopyCase& k : vri::test::kCopyCases)
         {
+            if (ok && !vri::test::CopyCaseSupported(dev, c, k))
+            {
+                std::printf("copy of format %d cannot be read back here - skipped\n", static_cast<int>(k.format));
+                continue;
+            }
             const int failure = ok ? vri::test::CheckBufferTextureRoundTrip(dev, c, k) : __LINE__;
             if (failure)
                 std::printf("WebGL copy of format %d failed at line %d\n", static_cast<int>(k.format), failure);

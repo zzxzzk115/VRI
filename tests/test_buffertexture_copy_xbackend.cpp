@@ -28,6 +28,12 @@ namespace
         {
             INFO(std::string(name) << " format " << static_cast<int>(k.format) << " " << k.width << "x" << k.height
                                    << "x" << k.depth);
+            if (!vri::test::CopyCaseSupported(dev, c, k))
+            {
+                MESSAGE(std::string(name)
+                        << " format " << static_cast<int>(k.format) << " cannot be read back - skipped");
+                continue;
+            }
             CHECK(vri::test::CheckBufferTextureRoundTrip(dev, c, k) == 0);
         }
         c.DeviceWaitIdle(dev);
