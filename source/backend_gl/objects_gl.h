@@ -99,6 +99,7 @@ namespace vri::gl
         uint32_t  mipNum;
         uint32_t  layerNum;
         uint32_t  texelSize;
+        uint32_t  blockBytes     = 0;     // block-compressed: bytes per 4x4 block; 0 otherwise
         bool      isRenderbuffer = false; // MSAA targets are multisample renderbuffers (desktop GL + WebGL2)
     };
 

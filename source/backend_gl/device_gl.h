@@ -91,6 +91,14 @@ namespace vri::gl
         // Image load/store (glBindImageTexture), i.e. storage textures: desktop GL 4.2+.
         // The binding path is compiled out entirely under VRI_GL_ES_HEADERS.
         bool imageLoadStore = false;
+        // Block-compressed format families this context samples (filled with glCompressedTexSubImage*).
+        bool s3tc = false; // BC1-BC3: EXT_texture_compression_s3tc, WEBGL_compressed_texture_s3tc
+        bool rgtc = false; // BC4-BC5: core in desktop GL 3.0, else EXT_texture_compression_rgtc
+        bool bptc = false; // BC6H-BC7: core in desktop GL 4.2, else EXT/ARB_texture_compression_bptc
+        bool etc2 = false; // core in GLES 3.0 and desktop GL 4.3; WEBGL_compressed_texture_etc on WebGL
+        bool astc = false; // KHR_texture_compression_astc_ldr, WEBGL_compressed_texture_astc
+        // glCopyImageSubData (desktop GL 4.3): copies texels, compressed blocks included, without a framebuffer.
+        bool copyImage = false;
     };
 
     class DeviceGL final : public core::DeviceBase

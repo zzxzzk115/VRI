@@ -40,6 +40,32 @@ namespace vri::gl
     // depth format is fine and then be handed an RGBA8 texture for it.
     inline GLFormat ToGLFormatOrNone(VriFormat f) { return vri::MapOr(f, kGLFormatTable, GLFormat {0, 0, 0, 0}); }
 
+    // Block-compressed formats: 4x4 texel blocks of `blockBytes`, filled with glCompressedTexSubImage*. The
+    // enums come from the S3TC, RGTC, BPTC, ETC2 and ASTC extensions, which not every GL header declares.
+    struct GLCompressedFormat
+    {
+        GLenum   internalFormat;
+        uint32_t blockBytes;
+    };
+
+    inline constexpr vri::ConvRow<VriFormat, GLCompressedFormat> kGLCompressedTable[] = {
+        {VriFormat_BC1_UNORM, {0x83F1, 8}},         // GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
+        {VriFormat_BC2_UNORM, {0x83F2, 16}},        // GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
+        {VriFormat_BC3_UNORM, {0x83F3, 16}},        // GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
+        {VriFormat_BC4_UNORM, {0x8DBB, 8}},         // GL_COMPRESSED_RED_RGTC1
+        {VriFormat_BC5_UNORM, {0x8DBD, 16}},        // GL_COMPRESSED_RG_RGTC2
+        {VriFormat_BC6H_UFLOAT, {0x8E8F, 16}},      // GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT
+        {VriFormat_BC7_UNORM, {0x8E8C, 16}},        // GL_COMPRESSED_RGBA_BPTC_UNORM
+        {VriFormat_ETC2_RGBA8_UNORM, {0x9278, 16}}, // GL_COMPRESSED_RGBA8_ETC2_EAC
+        {VriFormat_ASTC_4x4_UNORM, {0x93B0, 16}},   // GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+    };
+
+    // internalFormat == 0 for a format that is not block-compressed.
+    inline GLCompressedFormat ToGLCompressedFormat(VriFormat f)
+    {
+        return vri::MapOr(f, kGLCompressedTable, GLCompressedFormat {0, 0});
+    }
+
     inline GLFormat ToGLFormat(VriFormat f)
     {
         const GLFormat mapped = ToGLFormatOrNone(f);

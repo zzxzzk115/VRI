@@ -731,6 +731,7 @@ namespace vri::gl
             f.colorBufferHalfFloat = atLeast(3, 0);
             f.floatBlend           = atLeast(3, 0);
             f.imageLoadStore       = atLeast(4, 2); // glBindImageTexture (macOS GL 4.1 misses it)
+            f.copyImage            = atLeast(4, 3);
         }
         else
         {
@@ -747,6 +748,28 @@ namespace vri::gl
 #if defined(VRI_GL_ES_HEADERS)
         f.imageLoadStore = false; // the binding path does not exist in this build
 #endif
+        // Block-compressed families, as this context reports them. WebGL names its extensions WEBGL_* and EXT_*,
+        // which Emscripten lists with a GL_ prefix.
+        f.s3tc =
+            HasGLExtension("GL_EXT_texture_compression_s3tc") || HasGLExtension("GL_WEBGL_compressed_texture_s3tc");
+        f.rgtc = (!m_es && atLeast(3, 0)) || HasGLExtension("GL_EXT_texture_compression_rgtc");
+        f.bptc = (!m_es && atLeast(4, 2)) || HasGLExtension("GL_ARB_texture_compression_bptc") ||
+                 HasGLExtension("GL_EXT_texture_compression_bptc");
+#if defined(__EMSCRIPTEN__)
+        f.etc2 = HasGLExtension("GL_WEBGL_compressed_texture_etc");
+#else
+        f.etc2 = m_es || atLeast(4, 3);
+#endif
+        f.astc =
+            HasGLExtension("GL_KHR_texture_compression_astc_ldr") || HasGLExtension("GL_WEBGL_compressed_texture_astc");
+        if (!f.textureStorage) // the glTexImage* fallback (macOS GL 4.1) cannot allocate compressed storage
+        {
+            f.s3tc = false;
+            f.rgtc = false;
+            f.bptc = false;
+            f.etc2 = false;
+            f.astc = false;
+        }
         m_features = f;
     }
 
