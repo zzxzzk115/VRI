@@ -49,6 +49,28 @@ namespace
         return failure == 0;
     }
 
+    // A feature this backend does not grant: refused without bestEffort, absent from enabledFeatures with it.
+    bool FeatureProbe(VriGraphicsAPI api)
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = api;
+        dc.enabledFeatures       = VriFeature_RayTracing;
+        dc.bestEffort            = VRI_FALSE;
+        VriDevice*      dev      = nullptr;
+        const VriResult strict   = vriCreateDevice(&dc, &dev);
+        if (dev)
+            vriDestroyDevice(dev);
+        dc.bestEffort = VRI_TRUE;
+        dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        const bool       granted = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                             c.GetDeviceDesc(dev)->enabledFeatures == 0;
+        vriDestroyDevice(dev);
+        return strict == VriResult_Unsupported && granted;
+    }
+
     bool RenderAndProbe(bool& centerRed)
     {
         centerRed                 = false;
@@ -410,13 +432,15 @@ int main()
     std::printf("VRI_WEBGPU_STEP: compute done\n");
     std::fflush(stdout);
     const bool completion = CompletionProbe();
-    const bool pass       = ran && centerRed && compute && completion;
-    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d)\n",
+    const bool features   = FeatureProbe(VriGraphicsAPI_WebGPU);
+    const bool pass       = ran && centerRed && compute && completion && features;
+    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d features=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
                 compute ? 1 : 0,
-                completion ? 1 : 0);
+                completion ? 1 : 0,
+                features ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);

@@ -2133,6 +2133,28 @@ namespace
         return true;
     }
 
+    // A feature this backend does not grant: refused without bestEffort, absent from enabledFeatures with it.
+    bool FeatureProbe(VriGraphicsAPI api)
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = api;
+        dc.enabledFeatures       = VriFeature_RayTracing;
+        dc.bestEffort            = VRI_FALSE;
+        VriDevice*      dev      = nullptr;
+        const VriResult strict   = vriCreateDevice(&dc, &dev);
+        if (dev)
+            vriDestroyDevice(dev);
+        dc.bestEffort = VRI_TRUE;
+        dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        const bool       granted = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                             c.GetDeviceDesc(dev)->enabledFeatures == 0;
+        vriDestroyDevice(dev);
+        return strict == VriResult_Unsupported && granted;
+    }
+
     // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
     // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
     // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
@@ -2542,6 +2564,8 @@ int main()
     const bool ranSecond  = SecondContextProbe(secondOk);
     const bool secondPass = ranSecond && secondOk;
 
+    const bool featurePass = FeatureProbe(VriGraphicsAPI_OpenGLES);
+
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
     const bool msaaPass = ranMsaa && msaaEdge;
@@ -2551,11 +2575,12 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && secondPass && msaaPass && swapPass;
+                      instPass && scissorPass && computeNoPass && secondPass && featurePass && msaaPass && swapPass;
     std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-                "ran=%d ok=%d | second-context: ran=%d ok=%d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
+                "ran=%d ok=%d | second-context: ran=%d ok=%d | features: %d | msaa: ran=%d edge=%d | swapchain: ran=%d "
+                "red=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ranTri,
                 topRed,
@@ -2582,6 +2607,7 @@ int main()
                 computeNoOk,
                 ranSecond,
                 secondOk,
+                featurePass,
                 ranMsaa,
                 msaaEdge,
                 ranSwap,

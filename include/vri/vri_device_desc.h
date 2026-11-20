@@ -111,8 +111,11 @@ typedef struct VriDeviceDesc
     VriBool  hasGeometryShader;
     VriBool  hasComputeShader;
 
-    /* optional features actually granted at device creation (subset of the
-       requested VriFeatureBits; see VriDeviceCreationDesc::enabledFeatures). */
+    /* The optional VriFeatureBits this device grants, on every backend: a subset of
+       VriDeviceCreationDesc::enabledFeatures. With bestEffort VRI_FALSE, creation fails with
+       VriResult_Unsupported unless every requested feature is granted. The has* flags that stand for
+       a feature (hasRayTracing, hasMeshShader, hasBindless, hasVariableShadingRate, hasOpacityMicromap,
+       hasRayQuery, hasExternalMemory, hasCooperativeVector, hasShaderAtomicInt64) equal its bit here. */
     uint64_t enabledFeatures;
     VriBool  hasRayTracing;
     VriBool  hasMeshShader;
