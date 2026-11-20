@@ -125,7 +125,7 @@ namespace
     // prefers the most capable / best-tested backend per platform.
     const VriGraphicsAPI* AutoOrder(uint32_t& count)
     {
-        // Software (CPU) rendering is the LAST candidate on every non-web platform: only reached
+        // Software (CPU) rendering is the LAST candidate on every desktop platform: only reached
         // when no GPU backend could create a device, and only succeeds when a software Vulkan ICD
         // is present - so a GPU-less machine still renders instead of failing outright.
 #if defined(__EMSCRIPTEN__)
@@ -142,7 +142,10 @@ namespace
                                            VriGraphicsAPI_WebGPU,
                                            VriGraphicsAPI_OpenGL,
                                            VriGraphicsAPI_Software};
-#else // Linux / Android
+#elif defined(__ANDROID__)
+        // Android has Vulkan and OpenGL ES; WebGPU and software Vulkan are not shipped there.
+        static const VriGraphicsAPI o[] = {VriGraphicsAPI_Vulkan, VriGraphicsAPI_OpenGLES};
+#else // Linux
         static const VriGraphicsAPI o[] = {
             VriGraphicsAPI_Vulkan, VriGraphicsAPI_WebGPU, VriGraphicsAPI_OpenGL, VriGraphicsAPI_Software};
 #endif
