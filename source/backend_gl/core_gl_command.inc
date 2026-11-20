@@ -97,6 +97,22 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
         }
     }
 
+    // GL clears are clipped by the scissor, which still holds the previous pass's rectangle (a
+    // 1024x1024 shadow pass would leave a larger window's color and depth uncleared outside it).
+    // A load-op clear covers the render area, as on the other backends.
+    if (a->renderArea.width != 0 && a->renderArea.height != 0)
+    {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(a->renderArea.x,
+                  a->renderArea.y,
+                  static_cast<GLsizei>(a->renderArea.width),
+                  static_cast<GLsizei>(a->renderArea.height));
+    }
+    else
+    {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
     // Per-pass: MSAA resolve targets (recorded for EndRendering) + load/clear ops.
     c->pendingResolves.clear();
     for (uint32_t i = 0; i < a->colorNum; ++i)
