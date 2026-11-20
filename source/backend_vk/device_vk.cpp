@@ -14,6 +14,10 @@
 
 #include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer
 
+#if defined(__APPLE__)
+#include <dlfcn.h>
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -26,10 +30,35 @@ namespace vri::vk
 {
     namespace
     {
+        // Opens the Vulkan loader and gives volk its vkGetInstanceProcAddr.
+        bool OpenVulkanLoader()
+        {
+            if (volkInitialize() == VK_SUCCESS)
+                return true;
+#if defined(__APPLE__)
+            // volk looks only in the system library paths; a Vulkan SDK elsewhere is found through
+            // the rpath the build records (rule vulkansdk.rpath). The loader stays open for the
+            // process's lifetime, as volkInitialize keeps its own.
+            void* loader = dlopen("@rpath/libvulkan.1.dylib", RTLD_NOW | RTLD_LOCAL);
+            if (loader)
+            {
+                auto getInstanceProcAddr =
+                    reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(loader, "vkGetInstanceProcAddr"));
+                if (getInstanceProcAddr)
+                {
+                    volkInitializeCustom(getInstanceProcAddr);
+                    return true;
+                }
+                dlclose(loader);
+            }
+#endif
+            return false;
+        }
+
         // volk opens the loader once per process; every device and EnumerateAdapters share it.
         bool LoadVulkanLoader()
         {
-            static const bool loaded = volkInitialize() == VK_SUCCESS;
+            static const bool loaded = OpenVulkanLoader();
             return loaded;
         }
 

@@ -217,6 +217,20 @@ rule("vulkansdk")
     end)
 rule_end()
 
+-- macOS: record the Vulkan SDK's library directory as an rpath of the programs that use vri, without
+-- linking the loader. volk opens the loader by name (system paths only); DeviceVK then opens
+-- @rpath/libvulkan.1.dylib, which this rpath resolves to the SDK's loader.
+rule("vulkansdk.rpath")
+    on_config(function (target)
+        import("detect.sdks.find_vulkansdk")
+        local vulkansdk = find_vulkansdk()
+        if vulkansdk and vulkansdk.linkdirs and vulkansdk.linkdirs[1] then
+            target:add("rpathdirs", vulkansdk.linkdirs[1], { public = true })
+            target:add("ldflags", "-Wl,-rpath," .. vulkansdk.linkdirs[1], { force = true, public = true })
+        end
+    end)
+rule_end()
+
 -- Link the Slang compiler library bundled with the Vulkan SDK (prebuilt), so
 -- vri-shaderc drives Slang in-process without building Slang from source.
 rule("slangsdk")
