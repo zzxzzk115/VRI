@@ -109,6 +109,7 @@ namespace vri::d3d12
             CmdClearStorageTexture,
             EnumerateObjects,
             WaitForFence,
+            MapBufferAsync,
         };
         return &t;
     }
