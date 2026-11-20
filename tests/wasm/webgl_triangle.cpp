@@ -2630,11 +2630,8 @@ int main()
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
                 "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | validation-state: %d | features: %d | "
-                "msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)
-                ",
-                    pass ?
-                    "PASS" :
-                    "FAIL",
+                "msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
+                pass ? "PASS" : "FAIL",
                 ranTri,
                 topRed,
                 botRed,
