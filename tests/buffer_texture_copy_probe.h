@@ -5,6 +5,7 @@
 #include <vri/vri.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -137,7 +138,17 @@ namespace vri::test
         for (uint32_t z = 0; z < k.depth && !failure; ++z)
             for (uint32_t y = 0; y < k.height && !failure; ++y)
                 if (std::memcmp(result + at(0, y, z, 0), source.data() + at(0, y, z, 0), k.width * k.texelSize) != 0)
+                {
                     failure = __LINE__;
+                    // Which bytes differ is what tells a layout error from a format one.
+                    std::printf("buffer-texture copy mismatch at slice %u, row %u: got", z, y);
+                    for (uint32_t i = 0; i < k.width * k.texelSize; ++i)
+                        std::printf(" %02x", result[at(0, y, z, i)]);
+                    std::printf(", want");
+                    for (uint32_t i = 0; i < k.width * k.texelSize; ++i)
+                        std::printf(" %02x", source[at(0, y, z, i)]);
+                    std::printf("\n");
+                }
         if (result)
             c.UnmapBuffer(readback);
 

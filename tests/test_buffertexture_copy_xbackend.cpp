@@ -6,6 +6,8 @@
 
 #include <vri/vri.h>
 
+#include <string>
+
 namespace
 {
     void Check(VriGraphicsAPI api, const char* name)
@@ -24,8 +26,8 @@ namespace
         REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
         for (const vri::test::CopyCase& k : vri::test::kCopyCases)
         {
-            INFO(name << " format " << static_cast<int>(k.format) << " " << k.width << "x" << k.height << "x"
-                      << k.depth);
+            INFO(std::string(name) << " format " << static_cast<int>(k.format) << " " << k.width << "x" << k.height
+                                   << "x" << k.depth);
             CHECK(vri::test::CheckBufferTextureRoundTrip(dev, c, k) == 0);
         }
         c.DeviceWaitIdle(dev);
