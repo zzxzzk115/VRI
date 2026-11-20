@@ -261,9 +261,12 @@ void TexImageAllocate(GLenum          target,
     {
         const GLsizei lw = (w >> level) > 0 ? (w >> level) : 1;
         const GLsizei lh = (h >> level) > 0 ? (h >> level) : 1;
+        GLsizei       ld = depth;    // an array keeps its layer count
+        if (target == GL_TEXTURE_3D) // a volume's depth shrinks with each mip
+            ld = (depth >> level) > 0 ? (depth >> level) : 1;
         if (is3D)
             glTexImage3D(
-                target, level, static_cast<GLint>(gf.internalFormat), lw, lh, depth, 0, gf.format, gf.type, nullptr);
+                target, level, static_cast<GLint>(gf.internalFormat), lw, lh, ld, 0, gf.format, gf.type, nullptr);
         else if (isCube)
             for (GLenum f = 0; f < 6; ++f)
                 glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f,
@@ -283,14 +286,16 @@ void TexImageAllocate(GLenum          target,
 
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
-    const GLFormat gf      = ToGLFormat(desc->format);
-    const GLsizei  mips    = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
-    const GLsizei  w       = static_cast<GLsizei>(desc->width);
-    const GLsizei  h       = static_cast<GLsizei>(desc->height ? desc->height : 1u);
-    const GLsizei  layers  = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
-    const bool     ms      = desc->sampleNum > 1;
-    const bool     isCube  = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
-    const bool     isArray = !ms && !isCube && desc->type != VriTextureType_3D && layers > 1; // 2D array texture
+    const GLFormat gf       = ToGLFormat(desc->format);
+    const GLsizei  mips     = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
+    const GLsizei  w        = static_cast<GLsizei>(desc->width);
+    const GLsizei  h        = static_cast<GLsizei>(desc->height ? desc->height : 1u);
+    const GLsizei  layers   = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
+    const GLsizei  depth    = static_cast<GLsizei>(desc->depth ? desc->depth : 1u);
+    const bool     ms       = desc->sampleNum > 1;
+    const bool     isCube   = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
+    const bool     isVolume = !ms && desc->type == VriTextureType_3D;
+    const bool     isArray  = !ms && !isCube && !isVolume && layers > 1; // 2D array texture
 
     // Immutable storage: GL 4.2+ and always present on GLES3/WebGL2; false only on macOS GL 4.1.
     const bool texStorage = Dev(device)->Features().textureStorage;
@@ -357,6 +362,28 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
             glBindTexture(target, 0);
         }
     }
+    else if (isVolume)
+    {
+        // 3D texture: glTexStorage3D on GL_TEXTURE_3D, depth = slice count.
+        target = GL_TEXTURE_3D;
+#if !defined(VRI_GL_ES_HEADERS)
+        if (dsa)
+        {
+            glCreateTextures(target, 1, &id);
+            glTextureStorage3D(id, mips, gf.internalFormat, w, h, depth);
+        }
+        else
+#endif
+        {
+            glGenTextures(1, &id);
+            glBindTexture(target, id);
+            if (texStorage)
+                glTexStorage3D(target, mips, gf.internalFormat, w, h, depth);
+            else
+                TexImageAllocate(target, gf, mips, w, h, depth, /*is3D*/ true, /*isCube*/ false);
+            glBindTexture(target, 0);
+        }
+    }
     else if (isArray)
     {
         // 2D array texture (GLES3/WebGL2 + desktop): glTexStorage3D, depth = layer count.
@@ -407,7 +434,7 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     t->internalFormat = gf.internalFormat;
     t->width          = desc->width;
     t->height         = desc->height ? desc->height : 1u;
-    t->depth          = 1;
+    t->depth          = isVolume ? static_cast<uint32_t>(depth) : 1u;
     t->mipNum         = static_cast<uint32_t>(mips);
     t->layerNum       = static_cast<uint32_t>(layers);
     t->texelSize      = gf.texelSize;

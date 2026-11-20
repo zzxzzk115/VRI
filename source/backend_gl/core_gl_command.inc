@@ -882,84 +882,114 @@ void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glDeleteFramebuffers(2, fbos);
 }
+// The texels a buffer<->texture copy covers at its mip. A zero width/height/depth is the mip's full
+// extent. `z`/`slices` are depth slices for a 3D texture, else layers (cube faces).
+struct CopyRegionGL
+{
+    GLint   x;
+    GLint   y;
+    GLint   z;
+    GLsizei width;
+    GLsizei height;
+    GLsizei slices;
+};
+CopyRegionGL ResolveCopyRegion(const TextureGL* t, const VriTextureRegionDesc& r)
+{
+    const auto   atMip = [&](uint32_t extent) { return static_cast<GLsizei>(std::max(extent >> r.mip, 1u)); };
+    CopyRegionGL c {};
+    c.x      = r.x;
+    c.y      = r.y;
+    c.width  = r.width ? static_cast<GLsizei>(r.width) : atMip(t->width);
+    c.height = r.height ? static_cast<GLsizei>(r.height) : atMip(t->height);
+    if (t->target == GL_TEXTURE_3D)
+    {
+        c.z      = r.z;
+        c.slices = r.depth ? static_cast<GLsizei>(r.depth) : atMip(t->depth);
+    }
+    else
+    {
+        c.z      = static_cast<GLint>(r.baseLayer);
+        c.slices = static_cast<GLsizei>(r.layerNum ? r.layerNum : 1u);
+    }
+    return c;
+}
+
+// Buffer rows are bufferRowLength texels apart and slices bufferImageHeight rows apart (0 = tightly
+// packed), with no row alignment. Sets that layout for one copy and puts back GL's defaults, which
+// the device's context otherwise keeps.
+class PixelStoreGL
+{
+public:
+    PixelStoreGL(bool pack, const VriBufferTextureCopyDesc& region) : m_pack(pack)
+    {
+        glPixelStorei(m_pack ? GL_PACK_ALIGNMENT : GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(m_pack ? GL_PACK_ROW_LENGTH : GL_UNPACK_ROW_LENGTH, static_cast<GLint>(region.bufferRowLength));
+        if (!m_pack) // a readback addresses each slice itself; there is no pack image height
+            glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, static_cast<GLint>(region.bufferImageHeight));
+    }
+    ~PixelStoreGL()
+    {
+        glPixelStorei(m_pack ? GL_PACK_ALIGNMENT : GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(m_pack ? GL_PACK_ROW_LENGTH : GL_UNPACK_ROW_LENGTH, 0);
+        if (!m_pack)
+            glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+    }
+    PixelStoreGL(const PixelStoreGL&)            = delete;
+    PixelStoreGL& operator=(const PixelStoreGL&) = delete;
+
+private:
+    bool m_pack;
+};
+
 void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*,
                                        VriTexture*                     dst,
                                        VriBuffer*                      src,
                                        const VriBufferTextureCopyDesc* region)
 {
-    TextureGL*     t     = Tex(dst);
-    const uint32_t w     = region->texture.width ? region->texture.width : t->width;
-    const uint32_t h     = region->texture.height ? region->texture.height : t->height;
-    const void*    off   = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
-    const bool     array = t->target == GL_TEXTURE_2D_ARRAY; // 2D array texture -> 3D sub-image, z = layer
-    const bool     cube  = t->target == GL_TEXTURE_CUBE_MAP; // cube -> per-face 2D sub-image (z = face)
-    const GLint    mip   = static_cast<GLint>(region->texture.mip);
-    const GLint    z     = static_cast<GLint>(region->texture.baseLayer);
-    const GLsizei  d     = static_cast<GLsizei>(region->texture.layerNum ? region->texture.layerNum : 1u);
+    TextureGL*         t       = Tex(dst);
+    const CopyRegionGL c       = ResolveCopyRegion(t, region->texture);
+    const void*        off     = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
+    const bool         layered = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_3D; // z = layer / slice
+    const bool         cube    = t->target == GL_TEXTURE_CUBE_MAP;                               // z = face
+    const GLint        mip     = static_cast<GLint>(region->texture.mip);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
+    const PixelStoreGL store(false, *region);
 #if !defined(VRI_GL_ES_HEADERS)
     if (t->device->Features()
             .dsa) // GL 4.5: upload without binding the texture (cube uses the layered 3D path, z = face)
     {
-        if (array || cube)
-            glTextureSubImage3D(t->id,
-                                mip,
-                                region->texture.x,
-                                region->texture.y,
-                                z,
-                                static_cast<GLsizei>(w),
-                                static_cast<GLsizei>(h),
-                                d,
-                                t->glFormat,
-                                t->glType,
-                                off);
+        if (layered || cube)
+            glTextureSubImage3D(t->id, mip, c.x, c.y, c.z, c.width, c.height, c.slices, t->glFormat, t->glType, off);
         else
-            glTextureSubImage2D(t->id,
-                                mip,
-                                region->texture.x,
-                                region->texture.y,
-                                static_cast<GLsizei>(w),
-                                static_cast<GLsizei>(h),
-                                t->glFormat,
-                                t->glType,
-                                off);
+            glTextureSubImage2D(t->id, mip, c.x, c.y, c.width, c.height, t->glFormat, t->glType, off);
     }
     else
 #endif
     {
         glBindTexture(t->target, t->id);
         if (cube)
-            glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + z,
-                            mip,
-                            region->texture.x,
-                            region->texture.y,
-                            static_cast<GLsizei>(w),
-                            static_cast<GLsizei>(h),
-                            t->glFormat,
-                            t->glType,
-                            off);
-        else if (array)
-            glTexSubImage3D(t->target,
-                            mip,
-                            region->texture.x,
-                            region->texture.y,
-                            z,
-                            static_cast<GLsizei>(w),
-                            static_cast<GLsizei>(h),
-                            d,
-                            t->glFormat,
-                            t->glType,
-                            off);
+        {
+            // One face at a time: faces follow each other in the buffer like the slices of an image.
+            const uint32_t rowLength =
+                region->bufferRowLength ? region->bufferRowLength : static_cast<uint32_t>(c.width);
+            const uint32_t rows =
+                region->bufferImageHeight ? region->bufferImageHeight : static_cast<uint32_t>(c.height);
+            const uint64_t faceBytes = static_cast<uint64_t>(rowLength) * rows * t->texelSize;
+            for (GLsizei face = 0; face < c.slices; ++face)
+                glTexSubImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + c.z + face),
+                                mip,
+                                c.x,
+                                c.y,
+                                c.width,
+                                c.height,
+                                t->glFormat,
+                                t->glType,
+                                static_cast<const uint8_t*>(off) + faceBytes * static_cast<uint64_t>(face));
+        }
+        else if (layered)
+            glTexSubImage3D(t->target, mip, c.x, c.y, c.z, c.width, c.height, c.slices, t->glFormat, t->glType, off);
         else
-            glTexSubImage2D(t->target,
-                            mip,
-                            region->texture.x,
-                            region->texture.y,
-                            static_cast<GLsizei>(w),
-                            static_cast<GLsizei>(h),
-                            t->glFormat,
-                            t->glType,
-                            off);
+            glTexSubImage2D(t->target, mip, c.x, c.y, c.width, c.height, t->glFormat, t->glType, off);
         glBindTexture(t->target, 0);
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
@@ -972,30 +1002,19 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     // No glGetTextureImage on GLES/WebGL: read via a temp FBO + glReadPixels
     // into a PBO. glReadPixels reads bottom-up; combined with the in-shader
     // flip_vert_y this yields VRI top-left row order.
-    const TextureGL* t   = reinterpret_cast<const TextureGL*>(src);
-    BufferGL*        b   = Buf(dst);
-    const GLint      mip = static_cast<GLint>(region->texture.mip);
-    GLsizei          w   = static_cast<GLsizei>(t->width >> region->texture.mip);
-    if (w < 1)
-        w = 1;
-    GLsizei h = static_cast<GLsizei>(t->height >> region->texture.mip);
-    if (h < 1)
-        h = 1;
+    const TextureGL*   t   = reinterpret_cast<const TextureGL*>(src);
+    BufferGL*          b   = Buf(dst);
+    const CopyRegionGL c   = ResolveCopyRegion(t, region->texture);
+    const GLint        mip = static_cast<GLint>(region->texture.mip);
+    // glReadPixels reads one image; layers and 3D slices are read one by one into consecutive slices.
+    const uint32_t rowLength  = region->bufferRowLength ? region->bufferRowLength : static_cast<uint32_t>(c.width);
+    const uint32_t rows       = region->bufferImageHeight ? region->bufferImageHeight : static_cast<uint32_t>(c.height);
+    const uint64_t sliceBytes = static_cast<uint64_t>(rowLength) * rows * t->texelSize;
+    // Array, cube and 3D textures attach one layer (glFramebufferTexture2D rejects them); plain 2D
+    // uses the 2D attach.
+    const bool layerAttach = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP ||
+                             t->target == GL_TEXTURE_3D || t->layerNum > 1;
 
-    GLuint fbo = 0;
-    glGenFramebuffers(1, &fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    // Array / cube textures must attach a single layer (glFramebufferTexture2D rejects a
-    // 2D_ARRAY target); honor the region's baseLayer. Plain 2D uses the 2D attach.
-    if (t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP || t->layerNum > 1)
-        glFramebufferTextureLayer(
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->id, mip, static_cast<GLint>(region->texture.baseLayer));
-    else
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->target, t->id, mip);
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
     // WebGL2 glReadPixels only accepts GL_RGBA (+ GL_UNSIGNED_BYTE); GL_BGRA is
     // rejected (INVALID_ENUM -> zeroed readback). The BGRA8 backbuffer is GL_RGBA8
     // internally, so read it as RGBA. Bytes land R,G,B,A (B/R swapped vs the BGRA
@@ -1004,7 +1023,23 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     GLenum readFmt = t->glFormat;
     if (b->device->IsES() && readFmt == GL_BGRA)
         readFmt = GL_RGBA;
-    glReadPixels(0, 0, w, h, readFmt, t->glType, reinterpret_cast<void*>(static_cast<uintptr_t>(region->bufferOffset)));
+
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
+    const PixelStoreGL store(true, *region);
+    for (GLsizei slice = 0; slice < c.slices; ++slice)
+    {
+        if (layerAttach)
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->id, mip, c.z + slice);
+        else
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->target, t->id, mip);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        const uint64_t offset = region->bufferOffset + sliceBytes * static_cast<uint64_t>(slice);
+        glReadPixels(
+            c.x, c.y, c.width, c.height, readFmt, t->glType, reinterpret_cast<void*>(static_cast<uintptr_t>(offset)));
+    }
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

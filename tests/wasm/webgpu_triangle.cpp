@@ -7,6 +7,7 @@
 // Build: xmake f -p wasm --vri_backend_wgpu=y; xmake build vri-webgpu-triangle
 // Run:   emrun (headless Chrome with --enable-unsafe-webgpu) over the .html
 
+#include "tests/buffer_texture_copy_probe.h"
 #include "tests/compressed_format_probe.h"
 #include "tests/map_async_probe.h"
 #include "tests/wgpu_completion_probe.h"
@@ -112,6 +113,32 @@ namespace
                              c.GetDeviceDesc(dev)->enabledFeatures == 0;
         vriDestroyDevice(dev);
         return strict == VriResult_Unsupported && granted;
+    }
+
+    // Buffer <-> texture copies with padded rows and slices: an odd-width R16F texture and a 3D texture.
+    bool CopyProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        bool             ok = vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success;
+        for (const vri::test::CopyCase& k : vri::test::kCopyCases)
+        {
+            if (ok && !vri::test::CopyCaseSupported(device, c, k))
+            {
+                std::printf("copy of format %d cannot be read back here - skipped\n", static_cast<int>(k.format));
+                continue;
+            }
+            const int failure = ok ? vri::test::CheckBufferTextureRoundTrip(device, c, k) : __LINE__;
+            if (failure)
+                std::printf("WebGPU copy of format %d failed at line %d\n", static_cast<int>(k.format), failure);
+            ok = ok && failure == 0;
+        }
+        vriDestroyDevice(device);
+        return ok;
     }
 
     bool RenderAndProbe(bool& centerRed)
@@ -478,17 +505,19 @@ int main()
     const bool mapAsync   = MapAsyncProbe();
     const bool compressed = CompressedProbe();
     const bool features   = FeatureProbe(VriGraphicsAPI_WebGPU);
-    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features;
-    std::printf(
-        "VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d features=%d)\n",
-        pass ? "PASS" : "FAIL",
-        ran ? 1 : 0,
-        centerRed ? 1 : 0,
-        compute ? 1 : 0,
-        completion ? 1 : 0,
-        mapAsync ? 1 : 0,
-        compressed ? 1 : 0,
-        features ? 1 : 0);
+    const bool copies     = CopyProbe();
+    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies;
+    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
+                "features=%d copies=%d)\n",
+                pass ? "PASS" : "FAIL",
+                ran ? 1 : 0,
+                centerRed ? 1 : 0,
+                compute ? 1 : 0,
+                completion ? 1 : 0,
+                mapAsync ? 1 : 0,
+                compressed ? 1 : 0,
+                features ? 1 : 0,
+                copies ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);
