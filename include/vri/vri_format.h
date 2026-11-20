@@ -85,6 +85,17 @@ typedef enum VriFormat
     VriFormat_ETC2_RGBA8_UNORM,
     VriFormat_ASTC_4x4_UNORM,
 
+    /* sRGB and signed variants of the block-compressed formats above, appended for the same reason */
+    VriFormat_BC1_SRGB,
+    VriFormat_BC2_SRGB,
+    VriFormat_BC3_SRGB,
+    VriFormat_BC7_SRGB,
+    VriFormat_BC6H_SFLOAT,
+    VriFormat_BC4_SNORM,
+    VriFormat_BC5_SNORM,
+    VriFormat_ETC2_RGBA8_SRGB,
+    VriFormat_ASTC_4x4_SRGB,
+
     VriFormat_Count,
     VriFormat_MaxEnum = 0x7fffffff
 } VriFormat;

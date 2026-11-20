@@ -5,6 +5,7 @@
 #include <vri/vri.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -137,7 +138,17 @@ namespace vri::test
         for (uint32_t z = 0; z < k.depth && !failure; ++z)
             for (uint32_t y = 0; y < k.height && !failure; ++y)
                 if (std::memcmp(result + at(0, y, z, 0), source.data() + at(0, y, z, 0), k.width * k.texelSize) != 0)
+                {
                     failure = __LINE__;
+                    // Which bytes differ is what tells a layout error from a format one.
+                    std::printf("buffer-texture copy mismatch at slice %u, row %u: got", z, y);
+                    for (uint32_t i = 0; i < k.width * k.texelSize; ++i)
+                        std::printf(" %02x", result[at(0, y, z, i)]);
+                    std::printf(", want");
+                    for (uint32_t i = 0; i < k.width * k.texelSize; ++i)
+                        std::printf(" %02x", source[at(0, y, z, i)]);
+                    std::printf("\n");
+                }
         if (result)
             c.UnmapBuffer(readback);
 
@@ -147,6 +158,16 @@ namespace vri::test
         c.DestroyBuffer(upload);
         c.DestroyTexture(texture);
         return failure;
+    }
+
+    // Whether the device can run `k`: the format must be a texture, and on GL, which reads a texture back through a
+    // framebuffer, a colour attachment too (R16F needs a colour-buffer extension on ES and WebGL).
+    inline bool CopyCaseSupported(VriDevice* device, const VriCoreInterface& c, const CopyCase& k)
+    {
+        const VriFormatSupportFlags flags = c.GetFormatSupport(device, k.format);
+        const VriGraphicsAPI        api   = c.GetDeviceDesc(device)->graphicsAPI;
+        const bool                  gl    = api == VriGraphicsAPI_OpenGL || api == VriGraphicsAPI_OpenGLES;
+        return (flags & VriFormatSupport_Texture) != 0 && (!gl || (flags & VriFormatSupport_ColorAttachment) != 0);
     }
 
     // An odd-width two-byte format (13-texel rows are 26 bytes, not a multiple of four) and a 3D texture.

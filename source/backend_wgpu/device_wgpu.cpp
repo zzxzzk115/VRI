@@ -146,6 +146,14 @@ namespace vri::wgpu
         m_initDone     = done;
         m_initUserData = userData;
         m_coordinates  = desc.coordinates;
+        if (desc.enabledFeatures && desc.bestEffort == VRI_FALSE)
+        {
+            const std::string message =
+                "requested features are not supported by WebGPU: " + core::FeatureNames(desc.enabledFeatures);
+            ReportError(message.c_str());
+            FinishInit(VriResult_Unsupported);
+            return;
+        }
 
         WGPUInstanceDescriptor instanceDesc = {};
         m_instance                          = wgpuCreateInstance(&instanceDesc);
@@ -269,6 +277,8 @@ namespace vri::wgpu
     {
         m_desc             = {};
         m_desc.graphicsAPI = VriGraphicsAPI_WebGPU;
+        // No VriFeatureBits feature exists on WebGPU: a best-effort request is granted nothing.
+        m_desc.enabledFeatures = 0;
         // Buffer/texture copy layouts require aligned rows in both transfer directions.
         m_desc.uploadBufferTextureRowAlignment = 256;
 
@@ -278,6 +288,7 @@ namespace vri::wgpu
         m_desc.adapter.deviceId = info.deviceID;
         m_desc.adapter.vendorId = info.vendorID;
         m_desc.nativeAPI        = ToNativeAPI(info.backendType);
+        m_desc.nativeValidation = VRI_TRUE; // WebGPU validates every call; errors reach OnUncapturedError
         switch (info.adapterType)
         {
             case WGPUAdapterType_DiscreteGPU:

@@ -81,15 +81,24 @@ namespace vri::wgpu
                 case VriFormat_RGBA32_SFLOAT:
                     return 16;
                 case VriFormat_BC1_UNORM:
+                case VriFormat_BC1_SRGB:
                 case VriFormat_BC4_UNORM:
+                case VriFormat_BC4_SNORM:
                     return 8; // per 4x4 block
                 case VriFormat_BC2_UNORM:
+                case VriFormat_BC2_SRGB:
                 case VriFormat_BC3_UNORM:
+                case VriFormat_BC3_SRGB:
                 case VriFormat_BC5_UNORM:
+                case VriFormat_BC5_SNORM:
                 case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC6H_SFLOAT:
                 case VriFormat_BC7_UNORM:
+                case VriFormat_BC7_SRGB:
                 case VriFormat_ETC2_RGBA8_UNORM:
+                case VriFormat_ETC2_RGBA8_SRGB:
                 case VriFormat_ASTC_4x4_UNORM:
+                case VriFormat_ASTC_4x4_SRGB:
                     return 16; // per 4x4 block
                 default:
                     return 4;
@@ -102,16 +111,25 @@ namespace vri::wgpu
             switch (f)
             {
                 case VriFormat_BC1_UNORM:
+                case VriFormat_BC1_SRGB:
                 case VriFormat_BC2_UNORM:
+                case VriFormat_BC2_SRGB:
                 case VriFormat_BC3_UNORM:
+                case VriFormat_BC3_SRGB:
                 case VriFormat_BC4_UNORM:
+                case VriFormat_BC4_SNORM:
                 case VriFormat_BC5_UNORM:
+                case VriFormat_BC5_SNORM:
                 case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC6H_SFLOAT:
                 case VriFormat_BC7_UNORM:
+                case VriFormat_BC7_SRGB:
                     return WGPUFeatureName_TextureCompressionBC;
                 case VriFormat_ETC2_RGBA8_UNORM:
+                case VriFormat_ETC2_RGBA8_SRGB:
                     return WGPUFeatureName_TextureCompressionETC2;
                 case VriFormat_ASTC_4x4_UNORM:
+                case VriFormat_ASTC_4x4_SRGB:
                     return WGPUFeatureName_TextureCompressionASTC;
                 default:
                     return WGPUFeatureName_Force32;
@@ -1670,7 +1688,24 @@ namespace vri::wgpu
             dstInfo.layout.bytesPerRow        = (rowTexels + block - 1) / block * t->texelSize;
             dstInfo.layout.rowsPerImage       = (imageRows + block - 1) / block;
 
-            WGPUExtent3D ext = {(w + block - 1) / block * block, (h + block - 1) / block * block, extDepth};
+            const uint32_t blockRows = (h + block - 1) / block;
+            WGPUExtent3D   ext       = {(w + block - 1) / block * block, blockRows * block, extDepth};
+            // wgpu-native 24.0.3.1 (webgpu-sdk v0.1.2) on D3D12 takes a 3D or array buffer<->texture copy's height, not
+            // rowsPerImage, as the distance between slices, so a buffer layout with padded slices lands misplaced.
+            // Such a copy goes one slice at a time, each at its own offset with rowsPerImage unused, on every
+            // implementation (the result is the same); every other copy is the single copy the API describes.
+            if (extDepth > 1 && dstInfo.layout.rowsPerImage != blockRows)
+            {
+                const uint64_t slicePitch = uint64_t(dstInfo.layout.bytesPerRow) * dstInfo.layout.rowsPerImage;
+                ext.depthOrArrayLayers    = 1;
+                for (uint32_t slice = 0; slice < extDepth; ++slice)
+                {
+                    srcInfo.origin.z      = originZ + slice;
+                    dstInfo.layout.offset = region->bufferOffset + slice * slicePitch;
+                    wgpuCommandEncoderCopyTextureToBuffer(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
+                }
+                return;
+            }
             wgpuCommandEncoderCopyTextureToBuffer(CB(cmd)->encoder, &srcInfo, &dstInfo, &ext);
         }
 
@@ -1719,7 +1754,20 @@ namespace vri::wgpu
                 srcInfo.buffer             = Buf(src)->buffer;
                 srcInfo.layout.offset      = region->bufferOffset;
                 srcInfo.layout.bytesPerRow = tightPitch;
-                wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
+                // As in CmdReadbackTextureToBuffer: a copy with padded slices goes one slice at a time.
+                if (extDepth > 1 && sourceRows != blockRows)
+                {
+                    const uint64_t slicePitch = uint64_t(tightPitch) * sourceRows;
+                    WGPUExtent3D   sliceExt   = {ext.width, ext.height, 1};
+                    for (uint32_t slice = 0; slice < extDepth; ++slice)
+                    {
+                        dstInfo.origin.z      = originZ + slice;
+                        srcInfo.layout.offset = region->bufferOffset + slice * slicePitch;
+                        wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &sliceExt);
+                    }
+                }
+                else
+                    wgpuCommandEncoderCopyBufferToTexture(c->encoder, &srcInfo, &dstInfo, &ext);
             }
             else
             {

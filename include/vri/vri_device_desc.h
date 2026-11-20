@@ -111,8 +111,11 @@ typedef struct VriDeviceDesc
     VriBool  hasGeometryShader;
     VriBool  hasComputeShader;
 
-    /* optional features actually granted at device creation (subset of the
-       requested VriFeatureBits; see VriDeviceCreationDesc::enabledFeatures). */
+    /* The optional VriFeatureBits this device grants, on every backend: a subset of
+       VriDeviceCreationDesc::enabledFeatures. With bestEffort VRI_FALSE, creation fails with
+       VriResult_Unsupported unless every requested feature is granted. The has* flags that stand for
+       a feature (hasRayTracing, hasMeshShader, hasBindless, hasVariableShadingRate, hasOpacityMicromap,
+       hasRayQuery, hasExternalMemory, hasCooperativeVector, hasShaderAtomicInt64) equal its bit here. */
     uint64_t enabledFeatures;
     VriBool  hasRayTracing;
     VriBool  hasMeshShader;
@@ -156,6 +159,15 @@ typedef struct VriDeviceDesc
     VriBool hasCooperativeVector;         /* enabled shader inference extension, not a general ML-runtime capability */
     VriBool hasShaderAtomicInt64;         /* 64-bit integer atomics on storage buffers (VriFeature_ShaderAtomicInt64) */
     VriCoordinateConventions coordinates; /* Immutable authoring policy selected at creation. */
+
+    /* Whether the native API's own validation checks this device's calls: the Vulkan validation
+       layer, the D3D12 debug layer, GL debug output (KHR_debug), Metal API validation
+       (MTL_DEBUG_LAYER), or WebGPU, which always validates. VriDeviceCreationDesc::enableValidation
+       asks for it; when the layer is missing the device is still created, a warning names what
+       is missing, and this is VRI_FALSE. The D3D12 debug layer and Metal API validation are process-wide:
+       once on, they validate devices that did not ask for them, and this reports that. VRI's own validation
+       layer is independent of it. */
+    VriBool nativeValidation;
 } VriDeviceDesc;
 
 VRI_EXTERN_C_END
