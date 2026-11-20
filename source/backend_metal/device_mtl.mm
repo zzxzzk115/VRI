@@ -11,10 +11,22 @@
 #include "core/imgui_vri.h" // backend-agnostic built-in ImGui renderer (SPIR-V transpiled to MSL)
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace vri::mtl
 {
+    namespace
+    {
+        // Metal API validation is switched on outside the program, before the device exists:
+        // MTL_DEBUG_LAYER=1 (which Xcode's scheme option sets). VRI can only read that variable.
+        bool MetalAPIValidation()
+        {
+            const char* layer = std::getenv("MTL_DEBUG_LAYER");
+            return layer && std::strcmp(layer, "0") != 0;
+        }
+    } // namespace
+
     DeviceMTL::~DeviceMTL()
     {
         if (m_clearBufferPipeline) [m_clearBufferPipeline release];
@@ -102,6 +114,10 @@ namespace vri::mtl
     {
         if (desc.callbackInterface)
             m_callback = *desc.callbackInterface;
+        if (desc.enableValidation && !MetalAPIValidation())
+            Diagnostic(VriMessageSeverity_Warning,
+                       "validation was requested, but Metal API validation is off; it is switched on outside the "
+                       "program with MTL_DEBUG_LAYER=1");
 
         @autoreleasepool
         {
@@ -178,6 +194,7 @@ namespace vri::mtl
         m_desc = {};
         m_desc.graphicsAPI = VriGraphicsAPI_Metal;
         m_desc.nativeAPI   = VriGraphicsAPI_Metal;
+        m_desc.nativeValidation = MetalAPIValidation() ? VRI_TRUE : VRI_FALSE;
 
         const char* name = [[m_device name] UTF8String];
         std::strncpy(m_desc.adapter.name, name ? name : "Metal Device", sizeof(m_desc.adapter.name) - 1);
