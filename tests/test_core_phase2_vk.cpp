@@ -428,3 +428,16 @@ TEST_CASE("Vulkan core: descriptor set with a uniform buffer tints the triangle"
     c.DestroyDescriptor(colorView);
     c.DestroyTexture(color);
 }
+
+TEST_CASE("Vulkan: the device reports Vulkan as its native API")
+{
+    Ctx ctx;
+    if (!Init(ctx))
+    {
+        MESSAGE("Vulkan unavailable - skipping");
+        return;
+    }
+    const VriDeviceDesc* dd = ctx.core.GetDeviceDesc(ctx.device);
+    CHECK(dd->graphicsAPI == VriGraphicsAPI_Vulkan);
+    CHECK(dd->nativeAPI == VriGraphicsAPI_Vulkan);
+}

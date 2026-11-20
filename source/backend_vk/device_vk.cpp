@@ -1042,6 +1042,7 @@ namespace vri::vk
         // Report Software when driven on a software Vulkan ICD, so callers see the CPU path they
         // asked for (the adapter also reports VriAdapterType_Software from the CPU device type).
         m_desc.graphicsAPI                     = m_software ? VriGraphicsAPI_Software : VriGraphicsAPI_Vulkan;
+        m_desc.nativeAPI                       = VriGraphicsAPI_Vulkan;
         m_desc.apiVersionMajor                 = VK_API_VERSION_MAJOR(props.apiVersion);
         m_desc.apiVersionMinor                 = VK_API_VERSION_MINOR(props.apiVersion);
         m_desc.viewportMaxNum                  = props.limits.maxViewports;

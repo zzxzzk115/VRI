@@ -13,6 +13,30 @@ namespace vri::wgpu
 {
     namespace
     {
+        // The API a WebGPU adapter is implemented on.
+        VriGraphicsAPI ToNativeAPI(WGPUBackendType backend)
+        {
+            switch (backend)
+            {
+                case WGPUBackendType_WebGPU:
+                    return VriGraphicsAPI_WebGPU;
+                case WGPUBackendType_D3D11:
+                    return VriGraphicsAPI_D3D11;
+                case WGPUBackendType_D3D12:
+                    return VriGraphicsAPI_D3D12;
+                case WGPUBackendType_Metal:
+                    return VriGraphicsAPI_Metal;
+                case WGPUBackendType_Vulkan:
+                    return VriGraphicsAPI_Vulkan;
+                case WGPUBackendType_OpenGL:
+                    return VriGraphicsAPI_OpenGL;
+                case WGPUBackendType_OpenGLES:
+                    return VriGraphicsAPI_OpenGLES;
+                default: // Undefined, Null
+                    return VriGraphicsAPI_None;
+            }
+        }
+
         // Copy a WGPUStringView into a fixed C buffer.
         void CopyStringView(char* dst, size_t dstSize, WGPUStringView sv)
         {
@@ -226,6 +250,7 @@ namespace vri::wgpu
         CopyStringView(m_desc.adapter.name, sizeof(m_desc.adapter.name), info.device);
         m_desc.adapter.deviceId = info.deviceID;
         m_desc.adapter.vendorId = info.vendorID;
+        m_desc.nativeAPI        = ToNativeAPI(info.backendType);
         switch (info.adapterType)
         {
             case WGPUAdapterType_DiscreteGPU:

@@ -398,6 +398,7 @@ namespace vri::d3d12
     {
         m_desc             = {};
         m_desc.graphicsAPI = VriGraphicsAPI_D3D12;
+        m_desc.nativeAPI   = VriGraphicsAPI_D3D12;
         if (adapter)
         {
             DXGI_ADAPTER_DESC1 ad = {};

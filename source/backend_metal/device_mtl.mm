@@ -177,6 +177,7 @@ namespace vri::mtl
     {
         m_desc = {};
         m_desc.graphicsAPI = VriGraphicsAPI_Metal;
+        m_desc.nativeAPI   = VriGraphicsAPI_Metal;
 
         const char* name = [[m_device name] UTF8String];
         std::strncpy(m_desc.adapter.name, name ? name : "Metal Device", sizeof(m_desc.adapter.name) - 1);
