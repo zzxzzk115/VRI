@@ -39,10 +39,11 @@ namespace vri::d3d12
         // Route a backend diagnostic (D3D12 InfoQueue message) to the app's callback.
         void Diagnostic(VriMessageSeverity severity, const char* message) const;
 
-        // One CPU-only render-target-view (or, with `depth`, depth-stencil-view) descriptor, held by a texture view
-        // from its creation to its destruction. OMSetRenderTargets and the clears read these descriptors when they
-        // are recorded, so a destroyed view's slot is free at once. False when every slot is taken.
-        bool AllocateAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE& out);
+        // The CPU-only render-target-view (or depth-stencil-view) descriptor of a texture view, made the first
+        // time the view is an attachment and held until the view is destroyed. OMSetRenderTargets and the clears
+        // read these descriptors when they are recorded, so a destroyed view's slot is free at once. False, with
+        // an error reported, when the texture cannot be an attachment or every slot is taken.
+        bool AttachmentView(const DescriptorD3D12& view, D3D12_CPU_DESCRIPTOR_HANDLE& out);
         void FreeAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE handle);
 
         // Lazily-created command signature for ExecuteIndirect(DispatchMesh) - must

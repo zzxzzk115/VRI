@@ -260,15 +260,89 @@ namespace vri::d3d12
         }
     }
 
-    bool DeviceD3D12::AllocateAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE& out)
+    namespace
     {
-        std::lock_guard lock(m_attachmentHeapMutex);
-        AttachmentHeap& heap = depth ? m_dsvHeap : m_rtvHeap;
-        if (heap.free.empty())
+        // Writes the RTV or DSV that renders into `view`'s mip and layers.
+        void WriteAttachmentView(ID3D12Device* device, const DescriptorD3D12& view, D3D12_CPU_DESCRIPTOR_HANDLE handle)
+        {
+            const TextureD3D12* t = view.texture;
+            if (t->isDepthStencil)
+            {
+                D3D12_DEPTH_STENCIL_VIEW_DESC dsv = {};
+                dsv.Format                        = t->dsvFormat; // typed depth (resource may be TYPELESS for sampling)
+                if (t->layerNum > 1) // a slice of an array: Texture2D views address slice 0 only
+                {
+                    dsv.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+                    dsv.Texture2DArray.MipSlice        = view.mip;
+                    dsv.Texture2DArray.FirstArraySlice = view.baseLayer;
+                    dsv.Texture2DArray.ArraySize       = view.layerNum;
+                }
+                else
+                {
+                    dsv.ViewDimension      = D3D12_DSV_DIMENSION_TEXTURE2D;
+                    dsv.Texture2D.MipSlice = view.mip;
+                }
+                device->CreateDepthStencilView(t->resource.Get(), &dsv, handle);
+                return;
+            }
+            D3D12_RENDER_TARGET_VIEW_DESC rtv = {};
+            rtv.Format                        = t->format;
+            // Array RTV for a layered target (viewType 2DArray, or > 1 layer): multiview
+            // (ViewInstancing) targets one array slice per view, so the RTV must span them. A view of
+            // one slice of an array is an array RTV too: Texture2D RTVs address slice 0 only.
+            const bool array = view.viewType == VriTextureViewType_2DArray || view.layerNum > 1 || t->layerNum > 1;
+            if (t->sampleCount > 1)
+            {
+                if (array)
+                {
+                    rtv.ViewDimension                    = D3D12_RTV_DIMENSION_TEXTURE2DMSARRAY;
+                    rtv.Texture2DMSArray.FirstArraySlice = view.baseLayer;
+                    rtv.Texture2DMSArray.ArraySize       = view.layerNum;
+                }
+                else
+                    rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+            }
+            else if (array)
+            {
+                rtv.ViewDimension                  = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+                rtv.Texture2DArray.MipSlice        = view.mip;
+                rtv.Texture2DArray.FirstArraySlice = view.baseLayer;
+                rtv.Texture2DArray.ArraySize       = view.layerNum;
+            }
+            else
+            {
+                rtv.ViewDimension      = D3D12_RTV_DIMENSION_TEXTURE2D;
+                rtv.Texture2D.MipSlice = view.mip;
+            }
+            device->CreateRenderTargetView(t->resource.Get(), &rtv, handle);
+        }
+    } // namespace
+
+    bool DeviceD3D12::AttachmentView(const DescriptorD3D12& view, D3D12_CPU_DESCRIPTOR_HANDLE& out)
+    {
+        if (!view.texture->isDepthStencil && !view.texture->isRenderTarget)
+        {
+            ReportError("CmdBeginRendering: an attachment's texture was not created with attachment usage");
             return false;
-        out = heap.heap->GetCPUDescriptorHandleForHeapStart();
-        out.ptr += static_cast<SIZE_T>(heap.free.back()) * heap.increment;
-        heap.free.pop_back();
+        }
+        std::lock_guard lock(m_attachmentHeapMutex);
+        if (!view.cpu.ptr)
+        {
+            AttachmentHeap& heap = view.cpuIsDepth ? m_dsvHeap : m_rtvHeap;
+            if (heap.free.empty())
+            {
+                ReportError(view.cpuIsDepth ?
+                                "CmdBeginRendering: every depth-stencil-view descriptor is held by a live view" :
+                                "CmdBeginRendering: every render-target-view descriptor is held by a live view");
+                return false;
+            }
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = heap.heap->GetCPUDescriptorHandleForHeapStart();
+            handle.ptr += static_cast<SIZE_T>(heap.free.back()) * heap.increment;
+            heap.free.pop_back();
+            WriteAttachmentView(m_device.Get(), view, handle);
+            view.cpu = handle;
+        }
+        out = view.cpu;
         return true;
     }
 

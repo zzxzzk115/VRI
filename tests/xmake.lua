@@ -66,6 +66,7 @@ target("vri-tests")
     add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
     add_files("test_explicitmemory_xbackend.cpp") -- explicit placed-resource memory (AllocateMemory + BindMemory)
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
+    add_files("test_attachment_views_many_xbackend.cpp") -- sampled views hold no attachment descriptor
     add_files("test_atomic_int64_xbackend.cpp") -- 64-bit atomics on storage buffers (Vulkan, D3D12)
     add_files("test_clear_texture_metal.cpp")
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)

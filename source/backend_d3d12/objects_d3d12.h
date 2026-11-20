@@ -95,21 +95,24 @@ namespace vri::d3d12
             TextureSrv,
             BufferView,
             Sampler
-        } kind                                   = Kind::TextureRtv;
-        DeviceD3D12*                device       = nullptr;
-        const TextureD3D12*         texture      = nullptr;
-        const BufferD3D12*          buffer       = nullptr;
-        uint64_t                    bufferOffset = 0;
-        uint64_t                    bufferSize   = 0;
-        D3D12_CPU_DESCRIPTOR_HANDLE cpu          = {};    // RTV or DSV slot, held until DestroyDescriptor
-        bool                        cpuIsDepth   = false; // `cpu` is in the DSV heap
-        uint32_t                    mip          = 0;     // first mip of a texture view
-        uint32_t                    mipNum       = 1;     // texture view: mips from `mip` (resolved, never 0)
-        uint32_t                    baseLayer    = 0;
-        uint32_t                    layerNum     = 1; // texture view: layers from baseLayer (resolved)
-        VriTextureViewType          viewType     = VriTextureViewType_2D; // SRV dimension (cube vs 2d/2darray)
-        VriSamplerDesc              sampler      = {}; // for Kind::Sampler (built into the sampler heap at update)
-        D3D12_GPU_VIRTUAL_ADDRESS   accelAddress = 0;  // for an acceleration-structure SRV (TLAS)
+        } kind                                 = Kind::TextureRtv;
+        DeviceD3D12*              device       = nullptr;
+        const TextureD3D12*       texture      = nullptr;
+        const BufferD3D12*        buffer       = nullptr;
+        uint64_t                  bufferOffset = 0;
+        uint64_t                  bufferSize   = 0;
+        uint32_t                  mip          = 0; // first mip of a texture view
+        uint32_t                  mipNum       = 1; // texture view: mips from `mip` (resolved, never 0)
+        uint32_t                  baseLayer    = 0;
+        uint32_t                  layerNum     = 1; // texture view: layers from baseLayer (resolved)
+        VriTextureViewType        viewType     = VriTextureViewType_2D; // SRV dimension (cube vs 2d/2darray)
+        VriSamplerDesc            sampler      = {}; // for Kind::Sampler (built into the sampler heap at update)
+        D3D12_GPU_VIRTUAL_ADDRESS accelAddress = 0;  // for an acceleration-structure SRV (TLAS)
+
+        // RTV or DSV slot: made the first time the view is an attachment (DeviceD3D12::AttachmentView),
+        // held until DestroyDescriptor. A view that is only sampled never takes one.
+        mutable D3D12_CPU_DESCRIPTOR_HANDLE cpu        = {};
+        bool                                cpuIsDepth = false; // `cpu` is in the DSV heap
     };
 
     // Flattened pipeline-layout binding: a VRI (set, binding) -> its D3D12 binding slot.
