@@ -275,7 +275,8 @@ add_rules("clangd.config")
 
 -- add repositories
 add_repositories("my-xmake-repo https://github.com/zzxzzk115/xmake-repo.git backup")
--- local package overrides (prebuilt Slang 2026.11 for vri-shaderc; see the package).
+-- local package overrides (prebuilt Slang 2026.11 for vri-shaderc, GameActivity for the Android
+-- examples; see each package).
 -- Anchored to os.scriptdir() so it still resolves when VRI is included as a subproject.
 add_repositories("vri-local-repo xmake/xmake-repo", {rootdir = os.scriptdir()})
 
@@ -292,6 +293,7 @@ includes(path.join(os.scriptdir(), "xmake", "examples.lua"))
 -- tasks (e.g. `xmake shaders` to compile test .slang -> SPIR-V headers)
 includes(path.join(os.scriptdir(), "xmake", "tasks", "shaders.lua"))
 includes(path.join(os.scriptdir(), "xmake", "tasks", "examples.lua"))
+includes(path.join(os.scriptdir(), "xmake", "tasks", "apk.lua"))
 
 -- include external libraries
 includes(path.join(os.scriptdir(), "external"))

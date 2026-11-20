@@ -2,7 +2,7 @@
 //
 // Backend selection (VRI_API env / ?backend= URL / Auto), windowing (SDL3 on desktop,
 // the page #canvas on the web), device + swapchain + an optional depth target, the
-// present loop (desktop while-loop / emscripten main loop), headless auto-exit
+// present loop (desktop while-loop / emscripten main loop / Android looper), headless auto-exit
 // (VRI_MAX_FRAMES env / ?frames=N URL) with a pixel self-check + BMP capture - all live
 // here so a backend/platform fix lands once for every example instead of being copy-pasted
 // (and missed) across the three mains.
@@ -13,12 +13,22 @@
 // shared. Header-only; examples only.
 #pragma once
 
+// Desktop windows and input come from SDL3; the web and Android hosts drive the page canvas and
+// the GameActivity surface themselves.
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+#define VRIEX_SDL3 1
+#endif
+
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
+#elif defined(__ANDROID__)
+#include <android/configuration.h>
+#include <android/native_window.h>
+#include <game-activity/native_app_glue/android_native_app_glue.h>
 #else
 #include <SDL3/SDL.h>
-#include <imgui_impl_sdl3.h> // desktop input; on web we feed ImGuiIO via Emscripten
+#include <imgui_impl_sdl3.h> // desktop input; on web and Android the host feeds ImGuiIO itself
 #include <vri/integration/vri_sdl3.h>
 #endif
 
@@ -32,11 +42,26 @@
 #include <cstring>
 #include <functional>
 #include <vector>
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if defined(__linux__) && defined(VRIEX_SDL3)
 #include <filesystem> // auto-detect the Wayland socket so `xmake run` works from an SSH shell
 #endif
 
+#include "asset_file.h"
 #include "capture.h"
+
+#if defined(__ANDROID__)
+// GameActivity loads the example as a shared library and runs android_main
+// (examples/common/android_main.cpp), which calls the example's main under this name - the same
+// renaming SDL_main.h does for SDL's mobile hosts.
+#define main vriExampleMain
+int vriExampleMain(int argc, char** argv);
+
+namespace vriex
+{
+    // Set by android_main before the example starts.
+    inline android_app* g_androidApp = nullptr;
+} // namespace vriex
+#endif
 
 namespace vriex
 {
@@ -252,17 +277,25 @@ namespace vriex
         ImDrawData*                      guiDraw       = nullptr;
         bool                             guiReady      = false; // ImGui renderer + this frame's draw data
         bool                             wantViewports = false; // multi-viewport (detached OS windows)
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
         SDL_Window* window = nullptr;
+#endif
+#if defined(__ANDROID__)
+        VriSwapChainDesc swapchainDesc {}; // recreates the swapchain when GameActivity hands back a surface
+        bool             resumed = true;   // frames run only while the activity is resumed
 #endif
 
         [[noreturn]] void Fail(const char* msg)
         {
             std::fprintf(stderr, "[%s] %s\n", name, msg);
+#if defined(__ANDROID__)
+            ExitAndroid(1);
+#else
             std::exit(1);
+#endif
         }
 
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if defined(__linux__) && defined(VRIEX_SDL3)
         // Make `xmake run example-*` reach the screen on a Wayland box (e.g. a Raspberry Pi)
         // regardless of which shell it's launched from. Whenever there's a live Wayland session,
         // lock SDL to the Wayland driver and drop any DISPLAY, because:
@@ -333,10 +366,10 @@ namespace vriex
             height   = h;
             hasDepth = depthWanted;
             api      = SelectApi();
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if defined(__linux__) && defined(VRIEX_SDL3)
             AutoDetectDisplay(); // make `xmake run` work straight from an SSH shell on a Wayland box
 #endif
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             if (!SDL_Init(SDL_INIT_VIDEO))
                 Fail("SDL_Init failed");
 #endif
@@ -350,6 +383,21 @@ namespace vriex
 #if defined(__EMSCRIPTEN__)
             wh.type                = VriWindowSystem_Web;
             wh.handle.web.selector = "#canvas";
+#elif defined(__ANDROID__)
+            // The activity's surface is the window: wait for it and render at its size (the
+            // requested size is the desktop window's).
+            g_androidApp->userData = this;
+            g_androidApp->onAppCmd = OnAndroidCommand;
+            while (!g_androidApp->window)
+            {
+                if (g_androidApp->destroyRequested)
+                    std::exit(0); // closed before a surface ever arrived
+                PollAndroid(-1);
+            }
+            width                    = uint32_t(ANativeWindow_getWidth(g_androidApp->window));
+            height                   = uint32_t(ANativeWindow_getHeight(g_androidApp->window));
+            wh.type                  = VriWindowSystem_Android;
+            wh.handle.android.window = g_androidApp->window;
 #else
             window = SDL_CreateWindow(name, static_cast<int>(width), static_cast<int>(height), 0);
             if (!window)
@@ -435,7 +483,7 @@ namespace vriex
                 },
                 name,
                 apiName);
-#else
+#elif defined(VRIEX_SDL3)
             char title[64];
             std::snprintf(title, sizeof(title), "VRI %s (%s)", name, apiName);
             SDL_SetWindowTitle(window, title);
@@ -455,6 +503,14 @@ namespace vriex
             scd.presentMode = SelectPresentMode();
             if (swap.CreateSwapChain(dev, &scd, &swapchain) != VriResult_Success)
                 Fail("CreateSwapChain failed");
+            // The backend may size the swapchain from the surface rather than the request (Vulkan's
+            // currentExtent). Every render target and viewport the example creates afterwards follows
+            // width/height, so take the size it actually got.
+            if (swap.GetSwapChainExtent(swapchain, &width, &height) != VriResult_Success)
+                Fail("GetSwapChainExtent failed");
+#if defined(__ANDROID__)
+            swapchainDesc = scd;
+#endif
 
             if (hasDepth)
             {
@@ -494,7 +550,7 @@ namespace vriex
             ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // dockable panels
             // Multi-viewport (detached OS windows) is opt-in (VRI_IMGUI_VIEWPORTS=1): it needs the
             // per-viewport swapchain + platform-callback wiring below and a real display to verify.
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             // Multi-viewport (detached OS windows) is on by default on desktop; opt out with
             // VRI_IMGUI_VIEWPORTS=0. Never in headless capture (VRI_MAX_FRAMES / VRI_CAPTURE renders
             // one offscreen target + a pixel self-check, so detached windows would break it).
@@ -506,6 +562,8 @@ namespace vriex
 #endif
 #if defined(__EMSCRIPTEN__)
             InstallWebInput();
+#elif defined(__ANDROID__)
+            ScaleGuiForAndroidDensity();
 #else
             ImGui_ImplSDL3_InitForOther(window);
 #endif
@@ -526,7 +584,7 @@ namespace vriex
             if (guiApi.CreateImgui(dev, &gd, &gui) != VriResult_Success)
                 Fail("CreateImgui failed");
             ImGui::GetIO().Fonts->SetTexID(reinterpret_cast<ImTextureID>(guiApi.GetImguiFontView(gui)));
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             if (wantViewports)
                 RegisterViewportRenderer();
 #endif
@@ -606,7 +664,7 @@ namespace vriex
             FlattenDrawData(dd, guiVerts, guiIndices, guiCmds, guiData, width, height);
         }
 
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
         // ---- Multi-viewport: render ImGui's detached OS windows (opt-in, VRI_IMGUI_VIEWPORTS=1) ----
         // Each platform window ImGui spawns gets its own VRI swapchain + VriImguiViewport (geometry
         // buffers) + command machinery; the renderer's per-viewport buffers keep their staging from
@@ -1014,6 +1072,117 @@ namespace vriex
         }
 #endif
 
+#if defined(__ANDROID__)
+        // Finishes the activity, waits until it is destroyed, then ends the process: the examples
+        // keep their state in function-local statics, so a relaunch needs a fresh process. _Exit
+        // skips static destructors - GameActivity's own would call JNI from this unattached thread.
+        [[noreturn]] static void ExitAndroid(int code)
+        {
+            g_androidApp->onAppCmd = nullptr; // the example's device is gone or unusable
+            g_androidApp->userData = nullptr;
+            if (!g_androidApp->destroyRequested)
+                GameActivity_finish(g_androidApp->activity);
+            while (!g_androidApp->destroyRequested)
+                PollAndroid(-1);
+            std::fflush(nullptr);
+            std::_Exit(code);
+        }
+
+        // Runs one looper event (an activity command or an input wake-up) if one arrives within
+        // timeoutMs; returns whether it did.
+        static bool PollAndroid(int timeoutMs)
+        {
+            android_poll_source* source = nullptr;
+            if (ALooper_pollOnce(timeoutMs, nullptr, nullptr, reinterpret_cast<void**>(&source)) < 0)
+                return false;
+            if (source)
+                source->process(g_androidApp, source);
+            return true;
+        }
+
+        static void OnAndroidCommand(android_app* activity, int32_t command)
+        {
+            ExampleApp& app = *static_cast<ExampleApp*>(activity->userData);
+            switch (command)
+            {
+                case APP_CMD_TERM_WINDOW:
+                    // The glue releases the ANativeWindow once this returns, so retire the swapchain
+                    // (and the GPU's last use of it) first.
+                    if (app.swapchain)
+                    {
+                        app.c.DeviceWaitIdle(app.dev);
+                        app.swap.DestroySwapChain(app.swapchain);
+                        app.swapchain = nullptr;
+                    }
+                    break;
+                case APP_CMD_INIT_WINDOW:
+                    if (app.dev && !app.swapchain) // the first surface is taken by Init
+                        app.RecreateAndroidSwapchain();
+                    break;
+                case APP_CMD_RESUME:
+                    app.resumed       = true;
+                    app.haveFrameTime = false; // no giant dt after a pause
+                    break;
+                case APP_CMD_PAUSE:
+                    app.resumed = false;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // A surface handed back after the activity was backgrounded. The example's render targets
+        // were made for the first surface's size, and the manifest locks the orientation, so the
+        // new surface must match it.
+        void RecreateAndroidSwapchain()
+        {
+            swapchainDesc.window.handle.android.window = g_androidApp->window;
+            if (swap.CreateSwapChain(dev, &swapchainDesc, &swapchain) != VriResult_Success)
+                Fail("CreateSwapChain failed");
+            uint32_t w = 0;
+            uint32_t h = 0;
+            if (swap.GetSwapChainExtent(swapchain, &w, &h) != VriResult_Success || w != width || h != height)
+                Fail("the new surface's size differs from the one the example's targets were made for");
+        }
+
+        // Touch drives ImGui as a mouse: the first pointer moves it, down/up press the left button.
+        static void ProcessAndroidInput()
+        {
+            android_input_buffer* buffer = android_app_swap_input_buffers(g_androidApp);
+            if (!buffer)
+                return;
+            ImGuiIO& io = ImGui::GetIO();
+            for (uint64_t i = 0; i < buffer->motionEventsCount; ++i)
+            {
+                const GameActivityMotionEvent& event = buffer->motionEvents[i];
+                if (event.pointerCount == 0)
+                    continue;
+                const int32_t action = event.action & AMOTION_EVENT_ACTION_MASK;
+                io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+                io.AddMousePosEvent(GameActivityPointerAxes_getX(&event.pointers[0]),
+                                    GameActivityPointerAxes_getY(&event.pointers[0]));
+                if (action == AMOTION_EVENT_ACTION_DOWN)
+                    io.AddMouseButtonEvent(0, true);
+                else if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL)
+                    io.AddMouseButtonEvent(0, false);
+            }
+            android_app_clear_motion_events(buffer);
+            android_app_clear_key_events(buffer);
+        }
+
+        // Phone screens are dense: bake the font and size the widgets for the display's density
+        // (160 dpi == ImGui's 1:1 desktop scale). Runs before the font atlas is built.
+        static void ScaleGuiForAndroidDensity()
+        {
+            const int32_t density = AConfiguration_getDensity(g_androidApp->config);
+            const float   scale   = density > 0 ? float(density) / float(ACONFIGURATION_DENSITY_MEDIUM) : 1.0f;
+            ImFontConfig  font;
+            font.SizePixels = 13.0f * scale;
+            ImGui::GetIO().Fonts->AddFontDefault(&font);
+            ImGui::GetStyle().ScaleAllSizes(scale);
+        }
+#endif
+
         // Measure real seconds since the previous frame into `dt`. Pinned to 1/60 in headless capture
         // (maxFrames != 0) so frame N is deterministic; clamped otherwise to absorb startup/stall spikes
         // (e.g. a tab switch) and to keep ImGui's required DeltaTime > 0.
@@ -1041,7 +1210,7 @@ namespace vriex
         void BeginGui()
         {
             ImGuiIO& io = ImGui::GetIO();
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
             io.DisplaySize = ImVec2(float(width), float(height));
 #else
             ImGui_ImplSDL3_NewFrame(); // pulls window size + accumulated input
@@ -1053,7 +1222,15 @@ namespace vriex
             // origin and spawn a detached window; the main viewport's WorkPos offsets it back onto the
             // main window (WorkPos is (0,0) without viewports, so single-viewport behaviour is unchanged).
             const ImGuiViewport* mainVp = ImGui::GetMainViewport();
-            ImGui::SetNextWindowPos(ImVec2(mainVp->WorkPos.x + 8, mainVp->WorkPos.y + 8), ImGuiCond_FirstUseEver);
+            ImVec2               panel(mainVp->WorkPos.x + 8, mainVp->WorkPos.y + 8);
+#if defined(__ANDROID__)
+            // The surface spans the whole screen: keep the panel clear of the status and navigation bars.
+            ARect bars {};
+            GameActivity_getWindowInsets(g_androidApp->activity, GAMECOMMON_INSETS_TYPE_SYSTEM_BARS, &bars);
+            panel.x += float(bars.left);
+            panel.y += float(bars.top);
+#endif
+            ImGui::SetNextWindowPos(panel, ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowBgAlpha(0.7f);
             if (ImGui::Begin(name, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
             {
@@ -1225,7 +1402,7 @@ namespace vriex
             swap.Present(swapchain, nullptr, 0);
             c.DestroyDescriptor(bbView);
 
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             // Render ImGui's detached windows (each into its own swapchain) after the main window.
             if (wantViewports)
             {
@@ -1299,6 +1476,23 @@ namespace vriex
             }); // reveal the canvas (hide the loading overlay)
             emscripten_set_main_loop_arg(
                 [](void* p) { static_cast<ExampleApp*>(p)->Frame(); }, this, 0, true); // never returns
+#elif defined(__ANDROID__)
+            while (running)
+            {
+                // Drain pending events; block while there is nothing to draw (paused, or between surfaces).
+                while (!g_androidApp->destroyRequested && PollAndroid(resumed && swapchain ? 0 : -1))
+                {
+                }
+                if (g_androidApp->destroyRequested)
+                    break;
+                if (!resumed || !swapchain)
+                    continue;
+                ProcessAndroidInput();
+                Frame();
+            }
+            c.DeviceWaitIdle(dev);
+            std::printf(
+                "[%s] %s: %llu frames presented\n", name, apiName, static_cast<unsigned long long>(frameValue - 1));
 #else
             while (running)
             {
@@ -1323,14 +1517,14 @@ namespace vriex
         // example destroys its own resources before calling this.
         void Shutdown()
         {
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             // Destroy ImGui's detached windows (calls VpDestroy for each) before the renderer/device.
             if (wantViewports)
                 ImGui::DestroyPlatformWindows();
 #endif
             if (gui)
                 guiApi.DestroyImgui(gui);
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             ImGui_ImplSDL3_Shutdown();
 #endif
             ImGui::DestroyContext();
@@ -1350,7 +1544,7 @@ namespace vriex
                 swap.DestroySwapChain(swapchain);
             if (dev)
                 vriDestroyDevice(dev);
-#if !defined(__EMSCRIPTEN__)
+#if defined(VRIEX_SDL3)
             if (window)
                 SDL_DestroyWindow(window);
             SDL_Quit();

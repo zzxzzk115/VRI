@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- `xmake apk` fills in @VRI_LIBRARY@ (the example's shared library) and @VRI_LABEL@. Only
+     OpenGL ES 3 is required: VRI's Auto order picks Vulkan where the device has a driver. The
+     orientation is locked because an example sizes its render targets once, from the first surface. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <application android:label="@VRI_LABEL@" android:theme="@style/Theme.AppCompat.NoActionBar">
+        <activity android:name="com.google.androidgamesdk.GameActivity" android:exported="true"
+                  android:screenOrientation="sensorLandscape"
+                  android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|density">
+            <meta-data android:name="android.app.lib_name" android:value="@VRI_LIBRARY@" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

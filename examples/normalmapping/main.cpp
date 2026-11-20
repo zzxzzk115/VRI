@@ -98,16 +98,8 @@ int main(int, char**)
 
     auto loadTex = [&](const char* file) {
         KtxImage img;
-#if defined(__EMSCRIPTEN__)
-        std::string p = std::string("/") + file;
-        if (!LoadKtxRgba(p.c_str(), img) && !LoadKtxRgba(file, img))
+        if (!LoadKtxRgba(vriex::AssetPath(file).c_str(), img) && !LoadKtxRgba(file, img))
             app.Fail("failed to load texture");
-#else
-        const char* base = SDL_GetBasePath();
-        std::string p    = (base ? std::string(base) : std::string()) + file;
-        if (!LoadKtxRgba(p.c_str(), img) && !LoadKtxRgba(file, img))
-            app.Fail("failed to load texture");
-#endif
         return img;
     };
     const KtxImage colorImg  = loadTex("stonefloor01_color_rgba.ktx");
@@ -358,7 +350,8 @@ int main(int, char**)
         t += 1.2f * lightSpeed * app.dt; // 1.2/s (= 0.02/frame at 60fps)
         const float eye[3] = {0, 0, 2.8f}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         Ubo         u {};
-        u.mvp = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 100.0f), LookAt(eye, ctr, up)));
+        u.mvp =
+            Transpose(Mul(Perspective(0.9f, float(app.width) / float(app.height), 0.1f, 100.0f), LookAt(eye, ctr, up)));
         u.lightPos[0] = std::cos(t) * 1.6f;
         u.lightPos[1] = std::sin(t) * 1.6f;
         u.lightPos[2] = lightZ;

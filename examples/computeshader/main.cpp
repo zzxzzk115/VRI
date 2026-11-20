@@ -62,8 +62,8 @@ int main(int, char**)
         t += 2.4f * speed * app.dt; // 2.4/s (= 0.04/frame at 60fps)
         Params p {};
         p.time   = t;
-        p.width  = kWidth;
-        p.height = kHeight;
+        p.width  = app.width;
+        p.height = app.height;
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Params)), &p, sizeof(Params));
         app.c.UnmapBuffer(ustg);
     };
@@ -78,8 +78,8 @@ int main(int, char**)
         VriTextureDesc td {};
         td.type           = VriTextureType_2D;
         td.format         = VriFormat_RGBA8_UNORM;
-        td.width          = kWidth;
-        td.height         = kHeight;
+        td.width          = app.width;
+        td.height         = app.height;
         td.depth          = 1;
         td.mipNum         = 1;
         td.layerNum       = 1;
@@ -270,8 +270,8 @@ int main(int, char**)
             c.CmdSetPipelineLayout(cmd, computeLayout);
             c.CmdSetDescriptorSet(cmd, 0, computeSet);
             VriDispatchDesc disp {};
-            disp.x = (kWidth + 7) / 8;
-            disp.y = (kHeight + 7) / 8;
+            disp.x = (app.width + 7) / 8;
+            disp.y = (app.height + 7) / 8;
             disp.z = 1;
             c.CmdDispatch(cmd, &disp);
             // storage image -> sampleable by the display pass

@@ -22,6 +22,10 @@
 #include <vector>
 
 #define TINYGLTF_NO_STB_IMAGE_WRITE
+#if defined(__ANDROID__)
+// The model ships in the APK's assets: tinygltf reads them through tinygltf::asset_manager.
+#define TINYGLTF_ANDROID_LOAD_FROM_ASSETS
+#endif
 #include <tiny_gltf.h>
 
 namespace vriex
@@ -199,11 +203,14 @@ namespace vriex
             VriCoreInterface&  c = app.c;
             tinygltf::Model    mdl;
             tinygltf::TinyGLTF loader;
-            std::string        err, warn;
-            const std::string  p        = path;
-            const bool         isBinary = p.size() > 4 && p.compare(p.size() - 4, 4, ".glb") == 0;
-            const bool         ok       = isBinary ? loader.LoadBinaryFromFile(&mdl, &err, &warn, p) :
-                                                     loader.LoadASCIIFromFile(&mdl, &err, &warn, p);
+#if defined(__ANDROID__)
+            tinygltf::asset_manager = g_androidAssets;
+#endif
+            std::string       err, warn;
+            const std::string p        = path;
+            const bool        isBinary = p.size() > 4 && p.compare(p.size() - 4, 4, ".glb") == 0;
+            const bool        ok       = isBinary ? loader.LoadBinaryFromFile(&mdl, &err, &warn, p) :
+                                                    loader.LoadASCIIFromFile(&mdl, &err, &warn, p);
             if (!warn.empty())
                 std::printf("[gltf] warning: %s\n", warn.c_str());
             if (!ok)

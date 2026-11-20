@@ -82,17 +82,9 @@ int main(int, char**)
 
     // load the texture (desktop: next to the exe; web: preloaded into MEMFS at root)
     KtxImage tex;
-#if defined(__EMSCRIPTEN__)
-    if (!LoadKtxRgba("/metalplate01_rgba.ktx", tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
+    if (!LoadKtxRgba(vriex::AssetPath("metalplate01_rgba.ktx").c_str(), tex) &&
+        !LoadKtxRgba("metalplate01_rgba.ktx", tex))
         app.Fail("failed to load metalplate01_rgba.ktx");
-#else
-    {
-        const char* base = SDL_GetBasePath();
-        std::string path = (base ? std::string(base) : std::string()) + "metalplate01_rgba.ktx";
-        if (!LoadKtxRgba(path.c_str(), tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
-            app.Fail("failed to load metalplate01_rgba.ktx");
-    }
-#endif
 
     auto makeDeviceBuf = [&](uint64_t size, VriBufferUsageFlags usage, const void* src) {
         VriBufferDesc bd {};
@@ -368,7 +360,7 @@ int main(int, char**)
         const float eye[3] = {std::cos(t) * r, 4.0f, std::sin(t) * r}, ctr[3] = {0, 0, 0}, up[3] = {0, 1, 0};
         // transpose for Slang's mul(viewProj, world); the per-instance columns stay column-major
         Mat4 viewProj =
-            Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.1f, 200.0f), LookAt(eye, ctr, up)));
+            Transpose(Mul(Perspective(0.9f, float(app.width) / float(app.height), 0.1f, 200.0f), LookAt(eye, ctr, up)));
         std::memcpy(app.c.MapBuffer(ustg, 0, sizeof(Mat4)), &viewProj, sizeof(Mat4));
         app.c.UnmapBuffer(ustg);
     };

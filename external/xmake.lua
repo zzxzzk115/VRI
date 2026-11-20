@@ -67,12 +67,17 @@ end
 
 -- Examples windowing (matches libvultra)
 if has_config("vri_build_examples") then
-    add_requires("libsdl3 3.4.0")
+    -- Android hosts the examples in GameActivity (examples/common/android_main.cpp) instead of SDL3.
+    if is_plat("android") then
+        add_requires("game-activity 4.4.2")
+    else
+        add_requires("libsdl3 3.4.0")
+    end
     -- Dear ImGui for the examples' UI. The examples draw ImDrawData through VRI
     -- (examples/common/imgui_vri.h), so we don't need an imgui render backend - only the
-    -- core, plus the SDL3 *input/platform* backend on desktop. On wasm input is fed via Emscripten.
-    -- The -docking variant adds docking + the multi-viewport (detached OS windows) platform API.
-    if is_plat("wasm") then
+    -- core, plus the SDL3 *input/platform* backend on desktop. On wasm and Android the host feeds
+    -- ImGuiIO itself. The -docking variant adds docking + the multi-viewport platform API.
+    if is_plat("wasm", "android") then
         add_requires("imgui v1.92.5-docking")
     else
         add_requires("imgui v1.92.5-docking", {configs = {sdl3 = true}})

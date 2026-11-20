@@ -55,13 +55,13 @@ device conventions are selected at initialization; neither a Vulkan-style rewrit
 
 | Backend | Platforms |
 | --- | --- |
-| **Vulkan** | Windows, Linux (and macOS via MoltenVK) |
+| **Vulkan** | Windows, Linux, Android (and macOS via MoltenVK) |
 | **Direct3D 12** | Windows |
 | **Metal** | macOS (Apple Silicon) |
 | **WebGPU** | Windows, Linux, macOS, **Web** |
 | **OpenGL** | Windows, Linux (and macOS, capped at 4.1) |
 | **WebGL 2** | **Web** |
-| **OpenGL ES** | Linux / embedded (e.g. Raspberry Pi) |
+| **OpenGL ES** | Android, Linux / embedded (e.g. Raspberry Pi) |
 | **Software (CPU)** | Windows, Linux, macOS — anywhere with a software Vulkan ICD |
 
 On the web, VRI runs through **two** backends — WebGPU and WebGL 2 — both via Emscripten. The
@@ -189,6 +189,25 @@ vriCreateDeviceAsync(&desc, [](void* app, VriResult result, VriDevice* device) {
 
 Off the browser `vriCreateDeviceAsync` creates the device before it returns.
 
+### Android
+
+An Android example is a shared library hosted by Google's
+[GameActivity](https://developer.android.com/games/agdk/game-activity); `xmake apk` packages it as a
+debug APK through the Gradle project in `examples/android` (needs Gradle and a JDK on the build
+machine). Every example except the desktop feature demos below builds for `arm64-v8a` and `x86_64`:
+
+```sh
+xmake f -p android -a x86_64 --ndk=<ndk> --android_sdk=<sdk> --vri_build_examples=y
+xmake apk --gradle=<gradle> example-cube    # -> build/android/example-cube.apk
+adb install -r build/android/example-cube.apk
+adb shell am start -n org.vri.example.cube/com.google.androidgamesdk.GameActivity --es VRI_API opengl
+```
+
+The launch Intent's string extras `VRI_API`, `VRI_MAX_FRAMES` and `VRI_PRESENT` take the place of
+the desktop environment variables, and the examples' output goes to logcat under the tag `VRI`
+(`adb logcat -s VRI`). An example renders at the full screen size, in landscape, with touch driving
+its ImGui panel.
+
 ## Coordinate conventions
 
 Initialize device descriptors with `vriDefaultDeviceCreationDesc()`; its size field guards C ABI drift.
@@ -238,7 +257,7 @@ xmake run example-pathtracer          # progressive path tracer with global illu
 xmake run example-waveops             # wave/subgroup intrinsics visualized (compute/fragment fallbacks)
 ```
 
-Desktop feature demos (these exercise capabilities the web backends don't expose):
+Desktop feature demos (these exercise capabilities the web backends and mobile GPUs don't expose):
 
 ```sh
 xmake run example-conservativeraster  # normal vs conservative rasterization, side by side

@@ -8,6 +8,10 @@ local vri_root = path.directory(os.scriptdir())
 target("vri")
     set_kind("static")
     set_languages("cxx23")
+    if is_plat("android") then
+        -- Android applications are shared libraries, so the archive they link must be PIC.
+        add_cxflags("-fPIC", {force = true})
+    end
 
     -- public C/C++ headers
     add_includedirs(path.join(vri_root, "include"), {public = true})

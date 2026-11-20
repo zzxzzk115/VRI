@@ -21,6 +21,9 @@ target("example-cube")
         add_ldflags("-sASYNCIFY", "-sALLOW_MEMORY_GROWTH=1", "-sEXIT_RUNTIME=1", "-fexceptions", "--emrun", {force = true})
         add_ldflags("--shell-file=" .. path.join(os.scriptdir(), "..", "common", "shell.html"), {force = true}) -- Bevy-style page
         add_ldflags("--preload-file=" .. path.join(os.scriptdir(), "assets", "metalplate01_rgba.ktx") .. "@/metalplate01_rgba.ktx", {force = true})
+    elseif is_plat("android") then
+        add_rules("vri.android_example") -- a GameActivity library; `xmake apk example-cube` packages it
+        add_values("vri.android_assets", path.join(os.scriptdir(), "assets", "metalplate01_rgba.ktx"))
     else
         add_packages("libsdl3")
         -- copy the .ktx asset next to the executable (loaded via SDL_GetBasePath)

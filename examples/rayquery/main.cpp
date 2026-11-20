@@ -174,7 +174,7 @@ int main(int, char**)
         const V3    fwd     = norm3(ctr - eye);
         const V3    right   = norm3(cross3(fwd, wup));
         const V3    up      = cross3(right, fwd);
-        const float tanHalf = std::tan(0.7f * 0.5f), aspect = float(kWidth) / float(kHeight);
+        const float tanHalf = std::tan(0.7f * 0.5f), aspect = float(app.width) / float(app.height);
         set4(s.eye, eye);
         set4(s.camRight, {right.x * tanHalf * aspect, right.y * tanHalf * aspect, right.z * tanHalf * aspect});
         set4(s.camUp, {up.x * tanHalf, up.y * tanHalf, up.z * tanHalf});
@@ -216,8 +216,8 @@ int main(int, char**)
     VriTextureDesc td {};
     td.type           = VriTextureType_2D;
     td.format         = VriFormat_RGBA8_UNORM;
-    td.width          = kWidth;
-    td.height         = kHeight;
+    td.width          = app.width;
+    td.height         = app.height;
     td.depth          = 1;
     td.mipNum         = 1;
     td.layerNum       = 1;
@@ -589,8 +589,8 @@ int main(int, char**)
         c.CmdSetPipelineLayout(cmd, computeLayout);
         c.CmdSetDescriptorSet(cmd, 0, computeSet);
         VriDispatchDesc disp {};
-        disp.x = (kWidth + 7) / 8;
-        disp.y = (kHeight + 7) / 8;
+        disp.x = (app.width + 7) / 8;
+        disp.y = (app.height + 7) / 8;
         disp.z = 1;
         c.CmdDispatch(cmd, &disp);
 

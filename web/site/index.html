@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VRI — one render hardware interface, every backend</title>
-  <meta name="description" content="VRI is a cross-platform Render Hardware Interface: write your renderer once, run it on Vulkan, Direct3D 12, Metal, WebGPU, and OpenGL — desktop, embedded, and the web.">
+  <meta name="description" content="VRI is a cross-platform Render Hardware Interface: write your renderer once, run it on Vulkan, Direct3D 12, Metal, WebGPU, and OpenGL — desktop, Android, embedded, and the web.">
   <link rel="stylesheet" href="style.css?v={{VRI_SHA}}">
 </head>
 <body>
@@ -51,18 +51,18 @@ cmd.<span class="f">EndRendering</span>();</pre>
 
     <section class="block">
       <h2>run everywhere</h2>
-      <p class="note">The desktop application requests <code>Auto</code> and VRI picks the best backend. On the web VRI runs through WebGPU and WebGL&nbsp;2, both via Emscripten. A software (CPU) fallback renders with no GPU at all.</p>
+      <p class="note">The desktop application requests <code>Auto</code> and VRI picks the best backend. On Android it runs on Vulkan or OpenGL&nbsp;ES; the examples package as APKs with <code>xmake apk</code>. On the web VRI runs through WebGPU and WebGL&nbsp;2, both via Emscripten. A software (CPU) fallback renders with no GPU at all.</p>
       <div class="panel tablewrap">
         <table>
           <thead><tr><th>Backend</th><th>Platforms</th></tr></thead>
           <tbody>
-            <tr><td>Vulkan</td><td>Windows, Linux (and macOS via MoltenVK)</td></tr>
+            <tr><td>Vulkan</td><td>Windows, Linux, <b>Android</b> (and macOS via MoltenVK)</td></tr>
             <tr><td>Direct3D 12</td><td>Windows</td></tr>
             <tr><td>Metal</td><td>macOS (Apple Silicon)</td></tr>
             <tr><td>WebGPU</td><td>Windows, Linux, macOS, <b>Web</b></td></tr>
             <tr><td>OpenGL</td><td>Windows, Linux (and macOS, capped at 4.1)</td></tr>
             <tr><td>WebGL 2</td><td><b>Web</b></td></tr>
-            <tr><td>OpenGL ES</td><td>Linux / embedded (e.g. Raspberry Pi)</td></tr>
+            <tr><td>OpenGL ES</td><td><b>Android</b>, Linux / embedded (e.g. Raspberry Pi)</td></tr>
             <tr><td>Software (CPU)</td><td>Windows, Linux, macOS — anywhere with a software Vulkan ICD</td></tr>
           </tbody>
         </table>

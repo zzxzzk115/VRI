@@ -17,6 +17,8 @@ target("example-pbrbasic")
         set_extension(".html")
         add_ldflags("-sASYNCIFY", "-sALLOW_MEMORY_GROWTH=1", "-sEXIT_RUNTIME=1", "-fexceptions", "--emrun", {force = true})
         add_ldflags("--shell-file=" .. path.join(os.scriptdir(), "..", "common", "shell.html"), {force = true}) -- Bevy-style page
+    elseif is_plat("android") then
+        add_rules("vri.android_example") -- a GameActivity library; `xmake apk example-pbrbasic` packages it
     else
         add_packages("libsdl3")
     end

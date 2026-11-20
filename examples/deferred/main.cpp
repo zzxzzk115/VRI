@@ -138,8 +138,8 @@ namespace
         VriTextureDesc td {};
         td.type           = VriTextureType_2D;
         td.format         = fmt;
-        td.width          = kWidth;
-        td.height         = kHeight;
+        td.width          = app.width;
+        td.height         = app.height;
         td.depth          = 1;
         td.mipNum         = 1;
         td.layerNum       = 1;
@@ -217,17 +217,9 @@ int main(int, char**)
 
     // ---- floor texture (reused from the cube example) ----
     KtxImage tex;
-#if defined(__EMSCRIPTEN__)
-    if (!LoadKtxRgba("/metalplate01_rgba.ktx", tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
+    if (!LoadKtxRgba(vriex::AssetPath("metalplate01_rgba.ktx").c_str(), tex) &&
+        !LoadKtxRgba("metalplate01_rgba.ktx", tex))
         app.Fail("failed to load metalplate01_rgba.ktx");
-#else
-    {
-        const char* base = SDL_GetBasePath();
-        std::string path = (base ? std::string(base) : std::string()) + "metalplate01_rgba.ktx";
-        if (!LoadKtxRgba(path.c_str(), tex) && !LoadKtxRgba("metalplate01_rgba.ktx", tex))
-            app.Fail("failed to load metalplate01_rgba.ktx");
-    }
-#endif
 
     auto makeDeviceBuf = [&](uint64_t size, VriBufferUsageFlags usage, const void* src) {
         VriBufferDesc bd {};
@@ -675,7 +667,8 @@ int main(int, char**)
         const float R      = kGrid * kSpacing + 12.0f;
         const float eye[3] = {std::sin(t) * R, R * 0.55f, std::cos(t) * R}, ctr[3] = {0, 0.5f, 0}, up[3] = {0, 1, 0};
 
-        Mat4 vp = Transpose(Mul(Perspective(0.9f, float(kWidth) / float(kHeight), 0.5f, 300.0f), LookAt(eye, ctr, up)));
+        Mat4 vp =
+            Transpose(Mul(Perspective(0.9f, float(app.width) / float(app.height), 0.5f, 300.0f), LookAt(eye, ctr, up)));
         std::memcpy(app.c.MapBuffer(camStg, 0, sizeof(Mat4)), &vp, sizeof(Mat4));
         app.c.UnmapBuffer(camStg);
 
@@ -787,13 +780,13 @@ int main(int, char**)
         att.colors            = colors;
         att.colorNum          = 3;
         att.depth             = &depthRT;
-        att.renderArea.width  = kWidth;
-        att.renderArea.height = kHeight;
+        att.renderArea.width  = app.width;
+        att.renderArea.height = app.height;
         att.layerNum          = 1;
         c.CmdBeginRendering(cmd, &att);
-        VriViewport vp {0, 0, float(kWidth), float(kHeight), 0, 1};
+        VriViewport vp {0, 0, float(app.width), float(app.height), 0, 1};
         c.CmdSetViewports(cmd, &vp, 1);
-        VriRect sc {0, 0, kWidth, kHeight};
+        VriRect sc {0, 0, app.width, app.height};
         c.CmdSetScissors(cmd, &sc, 1);
         c.CmdSetPipeline(cmd, mrtPipeline);
         c.CmdSetPipelineLayout(cmd, mrtLayout);
