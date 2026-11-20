@@ -26,6 +26,10 @@ TEST_CASE("WebGPU: device creates and reports an adapter")
 
     const VriDeviceDesc* dd = core.GetDeviceDesc(device);
     CHECK(dd->graphicsAPI == VriGraphicsAPI_WebGPU);
+    // wgpu-native runs on a native API; only a browser adapter reports WebGPU itself.
+    CHECK(dd->nativeAPI != VriGraphicsAPI_None);
+    CHECK(dd->nativeAPI != VriGraphicsAPI_WebGPU);
+    MESSAGE("WebGPU native API: ", static_cast<int>(dd->nativeAPI));
     CHECK(dd->adapter.name[0] != '\0');
     MESSAGE("WebGPU adapter: ", dd->adapter.name);
 

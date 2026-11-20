@@ -81,6 +81,10 @@ typedef struct VriDeviceDesc
 {
     VriAdapterDesc adapter;
     VriGraphicsAPI graphicsAPI;
+    /* The API the device's commands finally reach: graphicsAPI itself for the direct backends,
+       Vulkan for Software, and for WebGPU the API under it (Vulkan / D3D12 / Metal / D3D11 /
+       OpenGL / OpenGLES on wgpu-native, WebGPU in the browser, None when the adapter does not say). */
+    VriGraphicsAPI nativeAPI;
     uint32_t       apiVersionMajor;
     uint32_t       apiVersionMinor;
 

@@ -507,6 +507,7 @@ namespace vri::gl
         // ran as ES (native-ES build / WebGL2 / an explicit ES context) reports OpenGLES, so
         // the app can label it honestly ("OpenGL ES" vs "OpenGL" / "WebGL") with the version.
         m_desc.graphicsAPI = m_es ? VriGraphicsAPI_OpenGLES : VriGraphicsAPI_OpenGL;
+        m_desc.nativeAPI   = m_desc.graphicsAPI;
 
         const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         if (renderer)

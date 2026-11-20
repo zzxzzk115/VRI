@@ -24,6 +24,7 @@ TEST_CASE("D3D12: device creates and reports an adapter")
 
     const VriDeviceDesc* dd = core.GetDeviceDesc(device);
     CHECK(dd->graphicsAPI == VriGraphicsAPI_D3D12);
+    CHECK(dd->nativeAPI == VriGraphicsAPI_D3D12);
     CHECK(dd->adapter.name[0] != '\0');
     CHECK(dd->apiVersionMajor == 12);
     CHECK(dd->attachmentColorMaxNum >= 8);
