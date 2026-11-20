@@ -21,8 +21,10 @@ extern "C" void (*glXGetProcAddressARB(const unsigned char* name))(void);
 #include "device_gl.h"
 
 #if defined(VRI_GL_EGL)
-#include <EGL/egl.h>     // windowed present retargets the device's EGL context to the app window
+#include <EGL/egl.h> // windowed present retargets the device's EGL context to the app window
+#if !defined(__ANDROID__)
 #include <wayland-egl.h> // wl_egl_window_{create,resize,destroy} for the Wayland window surface
+#endif
 #endif
 
 #if defined(__APPLE__)
@@ -245,9 +247,10 @@ void main()
 #if defined(VRI_GL_EGL)
             // Native OpenGL ES present: build an EGLSurface for the app's window from the
             // device's EGLDisplay/EGLConfig, then Present retargets the device context to it
-            // (same blit-then-swap model as the GLX path). Supports X11 (window XID directly)
-            // and Wayland (a wl_egl_window wrapping the app's wl_surface - the device must
-            // have been created on the same wl_display, via VriDeviceCreationDesc::nativeDisplay).
+            // (same blit-then-swap model as the GLX path). Supports Android (the ANativeWindow
+            // directly), X11 (window XID directly) and Wayland (a wl_egl_window wrapping the app's
+            // wl_surface - the device must have been created on the same wl_display, via
+            // VriDeviceCreationDesc::nativeDisplay).
             EGLDisplay dpy = static_cast<EGLDisplay>(d->EglDisplay());
             if (!dpy || !d->EglConfig())
             {
@@ -256,6 +259,17 @@ void main()
             }
             EGLNativeWindowType nativeWin = 0;
             void*               wlEglWin  = nullptr;
+#if defined(__ANDROID__)
+            if (desc->window.type == VriWindowSystem_Android && desc->window.handle.android.window)
+            {
+                nativeWin = static_cast<EGLNativeWindowType>(desc->window.handle.android.window);
+            }
+            else
+            {
+                d->ReportError("GL swapchain: Android present needs a VriWindowSystem_Android ANativeWindow");
+                return VriResult_Unsupported;
+            }
+#else
             if (desc->window.type == VriWindowSystem_Xlib)
             {
                 nativeWin = static_cast<EGLNativeWindowType>(desc->window.handle.xlib.window);
@@ -282,12 +296,15 @@ void main()
                 d->ReportError("GL swapchain: native OpenGL ES present implements the Xlib and Wayland window systems");
                 return VriResult_Unsupported;
             }
+#endif
             EGLSurface eglSurf =
                 eglCreateWindowSurface(dpy, static_cast<EGLConfig>(d->EglConfig()), nativeWin, nullptr);
             if (eglSurf == EGL_NO_SURFACE)
             {
+#if !defined(__ANDROID__)
                 if (wlEglWin)
                     wl_egl_window_destroy(static_cast<wl_egl_window*>(wlEglWin));
+#endif
                 d->ReportError("GL swapchain: eglCreateWindowSurface failed (window visual/config mismatch?)");
                 return VriResult_Failure;
             }
@@ -473,8 +490,10 @@ void main()
             if (s->eglSurface)
                 eglDestroySurface(static_cast<EGLDisplay>(s->device->EglDisplay()),
                                   static_cast<EGLSurface>(s->eglSurface));
+#if !defined(__ANDROID__)
             if (s->wlEglWindow)
                 wl_egl_window_destroy(static_cast<wl_egl_window*>(s->wlEglWindow));
+#endif
 #endif
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
             if (s->hdc && s->hwnd)
@@ -699,7 +718,7 @@ void main()
             emscripten_set_canvas_element_size(
                 s->canvasSelector.c_str(), static_cast<int>(s->width), static_cast<int>(s->height));
 #endif
-#if defined(VRI_GL_EGL)
+#if defined(VRI_GL_EGL) && !defined(__ANDROID__)
             if (s->wlEglWindow) // keep the Wayland window surface in step with the swapchain size
                 wl_egl_window_resize(static_cast<wl_egl_window*>(s->wlEglWindow),
                                      static_cast<int>(s->width),

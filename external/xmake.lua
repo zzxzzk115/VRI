@@ -43,7 +43,7 @@ if has_config("vri_backend_gl") or has_config("vri_backend_metal") then
     -- the native OpenGL ES build uses system GLES headers instead. glfw provides the context
     -- on Windows/macOS only - Linux (both desktop GL and GLES) uses EGL directly, no glfw.
     -- GL-only: the Metal backend shares spirv-cross above but needs neither loader.
-    if has_config("vri_backend_gl") and not is_plat("wasm") then
+    if has_config("vri_backend_gl") and not is_plat("wasm", "android") then
         if not has_config("vri_backend_gl_es") then
             add_requires("glad v0.1.36", {configs = {profile = "core", api = "gl=4.6"}})
             if is_plat("macosx") then
