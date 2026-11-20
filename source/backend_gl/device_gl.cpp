@@ -13,6 +13,10 @@
 #include <GLFW/glfw3.h>
 #endif
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -376,6 +380,15 @@ namespace vri::gl
         if (!InitEGL(desc.nativeDisplay))
             return VriResult_Failure;
 #else
+#if defined(__EMSCRIPTEN__)
+        // WebGL needs the browser's window and document: Emscripten's glfwInit touches `window`
+        // and would throw out of the whole program elsewhere (node, a worker).
+        if (!EM_ASM_INT({ return typeof window != 'undefined' && typeof document != 'undefined'; }))
+        {
+            ReportWarning("WebGL needs a browser window; this environment has none");
+            return VriResult_Unsupported;
+        }
+#endif
         if (!glfwInit())
         {
             ReportError("glfwInit failed");
