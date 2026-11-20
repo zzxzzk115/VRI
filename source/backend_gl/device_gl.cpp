@@ -191,9 +191,14 @@ namespace vri::gl
         //  3. Headless (no display server): the surfaceless platform, rendering into FBOs.
         auto getPlatformDisplay =
             reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
-        const bool haveX11          = std::getenv("DISPLAY") != nullptr;
+        const bool haveX11 = std::getenv("DISPLAY") != nullptr;
+#if defined(__ANDROID__)
+        // Android's default display makes window surfaces from an ANativeWindow.
+        const bool haveWindowSystem = true;
+#else
         const bool haveWindowSystem = nativeDisplay != nullptr || haveX11;
-        EGLDisplay dpy              = EGL_NO_DISPLAY;
+#endif
+        EGLDisplay dpy = EGL_NO_DISPLAY;
         if (nativeDisplay) // Wayland: bind the app's wl_display
         {
             if (getPlatformDisplay)

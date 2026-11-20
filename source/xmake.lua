@@ -75,6 +75,12 @@ target("vri")
             add_ldflags("-sUSE_GLFW=3", "-sFULL_ES3",
                         "-sMIN_WEBGL_VERSION=2", "-sMAX_WEBGL_VERSION=2",
                         {public = true, force = true})
+        elseif is_plat("android") then
+            -- Android has OpenGL ES only: the system EGL and libGLESv3 (ES 3.0-3.2 entry points,
+            -- no loader), the same EGL context + present path as native GLES on Linux, with the
+            -- window surface made from the app's ANativeWindow.
+            add_defines("VRI_GL_EGL", "VRI_GL_NATIVE_ES")
+            add_syslinks("EGL", "GLESv3", {public = true})
         elseif is_plat("linux") then
             -- Linux: the context + present go through EGL (VRI_GL_EGL), GLFW-free, so one
             -- path serves Wayland, X11, and headless - for BOTH desktop GL and native GLES.
