@@ -374,6 +374,7 @@ int main(int, char**)
         cr[2].baseRegister   = 2;
         cr[2].descriptorNum  = 1;
         cr[2].descriptorType = VriDescriptorType_StorageTexture;
+        cr[2].flags          = VriDescriptorRange_WriteOnly; // the shader only writes it (WGSL `write`)
         cr[2].shaderStages   = VriShaderStage_Compute;
         VriDescriptorSetDesc csd {};
         csd.registerSpace = 0;
@@ -437,6 +438,7 @@ int main(int, char**)
         cr[1].baseRegister   = 1;
         cr[1].descriptorNum  = 1;
         cr[1].descriptorType = VriDescriptorType_StorageTexture;
+        cr[1].flags          = VriDescriptorRange_WriteOnly; // the shader only writes it (WGSL `write`)
         cr[1].shaderStages   = VriShaderStage_Compute;
         VriDescriptorSetDesc csd {};
         csd.registerSpace = 0;

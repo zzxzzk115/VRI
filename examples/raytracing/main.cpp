@@ -384,6 +384,7 @@ int main(int argc, char** argv)
     rr[rn].baseRegister   = 1;
     rr[rn].descriptorNum  = 1;
     rr[rn].descriptorType = VriDescriptorType_StorageTexture;
+    rr[rn].flags          = VriDescriptorRange_WriteOnly; // the shader only writes it (WGSL `write`)
     rr[rn].shaderStages   = rgStage;
     ++rn;
     rr[rn].baseRegister   = 2;
