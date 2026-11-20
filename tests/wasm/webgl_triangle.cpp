@@ -9,6 +9,7 @@
 // Run:   emrun (headless Chrome) over the generated .html
 
 #include "tests/buffer_texture_copy_probe.h"
+#include "tests/gl_compressed_probe.h"
 
 #include <vri/ext/vri_ext_swapchain.h>
 #include <vri/vri.h>
@@ -2157,6 +2158,49 @@ namespace
         return ok;
     }
 
+    // Block-compressed formats the browser grants: each samples to its known decode and refuses a readback.
+    void VRI_CALL CountCompressedErrors(void* userArg, VriMessageSeverity severity, const char*)
+    {
+        if (severity == VriMessageSeverity_Error)
+            ++*static_cast<int*>(userArg);
+    }
+    bool CompressedProbe()
+    {
+        int                   errors    = 0;
+        VriCallbackInterface  callbacks = {&errors, CountCompressedErrors};
+        VriDeviceCreationDesc dc        = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI                  = VriGraphicsAPI_OpenGLES;
+        dc.callbackInterface            = &callbacks;
+        VriDevice* dev                  = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        bool             ok = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success;
+        for (const vri::test::CompressedSample& sample : vri::test::CompressedSamples())
+        {
+            if (!ok || (c.GetFormatSupport(dev, sample.format) & VriFormatSupport_Texture) == 0)
+            {
+                std::printf("VRI_WEBGL_STEP: %s unsupported\n", sample.name);
+                continue;
+            }
+            uint8_t    rgba[4] = {};
+            const int  sampled = vri::test::SampleCompressed(dev, c, sample, rgba);
+            const int  refused = vri::test::CheckCompressedReadbackRefused(dev, c, sample, errors);
+            const bool match   = sampled == 0 && vri::test::MatchesDecode(sample, rgba);
+            std::printf("VRI_WEBGL_STEP: %s sampled %d,%d,%d,%d %s, readback refused %s\n",
+                        sample.name,
+                        rgba[0],
+                        rgba[1],
+                        rgba[2],
+                        rgba[3],
+                        match ? "ok" : "WRONG",
+                        refused == 0 ? "ok" : "WRONG");
+            ok = match && refused == 0;
+        }
+        vriDestroyDevice(dev);
+        return ok;
+    }
+
     // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
     // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
     // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
@@ -2568,6 +2612,8 @@ int main()
 
     const bool copyPass = CopyProbe();
 
+    const bool compressedPass = CompressedProbe();
+
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
     const bool msaaPass = ranMsaa && msaaEdge;
@@ -2577,43 +2623,45 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && secondPass && copyPass && msaaPass && swapPass;
-    std::printf(
-        "VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
-        "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
-        "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-        "ran=%d ok=%d | second-context: ran=%d ok=%d | copies: %d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
-        pass ? "PASS" : "FAIL",
-        ranTri,
-        topRed,
-        botRed,
-        ranUbo,
-        centerGreen,
-        ranTex,
-        centerBlue,
-        ranVbuf,
-        centerYellow,
-        ranDepth,
-        depthGreen,
-        ranBlend,
-        blendPurple,
-        ranCull,
-        cullGreen,
-        ranMrt,
-        mrtOk,
-        ranInst,
-        instOk,
-        ranScissor,
-        scissorOk,
-        ranComputeNo,
-        computeNoOk,
-        ranSecond,
-        secondOk,
-        copyPass,
-        ranMsaa,
-        msaaEdge,
-        ranSwap,
-        swapRed);
+                      instPass && scissorPass && computeNoPass && secondPass && copyPass && compressedPass &&
+                      msaaPass && swapPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
+                "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
+                "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
+                "ran=%d ok=%d | second-context: ran=%d ok=%d | copies: %d | compressed: %d | msaa: ran=%d edge=%d | "
+                "swapchain: ran=%d red=%d)\n",
+                pass ? "PASS" : "FAIL",
+                ranTri,
+                topRed,
+                botRed,
+                ranUbo,
+                centerGreen,
+                ranTex,
+                centerBlue,
+                ranVbuf,
+                centerYellow,
+                ranDepth,
+                depthGreen,
+                ranBlend,
+                blendPurple,
+                ranCull,
+                cullGreen,
+                ranMrt,
+                mrtOk,
+                ranInst,
+                instOk,
+                ranScissor,
+                scissorOk,
+                ranComputeNo,
+                computeNoOk,
+                ranSecond,
+                secondOk,
+                copyPass,
+                compressedPass,
+                ranMsaa,
+                msaaEdge,
+                ranSwap,
+                swapRed);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.

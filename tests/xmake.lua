@@ -67,6 +67,7 @@ target("vri-tests")
     add_files("test_explicitmemory_xbackend.cpp") -- explicit placed-resource memory (AllocateMemory + BindMemory)
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
     add_files("test_buffertexture_copy_xbackend.cpp") -- buffer <-> texture copies with padded rows and slices
+    add_files("test_gl_compressed.cpp") -- GL block-compressed upload, sampling and readback refusal
     add_files("test_atomic_int64_xbackend.cpp") -- 64-bit atomics on storage buffers (Vulkan, D3D12)
     add_files("test_clear_texture_metal.cpp")
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)

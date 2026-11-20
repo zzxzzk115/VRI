@@ -941,11 +941,62 @@ private:
     bool m_pack;
 };
 
+// A block-compressed upload. glCompressedTexSubImage* takes whole blocks and, on ES and WebGL, no buffer
+// row length, so a padded buffer layout goes up one row of blocks at a time.
+void UploadCompressed(const TextureGL* t, const BufferGL* src, const VriBufferTextureCopyDesc& region)
+{
+    const CopyRegionGL c          = ResolveCopyRegion(t, region.texture);
+    const GLint        mip        = static_cast<GLint>(region.texture.mip);
+    const uint64_t     blocksWide = (static_cast<uint64_t>(c.width) + 3) / 4;
+    const uint64_t     blocksHigh = (static_cast<uint64_t>(c.height) + 3) / 4;
+    const uint64_t     rowBlocks  = region.bufferRowLength ? (uint64_t(region.bufferRowLength) + 3) / 4 : blocksWide;
+    const uint64_t     sliceRows = region.bufferImageHeight ? (uint64_t(region.bufferImageHeight) + 3) / 4 : blocksHigh;
+    const uint64_t     rowBytes  = rowBlocks * t->blockBytes;
+    const uint64_t     bandRows  = rowBlocks == blocksWide ? blocksHigh : 1; // block rows per call
+    const bool         layered   = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_3D;
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, src->id);
+    glBindTexture(t->target, t->id);
+    for (GLsizei slice = 0; slice < c.slices; ++slice)
+    {
+        for (uint64_t row = 0; row < blocksHigh; row += bandRows)
+        {
+            const GLint    y      = c.y + static_cast<GLint>(row * 4);
+            const GLsizei  height = static_cast<GLsizei>(std::min<uint64_t>(bandRows * 4, c.height - row * 4));
+            const GLsizei  size   = static_cast<GLsizei>(bandRows * blocksWide * t->blockBytes);
+            const uint64_t offset =
+                region.bufferOffset + static_cast<uint64_t>(slice) * sliceRows * rowBytes + row * rowBytes;
+            const void* data = reinterpret_cast<const void*>(static_cast<uintptr_t>(offset));
+            if (layered)
+                glCompressedTexSubImage3D(
+                    t->target, mip, c.x, y, c.z + slice, c.width, height, 1, t->internalFormat, size, data);
+            else if (t->target == GL_TEXTURE_CUBE_MAP)
+                glCompressedTexSubImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + c.z + slice),
+                                          mip,
+                                          c.x,
+                                          y,
+                                          c.width,
+                                          height,
+                                          t->internalFormat,
+                                          size,
+                                          data);
+            else
+                glCompressedTexSubImage2D(t->target, mip, c.x, y, c.width, height, t->internalFormat, size, data);
+        }
+    }
+    glBindTexture(t->target, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+}
+
 void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*,
                                        VriTexture*                     dst,
                                        VriBuffer*                      src,
                                        const VriBufferTextureCopyDesc* region)
 {
+    if (Tex(dst)->blockBytes != 0)
+    {
+        UploadCompressed(Tex(dst), Buf(src), *region);
+        return;
+    }
     TextureGL*         t       = Tex(dst);
     const CopyRegionGL c       = ResolveCopyRegion(t, region->texture);
     const void*        off     = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
@@ -1002,8 +1053,14 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     // No glGetTextureImage on GLES/WebGL: read via a temp FBO + glReadPixels
     // into a PBO. glReadPixels reads bottom-up; combined with the in-shader
     // flip_vert_y this yields VRI top-left row order.
-    const TextureGL*   t   = reinterpret_cast<const TextureGL*>(src);
-    BufferGL*          b   = Buf(dst);
+    const TextureGL* t = reinterpret_cast<const TextureGL*>(src);
+    BufferGL*        b = Buf(dst);
+    if (t->blockBytes != 0)
+    {
+        b->device->ReportError("CmdReadbackTextureToBuffer: a block-compressed texture cannot be read back on GL "
+                               "(GLES and WebGL have no glGetCompressedTexImage)");
+        return;
+    }
     const CopyRegionGL c   = ResolveCopyRegion(t, region->texture);
     const GLint        mip = static_cast<GLint>(region->texture.mip);
     // glReadPixels reads one image; layers and 3D slices are read one by one into consecutive slices.

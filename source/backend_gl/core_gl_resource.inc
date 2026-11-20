@@ -11,10 +11,37 @@ const VriDeviceDesc* VRI_CALL GetDeviceDesc(const VriDevice* device) { return &D
 // completeness. It also withheld DepthStencil from the two depth formats GL does
 // implement, so the usual "probe D24S8, else fall back" pattern picked the wrong
 // one here. Report per format instead.
+// Whether this context samples the block-compressed `format`; false for every other format.
+bool CompressedFormatAvailable(const GlFeatures& caps, VriFormat format)
+{
+    switch (format)
+    {
+        case VriFormat_BC1_UNORM:
+        case VriFormat_BC2_UNORM:
+        case VriFormat_BC3_UNORM:
+            return caps.s3tc;
+        case VriFormat_BC4_UNORM:
+        case VriFormat_BC5_UNORM:
+            return caps.rgtc;
+        case VriFormat_BC6H_UFLOAT:
+        case VriFormat_BC7_UNORM:
+            return caps.bptc;
+        case VriFormat_ETC2_RGBA8_UNORM:
+            return caps.etc2;
+        case VriFormat_ASTC_4x4_UNORM:
+            return caps.astc;
+        default:
+            return false;
+    }
+}
+
 VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
 {
     VriFormatSupportFlags r    = VriFormatSupport_None;
     const GlFeatures&     caps = Dev(device)->Features();
+    // A compressed format is sampled only: it cannot be rendered to, stored to or read back on GL.
+    if (ToGLCompressedFormat(format).internalFormat != 0)
+        return CompressedFormatAvailable(caps, format) ? VriFormatSupport_Texture : VriFormatSupport_None;
 
     const GLFormat g = ToGLFormatOrNone(format);
     if (g.internalFormat != 0)
@@ -278,16 +305,25 @@ void TexImageAllocate(GLenum          target,
 
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
-    const GLFormat gf       = ToGLFormat(desc->format);
-    const GLsizei  mips     = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
-    const GLsizei  w        = static_cast<GLsizei>(desc->width);
-    const GLsizei  h        = static_cast<GLsizei>(desc->height ? desc->height : 1u);
-    const GLsizei  layers   = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
-    const GLsizei  depth    = static_cast<GLsizei>(desc->depth ? desc->depth : 1u);
-    const bool     ms       = desc->sampleNum > 1;
-    const bool     isCube   = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
-    const bool     isVolume = !ms && desc->type == VriTextureType_3D;
-    const bool     isArray  = !ms && !isCube && !isVolume && layers > 1; // 2D array texture
+    const GLCompressedFormat compressed = ToGLCompressedFormat(desc->format);
+    if (compressed.internalFormat != 0 && !CompressedFormatAvailable(Dev(device)->Features(), desc->format))
+    {
+        Dev(device)->ReportError("CreateTexture: this GL context does not support the compressed format");
+        *out = nullptr;
+        return VriResult_Unsupported;
+    }
+    // A compressed texture has no pixel format or type: glCompressedTexSubImage* fills it.
+    const GLFormat gf =
+        compressed.internalFormat != 0 ? GLFormat {compressed.internalFormat, 0, 0, 0} : ToGLFormat(desc->format);
+    const GLsizei mips     = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
+    const GLsizei w        = static_cast<GLsizei>(desc->width);
+    const GLsizei h        = static_cast<GLsizei>(desc->height ? desc->height : 1u);
+    const GLsizei layers   = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
+    const GLsizei depth    = static_cast<GLsizei>(desc->depth ? desc->depth : 1u);
+    const bool    ms       = desc->sampleNum > 1;
+    const bool    isCube   = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
+    const bool    isVolume = !ms && desc->type == VriTextureType_3D;
+    const bool    isArray  = !ms && !isCube && !isVolume && layers > 1; // 2D array texture
 
     // Immutable storage: GL 4.2+ and always present on GLES3/WebGL2; false only on macOS GL 4.1.
     const bool texStorage = Dev(device)->Features().textureStorage;
@@ -430,11 +466,15 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     t->mipNum         = static_cast<uint32_t>(mips);
     t->layerNum       = static_cast<uint32_t>(layers);
     t->texelSize      = gf.texelSize;
+    t->blockBytes     = compressed.blockBytes;
     {
         // No allocation query in GL: this is the mip-0 footprint plus the 1/3 mip-tail
         // estimate, which is the same approximation the GL driver's own tools report.
         VriObjectInfo info = MakeObjectInfo(VriObjectType_Texture);
         uint64_t      size = static_cast<uint64_t>(t->width) * t->height * t->depth * t->layerNum * gf.texelSize;
+        if (t->blockBytes != 0)
+            size = (static_cast<uint64_t>(t->width) + 3) / 4 * ((t->height + 3) / 4) * t->depth * t->layerNum *
+                   t->blockBytes;
         if (t->mipNum > 1)
             size += size / 3;
         info.memoryBytes = size;
