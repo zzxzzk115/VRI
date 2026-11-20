@@ -33,6 +33,9 @@ TEST_CASE("GL compressed formats: upload, sample against the reference decode, r
     }
     VriCoreInterface c {};
     REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
+    const VriDeviceDesc& desc      = *c.GetDeviceDesc(dev);
+    const bool           copyImage = desc.graphicsAPI == VriGraphicsAPI_OpenGL &&
+                           (desc.apiVersionMajor > 4 || (desc.apiVersionMajor == 4 && desc.apiVersionMinor >= 3));
     std::string supported;
     for (const vri::test::CompressedSample& sample : vri::test::CompressedSamples())
     {
@@ -62,11 +65,18 @@ TEST_CASE("GL compressed formats: upload, sample against the reference decode, r
         INFO("got " << int(rgba[0]) << "," << int(rgba[1]) << "," << int(rgba[2]) << "," << int(rgba[3]));
         CHECK(vri::test::MatchesDecode(sample, rgba));
         CHECK(vri::test::CheckCompressedReadbackRefused(dev, c, sample, errors) == 0);
-        // Desktop GL 4.3 copies compressed blocks: the copy samples to the same decode.
-        uint8_t copied[4] = {};
-        CHECK(vri::test::SampleCompressed(dev, c, sample, copied, true) == 0);
-        INFO("copied " << int(copied[0]) << "," << int(copied[1]) << "," << int(copied[2]) << "," << int(copied[3]));
-        CHECK(vri::test::MatchesDecode(sample, copied));
+        // Desktop GL 4.3 copies compressed blocks, and the copy samples to the same decode. An ES context (which an
+        // OpenGL request becomes on a native-ES build) and older desktop GL have no such copy and refuse it.
+        if (copyImage)
+        {
+            uint8_t copied[4] = {};
+            CHECK(vri::test::SampleCompressed(dev, c, sample, copied, true) == 0);
+            INFO("copied " << int(copied[0]) << "," << int(copied[1]) << "," << int(copied[2]) << ","
+                           << int(copied[3]));
+            CHECK(vri::test::MatchesDecode(sample, copied));
+        }
+        else
+            CHECK(vri::test::CheckCompressedCopyRefused(dev, c, sample, errors) == 0);
         // No compressed family is a 3D texture on GL.
         const int before = errors;
         CHECK(vri::test::CreateCompressedTexture(dev, c, sample.format, VriTextureType_3D) == nullptr);
