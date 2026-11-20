@@ -99,7 +99,8 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
 
     // GL clears are clipped by the scissor, which still holds the previous pass's rectangle (a
     // 1024x1024 shadow pass would leave a larger window's color and depth uncleared outside it).
-    // A load-op clear covers the render area, as on the other backends.
+    // A load-op clear covers the render area, as on the other backends; the scissor this command
+    // buffer set is draw state, so it is restored once the clears are done.
     if (a->renderArea.width != 0 && a->renderArea.height != 0)
     {
         glEnable(GL_SCISSOR_TEST);
@@ -159,6 +160,16 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
                 glClearBufferfv(GL_DEPTH, 0, &d);
         }
     }
+
+    if (c->scissorSet)
+    {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(c->scissorRect[0], c->scissorRect[1], c->scissorRect[2], c->scissorRect[3]);
+    }
+    else
+    {
+        glDisable(GL_SCISSOR_TEST);
+    }
 }
 void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
 {
@@ -207,12 +218,18 @@ void VRI_CALL CmdSetViewports(VriCommandBuffer*, const VriViewport* vps, uint32_
                static_cast<GLsizei>(vps[0].height));
     glDepthRangef(vps[0].minDepth, vps[0].maxDepth);
 }
-void VRI_CALL CmdSetScissors(VriCommandBuffer*, const VriRect* r, uint32_t num)
+void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* r, uint32_t num)
 {
     if (!num)
         return;
+    CommandBufferGL* c = CB(cmd);
+    c->scissorSet      = true;
+    c->scissorRect[0]  = r[0].x;
+    c->scissorRect[1]  = r[0].y;
+    c->scissorRect[2]  = static_cast<GLint>(r[0].width);
+    c->scissorRect[3]  = static_cast<GLint>(r[0].height);
     glEnable(GL_SCISSOR_TEST);
-    glScissor(r[0].x, r[0].y, static_cast<GLsizei>(r[0].width), static_cast<GLsizei>(r[0].height));
+    glScissor(c->scissorRect[0], c->scissorRect[1], c->scissorRect[2], c->scissorRect[3]);
 }
 void VRI_CALL CmdSetPipelineLayout(VriCommandBuffer* cmd, VriPipelineLayout* layout)
 {

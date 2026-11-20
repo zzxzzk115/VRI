@@ -94,7 +94,8 @@ VriResult VRI_CALL CreateCommandBuffer(VriCommandAllocator* allocator, VriComman
 }
 VriResult VRI_CALL BeginCommandBuffer(VriCommandBuffer* cmd)
 {
-    CB(cmd)->fbo = 0;
+    CB(cmd)->fbo        = 0;
+    CB(cmd)->scissorSet = false;
     return VriResult_Success;
 }
 VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer*) { return VriResult_Success; }

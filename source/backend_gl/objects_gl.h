@@ -57,6 +57,10 @@ namespace vri::gl
         GLenum                                              indexType   = 0x1405; // GL_UNSIGNED_INT
         uint32_t                      enabledAttribMask = 0; // attrib locations enabled by the last draw
         std::vector<PendingResolveGL> pendingResolves;       // MSAA resolves to run at EndRendering
+        // The scissor this command buffer set (CmdSetScissors): draw state that CmdBeginRendering's
+        // render-area clears restore, kept here so the GL state is never read back.
+        bool  scissorSet     = false;
+        GLint scissorRect[4] = {};
     };
 
     struct BufferGL
