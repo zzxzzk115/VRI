@@ -1023,10 +1023,12 @@ namespace vri::vk
         const uint32_t minor = props.apiVersion >= VK_API_VERSION_1_3 ? 3 : VK_API_VERSION_MINOR(props.apiVersion);
         ci.vulkanApiVersion  = VK_MAKE_API_VERSION(0, 1, minor, 0);
         ci.flags             = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-        // VMA loads the rest of its entry points from these two (VMA_DYNAMIC_VULKAN_FUNCTIONS).
+        // VMA loads the rest of its entry points from these two (VMA_DYNAMIC_VULKAN_FUNCTIONS): the
+        // loader's vkGetInstanceProcAddr, and this instance's vkGetDeviceProcAddr rather than volk's
+        // global one, which the next device's creation repoints.
         VmaVulkanFunctions functions    = {};
         functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
-        functions.vkGetDeviceProcAddr   = vkGetDeviceProcAddr;
+        functions.vkGetDeviceProcAddr   = m_vki.vkGetDeviceProcAddr;
         ci.pVulkanFunctions             = &functions;
         // Makes VMA chain VkMemoryPriorityAllocateInfoEXT from VmaAllocationCreateInfo::priority;
         // without it every allocation's priority field is silently ignored.
