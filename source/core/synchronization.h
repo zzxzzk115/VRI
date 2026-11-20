@@ -46,6 +46,22 @@ namespace vri::core
         return true;
     }
 
+    // MapBufferAsync for a backend whose mapping completes on the calling thread: map now and report
+    // through the callback before returning.
+    inline VriResult MapBufferNow(void*(VRI_CALL* map)(VriBuffer*, uint64_t, uint64_t),
+                                  VriBuffer*              buffer,
+                                  uint64_t                offset,
+                                  uint64_t                size,
+                                  VriBufferMappedCallback callback,
+                                  void*                   userData)
+    {
+        if (!buffer || !callback)
+            return VriResult_InvalidArgument;
+        void* data = map(buffer, offset, size);
+        callback(userData, data ? VriResult_Success : VriResult_Failure, data);
+        return VriResult_Success;
+    }
+
     class WaitDeadline
     {
     public:

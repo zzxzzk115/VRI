@@ -27,7 +27,7 @@ objects are fine. Concretely:
 | `VriQueue` | **Externally synchronized.** `QueueSubmit` / `QueueWaitIdle` on a given queue must be serialized; never submit to the same `VriQueue` from two threads at once. Distinct queues (Graphics / Compute / Transfer) are independent and may be driven from different threads; cross-queue ordering is the caller's job via timeline fences. |
 | `VriDescriptorPool` | **Externally synchronized.** `AllocateDescriptorSets`, `ResetDescriptorPool`, and `UpdateDescriptorRanges` on the same pool/its sets must be serialized. Reuse is lock-free. Use one pool per thread for parallel descriptor allocation. |
 | `VriFence` (timeline) | `GetFenceValue`, `Wait` and `WaitForFence` may run concurrently, except on context-bound GL. D3D12 creates a separate event per infinite wait. A fence is *signaled* through `QueueSubmit`, which follows the queue rule above. |
-| `VriBuffer` mapping | `MapBuffer` / `UnmapBuffer` on the same buffer must be serialized; do not map one buffer from two threads. Reading/writing the mapped pointer is ordinary CPU memory the caller must synchronize. |
+| `VriBuffer` mapping | `MapBuffer` / `MapBufferAsync` / `UnmapBuffer` on the same buffer must be serialized; do not map one buffer from two threads. A browser `MapBufferAsync` holds the buffer until its callback has run. Reading/writing the mapped pointer is ordinary CPU memory the caller must synchronize. |
 | `VriDevice` teardown | `DeviceWaitIdle` before destroying objects. Destruction (`Destroy*`, `FreeMemory`) must not race any in-flight use of the object on another thread or the GPU. |
 
 Internal locks protect validation-device bookkeeping and WebGPU's completion-record queue. WebGPU callbacks
@@ -119,7 +119,7 @@ This is the one backend where the model is *stricter* than the general contract 
 - Browser waits require Asyncify and yield the browser event loop. A timeout may exceed its requested duration
   by the browser's scheduling granularity; it never manufactures a completed value. Without Asyncify a bounded
   wait returns `VriResult_Timeout` at once and an unbounded one reports an error; WebGPU devices are then
-  created with `vriCreateDeviceAsync`.
+  created with `vriCreateDeviceAsync` and WebGPU buffers read back with `MapBufferAsync`.
 
 ## Validation aid (opt-in)
 
