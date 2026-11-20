@@ -31,6 +31,15 @@ namespace vri::gl
     // when the extension is absent.
     PFN_FramebufferTextureMultiviewOVR g_FramebufferTextureMultiviewOVR = nullptr;
 
+#if defined(__EMSCRIPTEN__)
+    namespace
+    {
+        // Emscripten's GLFW port keeps one window, the page's single WebGL context, and aborts the
+        // program when asked for a second one. Set while a device owns that window.
+        bool g_webWindowTaken = false;
+    } // namespace
+#endif
+
 #if !defined(VRI_GL_ES_HEADERS)
     namespace
     {
@@ -134,6 +143,9 @@ namespace vri::gl
             m_fboCache.clear();
             glfwMakeContextCurrent(nullptr);
             glfwDestroyWindow(m_window);
+#if defined(__EMSCRIPTEN__)
+            g_webWindowTaken = false;
+#endif
         }
         // Intentionally not calling glfwTerminate() (another device may exist).
 #endif
@@ -474,6 +486,11 @@ namespace vri::gl
             ReportWarning("WebGL needs a browser window; this environment has none");
             return VriResult_Unsupported;
         }
+        if (g_webWindowTaken)
+        {
+            ReportWarning("The page has one WebGL context and another GL device owns it; destroy that device first");
+            return VriResult_Unsupported;
+        }
 #endif
         if (!glfwInit())
         {
@@ -532,6 +549,9 @@ namespace vri::gl
 #endif
         }
         glfwMakeContextCurrent(m_window);
+#if defined(__EMSCRIPTEN__)
+        g_webWindowTaken = true;
+#endif
 
 #if !defined(__EMSCRIPTEN__)
         // On Emscripten the GLES3/WebGL2 symbols are provided directly; only native
