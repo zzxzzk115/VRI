@@ -325,25 +325,27 @@ namespace vri::d3d12
             ReportError("CmdBeginRendering: an attachment's texture was not created with attachment usage");
             return false;
         }
-        std::lock_guard lock(m_attachmentHeapMutex);
-        if (!view.cpu.ptr)
         {
+            std::lock_guard lock(m_attachmentHeapMutex);
             AttachmentHeap& heap = view.cpuIsDepth ? m_dsvHeap : m_rtvHeap;
-            if (heap.free.empty())
+            if (!view.cpu.ptr && !heap.free.empty())
             {
-                ReportError(view.cpuIsDepth ?
-                                "CmdBeginRendering: every depth-stencil-view descriptor is held by a live view" :
-                                "CmdBeginRendering: every render-target-view descriptor is held by a live view");
-                return false;
+                D3D12_CPU_DESCRIPTOR_HANDLE handle = heap.heap->GetCPUDescriptorHandleForHeapStart();
+                handle.ptr += static_cast<SIZE_T>(heap.free.back()) * heap.increment;
+                heap.free.pop_back();
+                WriteAttachmentView(m_device.Get(), view, handle);
+                view.cpu = handle;
             }
-            D3D12_CPU_DESCRIPTOR_HANDLE handle = heap.heap->GetCPUDescriptorHandleForHeapStart();
-            handle.ptr += static_cast<SIZE_T>(heap.free.back()) * heap.increment;
-            heap.free.pop_back();
-            WriteAttachmentView(m_device.Get(), view, handle);
-            view.cpu = handle;
+            if (view.cpu.ptr)
+            {
+                out = view.cpu;
+                return true;
+            }
         }
-        out = view.cpu;
-        return true;
+        // Reported after the lock is released: the message callback may destroy views, which frees slots under it.
+        ReportError(view.cpuIsDepth ? "CmdBeginRendering: every depth-stencil-view descriptor is held by a live view" :
+                                      "CmdBeginRendering: every render-target-view descriptor is held by a live view");
+        return false;
     }
 
     void DeviceD3D12::FreeAttachmentView(bool depth, D3D12_CPU_DESCRIPTOR_HANDLE handle)
