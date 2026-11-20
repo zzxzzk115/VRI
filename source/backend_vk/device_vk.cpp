@@ -249,8 +249,10 @@ namespace vri::vk
         {
             layers.push_back("VK_LAYER_KHRONOS_validation");
         }
-        else
+        else if (m_validation)
         {
+            ReportWarning("validation was requested, but the Vulkan validation layer VK_LAYER_KHRONOS_validation is "
+                          "not installed; the device runs without it");
             m_validation = false;
         }
 
@@ -1124,6 +1126,7 @@ namespace vri::vk
         // asked for (the adapter also reports VriAdapterType_Software from the CPU device type).
         m_desc.graphicsAPI                     = m_software ? VriGraphicsAPI_Software : VriGraphicsAPI_Vulkan;
         m_desc.nativeAPI                       = VriGraphicsAPI_Vulkan;
+        m_desc.nativeValidation                = m_validation ? VRI_TRUE : VRI_FALSE;
         m_desc.apiVersionMajor                 = VK_API_VERSION_MAJOR(props.apiVersion);
         m_desc.apiVersionMinor                 = VK_API_VERSION_MINOR(props.apiVersion);
         m_desc.viewportMaxNum                  = props.limits.maxViewports;

@@ -26,6 +26,7 @@
 #include "shaders/tests/triangle_vbuf_spv.h" // g_triangleVbufSpv (vertex buffer + indexed draw)
 
 #include <cstdlib>
+#include <cstring>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -2155,6 +2156,31 @@ namespace
         return failure == 0;
     }
 
+    // WebGL has no debug output: validation asked for is reported missing, once, and the device says so.
+    void VRI_CALL CountValidationWarning(void* userArg, VriMessageSeverity severity, const char* message)
+    {
+        if (severity == VriMessageSeverity_Warning && std::strstr(message, "validation was requested"))
+            ++*static_cast<int*>(userArg);
+    }
+    bool ValidationStateProbe()
+    {
+        int                   warnings  = 0;
+        VriCallbackInterface  callbacks = {&warnings, CountValidationWarning};
+        VriDeviceCreationDesc dc        = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI                  = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation             = VRI_TRUE;
+        dc.callbackInterface            = &callbacks;
+        VriDevice* dev                  = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        const bool       ok = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                        c.GetDeviceDesc(dev)->nativeValidation == VRI_FALSE && warnings == 1;
+        std::printf("VRI_WEBGL_STEP: validation-state warnings=%d\n", warnings);
+        vriDestroyDevice(dev);
+        return ok;
+    }
+
     // Buffer <-> texture copies with padded rows and slices: an odd-width R16F texture and a 3D texture.
     bool CopyProbe()
     {
@@ -2586,8 +2612,9 @@ int main()
     const bool ranSecond  = SecondContextProbe(secondOk);
     const bool secondPass = ranSecond && secondOk;
 
-    const bool mapAsyncPass = MapAsyncProbe();
-    const bool copyPass     = CopyProbe();
+    const bool mapAsyncPass   = MapAsyncProbe();
+    const bool validationPass = ValidationStateProbe();
+    const bool copyPass       = CopyProbe();
 
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
@@ -2598,46 +2625,48 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && secondPass && mapAsyncPass && copyPass && msaaPass &&
-                      swapPass;
-    std::printf(
-        "VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
-        "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
-        "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-        "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | copies: %d | msaa: ran=%d edge=%d | swapchain: "
-        "ran=%d red=%d)\n",
-        pass ? "PASS" : "FAIL",
-        ranTri,
-        topRed,
-        botRed,
-        ranUbo,
-        centerGreen,
-        ranTex,
-        centerBlue,
-        ranVbuf,
-        centerYellow,
-        ranDepth,
-        depthGreen,
-        ranBlend,
-        blendPurple,
-        ranCull,
-        cullGreen,
-        ranMrt,
-        mrtOk,
-        ranInst,
-        instOk,
-        ranScissor,
-        scissorOk,
-        ranComputeNo,
-        computeNoOk,
-        ranSecond,
-        secondOk,
-        mapAsyncPass,
-        copyPass,
-        ranMsaa,
-        msaaEdge,
-        ranSwap,
-        swapRed);
+                      instPass && scissorPass && computeNoPass && secondPass && mapAsyncPass && validationPass &&
+                      copyPass && msaaPass && swapPass;
+    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
+                "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
+                "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
+                "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | validation-state: %d | copies: %d | "
+                "msaa: ran=%d "
+                "edge=%d | swapchain: "
+                "ran=%d red=%d)\n",
+                pass ? "PASS" : "FAIL",
+                ranTri,
+                topRed,
+                botRed,
+                ranUbo,
+                centerGreen,
+                ranTex,
+                centerBlue,
+                ranVbuf,
+                centerYellow,
+                ranDepth,
+                depthGreen,
+                ranBlend,
+                blendPurple,
+                ranCull,
+                cullGreen,
+                ranMrt,
+                mrtOk,
+                ranInst,
+                instOk,
+                ranScissor,
+                scissorOk,
+                ranComputeNo,
+                computeNoOk,
+                ranSecond,
+                secondOk,
+                mapAsyncPass,
+                validationPass,
+                copyPass,
+                ranMsaa,
+                msaaEdge,
+                ranSwap,
+                swapRed);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.
