@@ -375,6 +375,15 @@ namespace vri::vk
             vmaUnmapMemory(b->device->Allocator(), b->allocation);
         }
 
+        VriResult VRI_CALL MapBufferAsync(VriBuffer*              buffer,
+                                          uint64_t                offset,
+                                          uint64_t                size,
+                                          VriBufferMappedCallback callback,
+                                          void*                   userData)
+        {
+            return core::MapBufferNow(MapBuffer, buffer, offset, size, callback, userData);
+        }
+
         uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer* buffer)
         {
             const BufferVK*           b    = Buf(buffer);
@@ -1922,6 +1931,7 @@ namespace vri::vk
             CmdClearStorageTexture,
             EnumerateObjects,
             WaitForFence,
+            MapBufferAsync,
         };
     } // namespace
 

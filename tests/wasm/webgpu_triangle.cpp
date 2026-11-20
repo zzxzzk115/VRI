@@ -8,6 +8,7 @@
 // Run:   emrun (headless Chrome with --enable-unsafe-webgpu) over the .html
 
 #include "tests/compressed_format_probe.h"
+#include "tests/map_async_probe.h"
 #include "tests/wgpu_completion_probe.h"
 
 #include <vri/vri.h>
@@ -70,6 +71,25 @@ namespace
         }
         vriDestroyDevice(device);
         return ok;
+    }
+
+    // MapBufferAsync maps a GPU buffer from the browser event loop: the callback runs after the call
+    // returns, once, with the copied data.
+    bool MapAsyncProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+            return false;
+        VriCoreInterface core {};
+        int              failure = __LINE__;
+        if (vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(core), &core) == VriResult_Success)
+            failure = vri::test::CheckMapBufferAsync(device, core, true);
+        if (failure)
+            std::printf("WebGPU MapBufferAsync failed at line %d\n", failure);
+        vriDestroyDevice(device);
+        return failure == 0;
     }
 
     bool RenderAndProbe(bool& centerRed)
@@ -433,14 +453,16 @@ int main()
     std::printf("VRI_WEBGPU_STEP: compute done\n");
     std::fflush(stdout);
     const bool completion = CompletionProbe();
+    const bool mapAsync   = MapAsyncProbe();
     const bool compressed = CompressedProbe();
-    const bool pass       = ran && centerRed && compute && completion && compressed;
-    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d compressed=%d)\n",
+    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed;
+    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
                 compute ? 1 : 0,
                 completion ? 1 : 0,
+                mapAsync ? 1 : 0,
                 compressed ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)

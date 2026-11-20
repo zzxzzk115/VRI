@@ -82,6 +82,7 @@ namespace vri::gl
             t.GetFenceValue               = GetFenceValue;
             t.Wait                        = Wait;
             t.WaitForFence                = WaitForFence;
+            t.MapBufferAsync              = MapBufferAsync;
             t.CmdBeginRendering           = CmdBeginRendering;
             t.CmdEndRendering             = CmdEndRendering;
             t.CmdSetViewports             = CmdSetViewports;
