@@ -278,6 +278,7 @@ namespace vri::wgpu
         m_desc.adapter.deviceId = info.deviceID;
         m_desc.adapter.vendorId = info.vendorID;
         m_desc.nativeAPI        = ToNativeAPI(info.backendType);
+        m_desc.nativeValidation = VRI_TRUE; // WebGPU validates every call; errors reach OnUncapturedError
         switch (info.adapterType)
         {
             case WGPUAdapterType_DiscreteGPU:

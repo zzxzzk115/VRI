@@ -89,6 +89,13 @@ namespace vri::d3d12
             {
                 dbg->EnableDebugLayer();
                 factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+                m_debugLayer = true;
+            }
+            else
+            {
+                Diagnostic(VriMessageSeverity_Warning,
+                           "validation was requested, but the D3D12 debug layer (D3D12SDKLayers.dll, Windows Graphics "
+                           "Tools) is not available; the device runs without it");
             }
         }
         if (FAILED(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&m_factory))))
@@ -396,9 +403,10 @@ namespace vri::d3d12
 
     void DeviceD3D12::FillDeviceDesc(IDXGIAdapter1* adapter)
     {
-        m_desc             = {};
-        m_desc.graphicsAPI = VriGraphicsAPI_D3D12;
-        m_desc.nativeAPI   = VriGraphicsAPI_D3D12;
+        m_desc                  = {};
+        m_desc.graphicsAPI      = VriGraphicsAPI_D3D12;
+        m_desc.nativeAPI        = VriGraphicsAPI_D3D12;
+        m_desc.nativeValidation = m_debugLayer ? VRI_TRUE : VRI_FALSE;
         if (adapter)
         {
             DXGI_ADAPTER_DESC1 ad = {};

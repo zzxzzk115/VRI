@@ -23,6 +23,7 @@
 #include "shaders/tests/triangle_vbuf_spv.h" // g_triangleVbufSpv (vertex buffer + indexed draw)
 
 #include <cstdlib>
+#include <cstring>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -2133,6 +2134,31 @@ namespace
         return true;
     }
 
+    // WebGL has no debug output: validation asked for is reported missing, once, and the device says so.
+    void VRI_CALL CountValidationWarning(void* userArg, VriMessageSeverity severity, const char* message)
+    {
+        if (severity == VriMessageSeverity_Warning && std::strstr(message, "validation was requested"))
+            ++*static_cast<int*>(userArg);
+    }
+    bool ValidationStateProbe()
+    {
+        int                   warnings  = 0;
+        VriCallbackInterface  callbacks = {&warnings, CountValidationWarning};
+        VriDeviceCreationDesc dc        = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI                  = VriGraphicsAPI_OpenGLES;
+        dc.enableValidation             = VRI_TRUE;
+        dc.callbackInterface            = &callbacks;
+        VriDevice* dev                  = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        const bool       ok = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                        c.GetDeviceDesc(dev)->nativeValidation == VRI_FALSE && warnings == 1;
+        std::printf("VRI_WEBGL_STEP: validation-state warnings=%d\n", warnings);
+        vriDestroyDevice(dev);
+        return ok;
+    }
+
     // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
     // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
     // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
@@ -2542,6 +2568,8 @@ int main()
     const bool ranSecond  = SecondContextProbe(secondOk);
     const bool secondPass = ranSecond && secondOk;
 
+    const bool validationPass = ValidationStateProbe();
+
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
     const bool msaaPass = ranMsaa && msaaEdge;
@@ -2551,11 +2579,12 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && secondPass && msaaPass && swapPass;
+                      instPass && scissorPass && computeNoPass && secondPass && validationPass && msaaPass && swapPass;
     std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-                "ran=%d ok=%d | second-context: ran=%d ok=%d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
+                "ran=%d ok=%d | second-context: ran=%d ok=%d | validation-state: %d | msaa: ran=%d edge=%d | "
+                "swapchain: ran=%d red=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ranTri,
                 topRed,
@@ -2582,6 +2611,7 @@ int main()
                 computeNoOk,
                 ranSecond,
                 secondOk,
+                validationPass,
                 ranMsaa,
                 msaaEdge,
                 ranSwap,
