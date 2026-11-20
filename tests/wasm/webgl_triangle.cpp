@@ -2061,6 +2061,19 @@ namespace
         return true;
     }
 
+    // Auto with the page's WebGL context taken: Unsupported in a GL-only build; in a build with the
+    // WebGPU backend as well, a WebGPU device (never a second GL one). Destroys what it gets.
+    bool AutoOutcomeValid(VriResult result, VriDevice* device)
+    {
+        if (device == nullptr)
+            return result == VriResult_Unsupported;
+        VriCoreInterface c {};
+        vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(c), &c);
+        const bool webgpu = c.GetDeviceDesc(device)->graphicsAPI == VriGraphicsAPI_WebGPU;
+        vriDestroyDevice(device);
+        return result == VriResult_Success && webgpu;
+    }
+
     // The page has one WebGL context: while a GL device owns it, another GL device (asked for directly
     // or reached through Auto, synchronously or not) reports Unsupported instead of aborting the
     // program, and the context can be created again once its device is destroyed.
@@ -2080,6 +2093,7 @@ namespace
         autoDc.graphicsAPI           = VriGraphicsAPI_Auto;
         VriDevice*      viaAuto      = nullptr;
         const VriResult autoResult   = vriCreateDevice(&autoDc, &viaAuto);
+        const bool      autoOk       = AutoOutcomeValid(autoResult, viaAuto);
         struct AsyncOutcome
         {
             bool       called = false;
@@ -2095,6 +2109,12 @@ namespace
                 outcome->device = device;
             },
             &async);
+#if defined(__EMSCRIPTEN__)
+        // A browser WebGPU request answers from the event loop; `async` must outlive the callback.
+        while (!async.called)
+            emscripten_sleep(1);
+#endif
+        const bool asyncOk = async.called && AutoOutcomeValid(async.result, async.device);
         vriDestroyDevice(first);
 
         VriDevice*      again       = nullptr;
@@ -2108,9 +2128,8 @@ namespace
                     async.called,
                     static_cast<int>(async.result),
                     static_cast<int>(againResult));
-        correct = direct == VriResult_Unsupported && second == nullptr && autoResult == VriResult_Unsupported &&
-                  viaAuto == nullptr && async.called && async.result == VriResult_Unsupported &&
-                  async.device == nullptr && againResult == VriResult_Success;
+        correct = direct == VriResult_Unsupported && second == nullptr && autoOk && asyncOk &&
+                  againResult == VriResult_Success;
         return true;
     }
 
