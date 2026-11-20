@@ -175,7 +175,8 @@ static void VRI_CALL CountError(void* userArg, VriMessageSeverity severity, cons
         ++*static_cast<int*>(userArg);
 }
 
-TEST_CASE("D3D12: running out of render-target views is an error, and destroying a view frees its descriptor")
+TEST_CASE("D3D12: running out of render-target views is an error at first attachment use, and destroying a "
+          "view frees its descriptor")
 {
     int                   errors = 0;
     VriCallbackInterface  callback {&errors, CountError};
@@ -205,34 +206,49 @@ TEST_CASE("D3D12: running out of render-target views is an error, and destroying
     VriTexture* target = nullptr;
     REQUIRE(c.CreateTexture(dev, &td, &target) == VriResult_Success);
     VriTextureViewDesc vd {};
-    vd.texture  = target;
-    vd.viewType = VriTextureViewType_2D;
-    vd.aspect   = VriImageAspect_Color;
-    vd.mipNum   = 1;
-    vd.layerNum = 1;
-    // Bounded so that a backend without a limit ends the loop and fails the checks below.
+    vd.texture                 = target;
+    vd.viewType                = VriTextureViewType_2D;
+    vd.aspect                  = VriImageAspect_Color;
+    vd.mipNum                  = 1;
+    vd.layerNum                = 1;
+    VriCommandAllocator* alloc = nullptr;
+    REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc) == VriResult_Success);
+    VriCommandBuffer* cmd = nullptr;
+    REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
+    REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
+    // A view takes its render-target descriptor the first time it is an attachment; the descriptors are
+    // read when the pass is recorded, so recording is enough. Bounded so that a backend without a limit
+    // ends the loop and fails the checks below.
+    const auto render = [&](VriDescriptor* view) {
+        VriAttachmentDesc color {};
+        color.view    = view;
+        color.loadOp  = VriAttachmentLoadOp_Load;
+        color.storeOp = VriAttachmentStoreOp_Store;
+        VriAttachmentsDesc attachments {};
+        attachments.colors     = &color;
+        attachments.colorNum   = 1;
+        attachments.renderArea = {0, 0, 4, 4};
+        attachments.layerNum   = 1;
+        c.CmdBeginRendering(cmd, &attachments);
+        c.CmdEndRendering(cmd);
+    };
     std::vector<VriDescriptor*> views;
-    VriResult                   result = VriResult_Success;
-    while (views.size() < 100000)
+    while (views.size() < 100000 && errors == 0)
     {
         VriDescriptor* view = nullptr;
-        result              = c.CreateTextureView(dev, &vd, &view);
-        if (result != VriResult_Success)
-        {
-            CHECK(view == nullptr);
-            break;
-        }
+        REQUIRE(c.CreateTextureView(dev, &vd, &view) == VriResult_Success);
         views.push_back(view);
+        render(view);
     }
-    CHECK(result == VriResult_OutOfMemory);
     CHECK(errors == 1);
-    REQUIRE(!views.empty());
-    c.DestroyDescriptor(views.back());
-    views.pop_back();
-    VriDescriptor* again = nullptr;
-    CHECK(c.CreateTextureView(dev, &vd, &again) == VriResult_Success);
-    if (again)
-        views.push_back(again);
+    REQUIRE(views.size() > 1);
+    // The view that found no descriptor gets one once a rendered view is destroyed.
+    c.DestroyDescriptor(views.front());
+    views.erase(views.begin());
+    render(views.back());
+    CHECK(errors == 1);
+    REQUIRE(c.EndCommandBuffer(cmd) == VriResult_Success);
+    c.DestroyCommandAllocator(alloc);
     for (VriDescriptor* view : views)
         c.DestroyDescriptor(view);
     c.DestroyTexture(target);

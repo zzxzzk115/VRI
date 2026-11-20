@@ -29,6 +29,7 @@ target("vri-tests")
     add_files("test_timeline_c.c", {languages = "c11"})
     add_files("test_conversion_map.cpp")      -- shared enum/flag conversion skeleton (backend-neutral)
     add_files("test_formatsupport_xbackend.cpp") -- GetFormatSupport answers per format, not from a constant
+    add_files("test_compressed_formats_xbackend.cpp") -- sRGB/signed BC, ETC2 and ASTC formats
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse
     add_files("test_buffer_dimensions_metal.cpp")
     add_files("test_descriptor_xbackend.cpp") -- runs on whichever backends are enabled
@@ -69,6 +70,7 @@ target("vri-tests")
     add_files("test_videomemory_xbackend.cpp") -- live VRAM budget/usage query
     add_files("test_explicitmemory_xbackend.cpp") -- explicit placed-resource memory (AllocateMemory + BindMemory)
     add_files("test_clearstorage_xbackend.cpp") -- clear storage buffer (fill with a uint32)
+    add_files("test_attachment_views_many_xbackend.cpp") -- sampled views hold no attachment descriptor
     add_files("test_atomic_int64_xbackend.cpp") -- 64-bit atomics on storage buffers (Vulkan, D3D12)
     add_files("test_clear_texture_metal.cpp")
     add_files("test_clearstoragetex_xbackend.cpp") -- clear storage texture (to a color)

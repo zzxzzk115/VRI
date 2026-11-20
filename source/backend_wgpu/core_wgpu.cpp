@@ -81,15 +81,24 @@ namespace vri::wgpu
                 case VriFormat_RGBA32_SFLOAT:
                     return 16;
                 case VriFormat_BC1_UNORM:
+                case VriFormat_BC1_SRGB:
                 case VriFormat_BC4_UNORM:
+                case VriFormat_BC4_SNORM:
                     return 8; // per 4x4 block
                 case VriFormat_BC2_UNORM:
+                case VriFormat_BC2_SRGB:
                 case VriFormat_BC3_UNORM:
+                case VriFormat_BC3_SRGB:
                 case VriFormat_BC5_UNORM:
+                case VriFormat_BC5_SNORM:
                 case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC6H_SFLOAT:
                 case VriFormat_BC7_UNORM:
+                case VriFormat_BC7_SRGB:
                 case VriFormat_ETC2_RGBA8_UNORM:
+                case VriFormat_ETC2_RGBA8_SRGB:
                 case VriFormat_ASTC_4x4_UNORM:
+                case VriFormat_ASTC_4x4_SRGB:
                     return 16; // per 4x4 block
                 default:
                     return 4;
@@ -102,16 +111,25 @@ namespace vri::wgpu
             switch (f)
             {
                 case VriFormat_BC1_UNORM:
+                case VriFormat_BC1_SRGB:
                 case VriFormat_BC2_UNORM:
+                case VriFormat_BC2_SRGB:
                 case VriFormat_BC3_UNORM:
+                case VriFormat_BC3_SRGB:
                 case VriFormat_BC4_UNORM:
+                case VriFormat_BC4_SNORM:
                 case VriFormat_BC5_UNORM:
+                case VriFormat_BC5_SNORM:
                 case VriFormat_BC6H_UFLOAT:
+                case VriFormat_BC6H_SFLOAT:
                 case VriFormat_BC7_UNORM:
+                case VriFormat_BC7_SRGB:
                     return WGPUFeatureName_TextureCompressionBC;
                 case VriFormat_ETC2_RGBA8_UNORM:
+                case VriFormat_ETC2_RGBA8_SRGB:
                     return WGPUFeatureName_TextureCompressionETC2;
                 case VriFormat_ASTC_4x4_UNORM:
+                case VriFormat_ASTC_4x4_SRGB:
                     return WGPUFeatureName_TextureCompressionASTC;
                 default:
                     return WGPUFeatureName_Force32;
