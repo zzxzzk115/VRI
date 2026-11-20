@@ -119,14 +119,20 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
     CommandBufferD3D12* c = CB(cmd);
     c->rtvCount           = a->colorNum <= 8 ? a->colorNum : 8;
     c->resolveCount       = 0;
+    // An attachment without a descriptor: the pass is not begun. Unbind the targets so the draws recorded
+    // until CmdEndRendering write nowhere rather than into the previous pass's attachments.
+    const auto abandon = [c]() {
+        c->rtvCount     = 0;
+        c->resolveCount = 0;
+        c->list->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+    };
     for (uint32_t i = 0; i < c->rtvCount; ++i)
     {
         const DescriptorD3D12* v = Desc(a->colors[i].view);
         TextureD3D12*          t = const_cast<TextureD3D12*>(v->texture);
         if (!c->device->AttachmentView(*v, c->rtvs[i]))
         {
-            c->rtvCount     = 0;
-            c->resolveCount = 0;
+            abandon();
             return;
         }
         Transition(c, t, D3D12_RESOURCE_STATE_RENDER_TARGET, ViewRange(v)); // usually already RT
@@ -143,8 +149,7 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
         const DescriptorD3D12* dv = Desc(a->depth->view);
         if (!c->device->AttachmentView(*dv, dsv))
         {
-            c->rtvCount     = 0;
-            c->resolveCount = 0;
+            abandon();
             return;
         }
         Transition(c, const_cast<TextureD3D12*>(dv->texture), D3D12_RESOURCE_STATE_DEPTH_WRITE, ViewRange(dv));
