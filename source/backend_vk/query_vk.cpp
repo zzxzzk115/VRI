@@ -49,7 +49,7 @@ namespace vri::vk
             const VkQueryType vt = ci.queryType;
 
             VkQueryPool pool = VK_NULL_HANDLE;
-            if (vkCreateQueryPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
+            if (d->Vkd().vkCreateQueryPool(d->Device(), &ci, nullptr, &pool) != VK_SUCCESS)
                 return VriResult_Failure;
             *out = ToHandle(new QueryPoolVK {d, pool, vt, desc->queryCount});
             return VriResult_Success;
@@ -60,7 +60,7 @@ namespace vri::vk
             if (!pool)
                 return;
             QueryPoolVK* q = QP(pool);
-            vkDestroyQueryPool(q->device->Device(), q->pool, nullptr);
+            q->device->Vkd().vkDestroyQueryPool(q->device->Device(), q->pool, nullptr);
             delete q;
         }
 
@@ -72,7 +72,7 @@ namespace vri::vk
 
         void VRI_CALL CmdResetQueries(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t offset, uint32_t num)
         {
-            vkCmdResetQueryPool(Cmd(cmd)->cmd, QP(pool)->pool, offset, num);
+            Cmd(cmd)->device->Vkd().vkCmdResetQueryPool(Cmd(cmd)->cmd, QP(pool)->pool, offset, num);
         }
 
         void VRI_CALL CmdWriteTimestamp(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
@@ -84,12 +84,13 @@ namespace vri::vk
 
         void VRI_CALL CmdBeginQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
         {
-            vkCmdBeginQuery(Cmd(cmd)->cmd, QP(pool)->pool, index, 0); // non-precise: >0 if any sample passed
+            Cmd(cmd)->device->Vkd().vkCmdBeginQuery(
+                Cmd(cmd)->cmd, QP(pool)->pool, index, 0); // non-precise: >0 if any sample passed
         }
 
         void VRI_CALL CmdEndQuery(VriCommandBuffer* cmd, VriQueryPool* pool, uint32_t index)
         {
-            vkCmdEndQuery(Cmd(cmd)->cmd, QP(pool)->pool, index);
+            Cmd(cmd)->device->Vkd().vkCmdEndQuery(Cmd(cmd)->cmd, QP(pool)->pool, index);
         }
 
         void VRI_CALL CmdCopyQueries(VriCommandBuffer* cmd,
@@ -102,14 +103,14 @@ namespace vri::vk
             // WAIT_BIT so the copy blocks on the queries' availability; 64_BIT for uint64 results.
             const VkDeviceSize stride =
                 QP(pool)->type == VK_QUERY_TYPE_PIPELINE_STATISTICS ? sizeof(VriPipelineStatistics) : sizeof(uint64_t);
-            vkCmdCopyQueryPoolResults(Cmd(cmd)->cmd,
-                                      QP(pool)->pool,
-                                      offset,
-                                      num,
-                                      Buf(dstBuffer)->buffer,
-                                      dstOffset,
-                                      stride,
-                                      VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+            Cmd(cmd)->device->Vkd().vkCmdCopyQueryPoolResults(Cmd(cmd)->cmd,
+                                                              QP(pool)->pool,
+                                                              offset,
+                                                              num,
+                                                              Buf(dstBuffer)->buffer,
+                                                              dstOffset,
+                                                              stride,
+                                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
         }
 
         VriResult VRI_CALL GetCalibratedTimestamps(VriDevice* device, VriCalibratedTimestamps* out)

@@ -33,6 +33,15 @@ namespace vri::vk
             return loaded;
         }
 
+        // volkLoadInstanceTable stores the instance's vkGetDeviceProcAddr in volk's global pointer and
+        // volkLoadDeviceTable loads through that global (volk.c), so a device table is loaded right
+        // after its own instance's table, under one lock: devices may be created on several threads.
+        std::mutex& VolkTableMutex()
+        {
+            static std::mutex mutex;
+            return mutex;
+        }
+
         VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                      VkDebugUtilsMessageTypeFlagsEXT /*types*/,
                                                      const VkDebugUtilsMessengerCallbackDataEXT* data,
@@ -86,11 +95,11 @@ namespace vri::vk
     {
         DebugObjectsVK::Untrack(this);
         if (m_device)
-            vkDeviceWaitIdle(m_device);
+            m_vkd.vkDeviceWaitIdle(m_device);
         if (m_allocator)
             vmaDestroyAllocator(m_allocator);
         if (m_device)
-            vkDestroyDevice(m_device, nullptr);
+            m_vkd.vkDestroyDevice(m_device, nullptr);
         if (m_debugMessenger)
         {
             auto destroy = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
@@ -99,7 +108,7 @@ namespace vri::vk
                 destroy(m_instance, m_debugMessenger, nullptr);
         }
         if (m_instance)
-            vkDestroyInstance(m_instance, nullptr);
+            m_vki.vkDestroyInstance(m_instance, nullptr);
     }
 
     void DeviceVK::ReportError(const char* message) const
@@ -255,12 +264,10 @@ namespace vri::vk
             ReportError("vkCreateInstance failed");
             return VriResult_Failure;
         }
-        // volk's pointers are process-wide, so they are loaded once, from the first device's instance.
-        // Through vkGetInstanceProcAddr they are dispatching entry points: valid for any instance or
-        // device, also after that instance is destroyed. Every device's instance enables the same
-        // surface extensions, so no later device needs a function the first one did not load.
-        static std::once_flag loadOnce;
-        std::call_once(loadOnce, [this] { volkLoadInstance(m_instance); });
+        {
+            std::lock_guard lock(VolkTableMutex());
+            volkLoadInstanceTable(&m_vki, m_instance);
+        }
 
         if (m_validation && m_debugUtils)
         {
@@ -294,14 +301,14 @@ namespace vri::vk
         }
 
         uint32_t count = 0;
-        vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
+        m_vki.vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
         if (count == 0)
         {
             ReportError("no Vulkan physical devices found");
             return VriResult_Failure;
         }
         std::vector<VkPhysicalDevice> devices(count);
-        vkEnumeratePhysicalDevices(m_instance, &count, devices.data());
+        m_vki.vkEnumeratePhysicalDevices(m_instance, &count, devices.data());
 
         // Software rendering: require a CPU-type device (SwiftShader / lavapipe) and never fall
         // back to a GPU - "software" means the CPU path specifically, so a missing software ICD is
@@ -312,7 +319,7 @@ namespace vri::vk
             for (VkPhysicalDevice d : devices)
             {
                 VkPhysicalDeviceProperties props;
-                vkGetPhysicalDeviceProperties(d, &props);
+                m_vki.vkGetPhysicalDeviceProperties(d, &props);
                 if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
                 {
                     m_physicalDevice = d;
@@ -335,7 +342,7 @@ namespace vri::vk
         for (VkPhysicalDevice d : devices)
         {
             VkPhysicalDeviceProperties props;
-            vkGetPhysicalDeviceProperties(d, &props);
+            m_vki.vkGetPhysicalDeviceProperties(d, &props);
             if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             {
                 m_physicalDevice = d;
@@ -348,9 +355,9 @@ namespace vri::vk
     VriResult DeviceVK::CreateLogicalDevice(const VriDeviceCreationDesc& desc)
     {
         uint32_t familyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &familyCount, nullptr);
+        m_vki.vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &familyCount, nullptr);
         std::vector<VkQueueFamilyProperties> families(familyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &familyCount, families.data());
+        m_vki.vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &familyCount, families.data());
 
         uint32_t graphicsFamily = UINT32_MAX;
         for (uint32_t i = 0; i < familyCount; ++i)
@@ -385,9 +392,9 @@ namespace vri::vk
 
         // ---- available device extensions ----
         uint32_t extCount = 0;
-        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &extCount, nullptr);
+        m_vki.vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &extCount, nullptr);
         std::vector<VkExtensionProperties> extProps(extCount);
-        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &extCount, extProps.data());
+        m_vki.vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &extCount, extProps.data());
         std::unordered_set<std::string> avail;
         for (const VkExtensionProperties& e : extProps)
             avail.insert(e.extensionName);
@@ -399,7 +406,7 @@ namespace vri::vk
         // dispatch slot, so on a <1.3 device we enable the extensions + KHR feature structs
         // (the loader aliases the core entry points to the extension implementations).
         VkPhysicalDeviceProperties physProps = {};
-        vkGetPhysicalDeviceProperties(m_physicalDevice, &physProps);
+        m_vki.vkGetPhysicalDeviceProperties(m_physicalDevice, &physProps);
         const bool useVk13Core = physProps.apiVersion >= VK_API_VERSION_1_3;
         // Timeline semaphores, buffer device address and the Vulkan 1.1/1.2 feature structs below
         // are core 1.2; an older device (common on Android 8-10) cannot run this backend.
@@ -505,7 +512,7 @@ namespace vri::vk
                 q  = &replicateSup.pNext;
             }
             *q = &v12Sup; // Vulkan 1.2 features are core, always safe to query
-            vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
+            m_vki.vkGetPhysicalDeviceFeatures2(m_physicalDevice, &sup);
             baseSup = sup.features;
         }
 
@@ -527,7 +534,7 @@ namespace vri::vk
                 VkPhysicalDeviceVulkan13Features supported = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
                 VkPhysicalDeviceFeatures2        query     = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
                 query.pNext                                = &supported;
-                vkGetPhysicalDeviceFeatures2(m_physicalDevice, &query);
+                m_vki.vkGetPhysicalDeviceFeatures2(m_physicalDevice, &query);
                 f13.pipelineCreationCacheControl = supported.pipelineCreationCacheControl;
             }
         }
@@ -567,7 +574,7 @@ namespace vri::vk
             VkPhysicalDeviceVulkan11Features mv11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
             VkPhysicalDeviceFeatures2        mvq  = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
             mvq.pNext                             = &mv11;
-            vkGetPhysicalDeviceFeatures2(m_physicalDevice, &mvq);
+            m_vki.vkGetPhysicalDeviceFeatures2(m_physicalDevice, &mvq);
             if (mv11.multiview)
             {
                 f11.multiview                               = VK_TRUE;
@@ -575,7 +582,7 @@ namespace vri::vk
                 VkPhysicalDeviceMultiviewProperties mvProps = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES};
                 VkPhysicalDeviceProperties2         p2      = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
                 p2.pNext                                    = &mvProps;
-                vkGetPhysicalDeviceProperties2(m_physicalDevice, &p2);
+                m_vki.vkGetPhysicalDeviceProperties2(m_physicalDevice, &p2);
                 m_maxViewCount = mvProps.maxMultiviewViewCount;
             }
         }
@@ -977,18 +984,23 @@ namespace vri::vk
         const VkResult devRes =
             m_vkHooks ?
                 static_cast<VkResult>(m_vkHooks->createDevice(m_vkHooks->userData, m_physicalDevice, &ci, &m_device)) :
-                vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device);
+                m_vki.vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device);
         if (devRes != VK_SUCCESS || m_device == VK_NULL_HANDLE)
         {
             ReportError("vkCreateDevice failed");
             return VriResult_Failure;
+        }
+        {
+            std::lock_guard lock(VolkTableMutex());
+            vkGetDeviceProcAddr = m_vki.vkGetDeviceProcAddr; // this device's instance, see VolkTableMutex
+            volkLoadDeviceTable(&m_vkd, m_device);
         }
 
         for (int t = 0; t < VriQueueType_Count; ++t)
         {
             const uint32_t idx = (uint32_t)t < queueCount ? (uint32_t)t : 0; // distinct queue per type if available
             VkQueue        q   = VK_NULL_HANDLE;
-            vkGetDeviceQueue(m_device, graphicsFamily, idx, &q);
+            m_vkd.vkGetDeviceQueue(m_device, graphicsFamily, idx, &q);
             m_queues[t].device        = this;
             m_queues[t].queue         = q;
             m_queues[t].familyIndex   = graphicsFamily;
@@ -1007,7 +1019,7 @@ namespace vri::vk
         // VMA calls core entry points of the version it is given; a 1.2 device (MoltenVK) has none
         // of the 1.3 ones, so pass the device's own version capped at the instance's 1.3.
         VkPhysicalDeviceProperties props = {};
-        vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+        m_vki.vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
         const uint32_t minor = props.apiVersion >= VK_API_VERSION_1_3 ? 3 : VK_API_VERSION_MINOR(props.apiVersion);
         ci.vulkanApiVersion  = VK_MAKE_API_VERSION(0, 1, minor, 0);
         ci.flags             = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
@@ -1036,7 +1048,7 @@ namespace vri::vk
     void DeviceVK::FillDeviceDesc()
     {
         VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+        m_vki.vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
 
         // Subgroup (wave) size + whether arithmetic wave ops are available; props12 carries the
         // descriptor-indexing (bindless) limits reported through VriDeviceDesc::bindless*MaxNum.
@@ -1045,7 +1057,7 @@ namespace vri::vk
         VkPhysicalDeviceProperties2        props2  = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         props11.pNext                              = &props12;
         props2.pNext                               = &props11;
-        vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
+        m_vki.vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
 
         m_desc = {};
         std::strncpy(m_desc.adapter.name, props.deviceName, sizeof(m_desc.adapter.name) - 1);
@@ -1068,7 +1080,7 @@ namespace vri::vk
         }
 
         VkPhysicalDeviceMemoryProperties mem;
-        vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &mem);
+        m_vki.vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &mem);
         for (uint32_t i = 0; i < mem.memoryHeapCount; ++i)
         {
             if (mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
@@ -1097,7 +1109,7 @@ namespace vri::vk
             m_desc.queueCount[t] = 1;
         m_desc.hasComputeShader = VRI_TRUE;
         VkPhysicalDeviceFeatures baseFeatures;
-        vkGetPhysicalDeviceFeatures(m_physicalDevice, &baseFeatures);
+        m_vki.vkGetPhysicalDeviceFeatures(m_physicalDevice, &baseFeatures);
         m_desc.hasGeometryShader = baseFeatures.geometryShader ? VRI_TRUE : VRI_FALSE;
         m_desc.hasTessellation   = baseFeatures.tessellationShader ? VRI_TRUE : VRI_FALSE;
 
@@ -1135,9 +1147,9 @@ namespace vri::vk
         // Timestamp queries: tick scale + whether the graphics queue family records timestamps.
         m_desc.timestampPeriodNanoseconds = props.limits.timestampPeriod;
         uint32_t qfCount                  = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &qfCount, nullptr);
+        m_vki.vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &qfCount, nullptr);
         std::vector<VkQueueFamilyProperties> qfProps(qfCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &qfCount, qfProps.data());
+        m_vki.vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &qfCount, qfProps.data());
         const uint32_t gfxFamily = m_queues[VriQueueType_Graphics].familyIndex;
         m_desc.hasTimestampQueries =
             (gfxFamily < qfCount && qfProps[gfxFamily].timestampValidBits > 0 && props.limits.timestampPeriod > 0.0f) ?
@@ -1150,7 +1162,7 @@ namespace vri::vk
                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
             VkPhysicalDeviceProperties2 props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
             props2.pNext                       = &rtProps;
-            vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
+            m_vki.vkGetPhysicalDeviceProperties2(m_physicalDevice, &props2);
             m_desc.rtShaderGroupHandleSize      = rtProps.shaderGroupHandleSize;
             m_desc.rtShaderGroupBaseAlignment   = rtProps.shaderGroupBaseAlignment;
             m_desc.rtShaderGroupHandleAlignment = rtProps.shaderGroupHandleAlignment;
@@ -1163,17 +1175,17 @@ namespace vri::vk
         if (m_debugUtils)
         {
             m_ext.CmdBeginDebugUtilsLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
-                vkGetDeviceProcAddr(m_device, "vkCmdBeginDebugUtilsLabelEXT"));
+                m_vki.vkGetDeviceProcAddr(m_device, "vkCmdBeginDebugUtilsLabelEXT"));
             m_ext.CmdEndDebugUtilsLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
-                vkGetDeviceProcAddr(m_device, "vkCmdEndDebugUtilsLabelEXT"));
+                m_vki.vkGetDeviceProcAddr(m_device, "vkCmdEndDebugUtilsLabelEXT"));
             m_ext.SetDebugUtilsObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
-                vkGetDeviceProcAddr(m_device, "vkSetDebugUtilsObjectNameEXT"));
+                m_vki.vkGetDeviceProcAddr(m_device, "vkSetDebugUtilsObjectNameEXT"));
         }
         // Core 1.3 entry points, loaded core-name-first with a KHR-alias fallback for
         // pre-1.3 drivers (MoltenVK reports 1.2 and only exposes the KHR variants).
         auto LoadCoreOrKhr = [&](const char* core, const char* khr) {
-            PFN_vkVoidFunction p = vkGetDeviceProcAddr(m_device, core);
-            return p ? p : vkGetDeviceProcAddr(m_device, khr);
+            PFN_vkVoidFunction p = m_vki.vkGetDeviceProcAddr(m_device, core);
+            return p ? p : m_vki.vkGetDeviceProcAddr(m_device, khr);
         };
         m_ext.CmdPipelineBarrier2 = reinterpret_cast<PFN_vkCmdPipelineBarrier2>(
             LoadCoreOrKhr("vkCmdPipelineBarrier2", "vkCmdPipelineBarrier2KHR"));
@@ -1191,18 +1203,18 @@ namespace vri::vk
                 reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeVectorPropertiesNV>(
                     vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceCooperativeVectorPropertiesNV"));
             m_ext.convertCooperativeVectorMatrix = reinterpret_cast<PFN_vkConvertCooperativeVectorMatrixNV>(
-                vkGetDeviceProcAddr(m_device, "vkConvertCooperativeVectorMatrixNV"));
+                m_vki.vkGetDeviceProcAddr(m_device, "vkConvertCooperativeVectorMatrixNV"));
         }
 
         if (m_enabledFeatures & VriFeature_VariableShadingRate)
             m_ext.CmdSetFragmentShadingRate = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(
-                vkGetDeviceProcAddr(m_device, "vkCmdSetFragmentShadingRateKHR"));
+                m_vki.vkGetDeviceProcAddr(m_device, "vkCmdSetFragmentShadingRateKHR"));
         if (m_enabledFeatures & VriFeature_MeshShader)
         {
-            m_ext.CmdDrawMeshTasks =
-                reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksEXT"));
+            m_ext.CmdDrawMeshTasks = reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(
+                m_vki.vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksEXT"));
             m_ext.CmdDrawMeshTasksIndirect = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(
-                vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksIndirectEXT"));
+                m_vki.vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksIndirectEXT"));
         }
         // Acceleration-structure entry points serve BOTH the SBT pipeline (RayTracing) and
         // inline ray query - a ray-query-only device still creates/builds AS through the
@@ -1211,7 +1223,7 @@ namespace vri::vk
         // enabled), matching the interface's gating on hasRayTracing.
         if (m_enabledFeatures & (VriFeature_RayTracing | VriFeature_RayQuery))
         {
-            auto L = [&](const char* n) { return vkGetDeviceProcAddr(m_device, n); };
+            auto L = [&](const char* n) { return m_vki.vkGetDeviceProcAddr(m_device, n); };
             m_ext.CreateAccelerationStructure =
                 reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(L("vkCreateAccelerationStructureKHR"));
             m_ext.DestroyAccelerationStructure =
@@ -1236,7 +1248,7 @@ namespace vri::vk
         }
         if (m_enabledFeatures & VriFeature_OpacityMicromap)
         {
-            auto L                = [&](const char* n) { return vkGetDeviceProcAddr(m_device, n); };
+            auto L                = [&](const char* n) { return m_vki.vkGetDeviceProcAddr(m_device, n); };
             m_ext.CreateMicromap  = reinterpret_cast<PFN_vkCreateMicromapEXT>(L("vkCreateMicromapEXT"));
             m_ext.DestroyMicromap = reinterpret_cast<PFN_vkDestroyMicromapEXT>(L("vkDestroyMicromapEXT"));
             m_ext.GetMicromapBuildSizes =
@@ -1344,10 +1356,11 @@ namespace vri::vk
         VkInstance instance = VK_NULL_HANDLE;
         if (vkCreateInstance(&ici, nullptr, &instance) != VK_SUCCESS)
             return 0;
-        // A table of its own: this instance enables no surface extension, so it must not be the one
-        // volk's process-wide pointers are loaded from.
         VolkInstanceTable vk = {};
-        volkLoadInstanceTable(&vk, instance);
+        {
+            std::lock_guard lock(VolkTableMutex());
+            volkLoadInstanceTable(&vk, instance);
+        }
 
         uint32_t count = 0;
         vk.vkEnumeratePhysicalDevices(instance, &count, nullptr);

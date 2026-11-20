@@ -24,14 +24,20 @@ namespace vri::vk
         VriResult Init(const VriDeviceCreationDesc& desc);
 
         // accessors used by the core interface implementation
-        VkInstance           Instance() const { return m_instance; }
-        VkPhysicalDevice     PhysicalDevice() const { return m_physicalDevice; }
-        bool                 HasMemoryBudget() const { return m_hasMemoryBudget; }
-        bool                 HasMemoryPriority() const { return m_hasMemoryPriority; }
-        bool                 HasPageableDeviceLocalMemory() const { return m_hasPageableDeviceLocalMemory; }
-        VkDevice             Device() const { return m_device; }
-        VmaAllocator         Allocator() const { return m_allocator; }
-        const VriDeviceDesc& Desc() const { return m_desc; }
+        VkInstance       Instance() const { return m_instance; }
+        VkPhysicalDevice PhysicalDevice() const { return m_physicalDevice; }
+        bool             HasMemoryBudget() const { return m_hasMemoryBudget; }
+        bool             HasMemoryPriority() const { return m_hasMemoryPriority; }
+        bool             HasPageableDeviceLocalMemory() const { return m_hasPageableDeviceLocalMemory; }
+        VkDevice         Device() const { return m_device; }
+        // This device's Vulkan entry points. A pointer from vkGetInstanceProcAddr/vkGetDeviceProcAddr
+        // is valid only for the instance or device it was loaded from, and devices may run on
+        // instances with different layers (validation is per device), so every call goes through
+        // the tables of the device it acts on.
+        const VolkInstanceTable& Vki() const { return m_vki; }
+        const VolkDeviceTable&   Vkd() const { return m_vkd; }
+        VmaAllocator             Allocator() const { return m_allocator; }
+        const VriDeviceDesc&     Desc() const { return m_desc; }
 
         QueueVK*                     GetQueue(VriQueueType type) { return &m_queues[type]; }
         const VkAllocationCallbacks* VkAllocCallbacks() const { return nullptr; }
@@ -128,6 +134,8 @@ namespace vri::vk
         VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
         VkPhysicalDevice         m_physicalDevice = VK_NULL_HANDLE;
         VkDevice                 m_device         = VK_NULL_HANDLE;
+        VolkInstanceTable        m_vki            = {};
+        VolkDeviceTable          m_vkd            = {};
         VmaAllocator             m_allocator      = VK_NULL_HANDLE;
 
         QueueVK  m_queues[VriQueueType_Count]        = {};

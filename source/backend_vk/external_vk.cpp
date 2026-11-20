@@ -79,7 +79,7 @@ namespace vri::vk
         uint32_t FindMemoryType(DeviceVK* d, uint32_t typeBits, VkMemoryPropertyFlags required)
         {
             VkPhysicalDeviceMemoryProperties mp;
-            vkGetPhysicalDeviceMemoryProperties(d->PhysicalDevice(), &mp);
+            d->Vki().vkGetPhysicalDeviceMemoryProperties(d->PhysicalDevice(), &mp);
             for (uint32_t i = 0; i < mp.memoryTypeCount; ++i)
                 if ((typeBits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & required) == required)
                     return i;
@@ -112,11 +112,11 @@ namespace vri::vk
             bci.sharingMode                  = VK_SHARING_MODE_EXCLUSIVE;
 
             VkBuffer buffer = VK_NULL_HANDLE;
-            if (vkCreateBuffer(d->Device(), &bci, nullptr, &buffer) != VK_SUCCESS)
+            if (d->Vkd().vkCreateBuffer(d->Device(), &bci, nullptr, &buffer) != VK_SUCCESS)
                 return VriResult_Failure;
 
             VkMemoryRequirements req = {};
-            vkGetBufferMemoryRequirements(d->Device(), buffer, &req);
+            d->Vkd().vkGetBufferMemoryRequirements(d->Device(), buffer, &req);
 
             // Chain: alloc <- exportInfo <- dedicatedInfo [<- flagsInfo if device address].
             VkExportMemoryAllocateInfo exportInfo   = {VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO};
@@ -138,15 +138,15 @@ namespace vri::vk
             ai.memoryTypeIndex = FindMemoryType(d, req.memoryTypeBits, PropsForLocation(desc->memoryLocation));
 
             VkDeviceMemory memory = VK_NULL_HANDLE;
-            if (vkAllocateMemory(d->Device(), &ai, nullptr, &memory) != VK_SUCCESS)
+            if (d->Vkd().vkAllocateMemory(d->Device(), &ai, nullptr, &memory) != VK_SUCCESS)
             {
-                vkDestroyBuffer(d->Device(), buffer, nullptr);
+                d->Vkd().vkDestroyBuffer(d->Device(), buffer, nullptr);
                 return VriResult_OutOfMemory;
             }
-            if (vkBindBufferMemory(d->Device(), buffer, memory, 0) != VK_SUCCESS)
+            if (d->Vkd().vkBindBufferMemory(d->Device(), buffer, memory, 0) != VK_SUCCESS)
             {
-                vkFreeMemory(d->Device(), memory, nullptr);
-                vkDestroyBuffer(d->Device(), buffer, nullptr);
+                d->Vkd().vkFreeMemory(d->Device(), memory, nullptr);
+                d->Vkd().vkDestroyBuffer(d->Device(), buffer, nullptr);
                 return VriResult_Failure;
             }
 
@@ -185,11 +185,11 @@ namespace vri::vk
                 ici.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
             VkImage image = VK_NULL_HANDLE;
-            if (vkCreateImage(d->Device(), &ici, nullptr, &image) != VK_SUCCESS)
+            if (d->Vkd().vkCreateImage(d->Device(), &ici, nullptr, &image) != VK_SUCCESS)
                 return VriResult_Failure;
 
             VkMemoryRequirements req = {};
-            vkGetImageMemoryRequirements(d->Device(), image, &req);
+            d->Vkd().vkGetImageMemoryRequirements(d->Device(), image, &req);
 
             VkExportMemoryAllocateInfo exportInfo   = {VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO};
             exportInfo.handleTypes                  = MemHandleBit();
@@ -203,15 +203,15 @@ namespace vri::vk
             ai.memoryTypeIndex      = FindMemoryType(d, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
             VkDeviceMemory memory = VK_NULL_HANDLE;
-            if (vkAllocateMemory(d->Device(), &ai, nullptr, &memory) != VK_SUCCESS)
+            if (d->Vkd().vkAllocateMemory(d->Device(), &ai, nullptr, &memory) != VK_SUCCESS)
             {
-                vkDestroyImage(d->Device(), image, nullptr);
+                d->Vkd().vkDestroyImage(d->Device(), image, nullptr);
                 return VriResult_OutOfMemory;
             }
-            if (vkBindImageMemory(d->Device(), image, memory, 0) != VK_SUCCESS)
+            if (d->Vkd().vkBindImageMemory(d->Device(), image, memory, 0) != VK_SUCCESS)
             {
-                vkFreeMemory(d->Device(), memory, nullptr);
-                vkDestroyImage(d->Device(), image, nullptr);
+                d->Vkd().vkFreeMemory(d->Device(), memory, nullptr);
+                d->Vkd().vkDestroyImage(d->Device(), image, nullptr);
                 return VriResult_Failure;
             }
 
@@ -242,7 +242,7 @@ namespace vri::vk
                 return VriResult_InvalidArgument;
 #if defined(_WIN32)
             auto getWin32 = reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(
-                vkGetDeviceProcAddr(d->Device(), "vkGetMemoryWin32HandleKHR"));
+                d->Vki().vkGetDeviceProcAddr(d->Device(), "vkGetMemoryWin32HandleKHR"));
             if (!getWin32)
                 return VriResult_Unsupported;
             VkMemoryGetWin32HandleInfoKHR gi = {VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR};
@@ -253,7 +253,8 @@ namespace vri::vk
                 return VriResult_Failure;
             out->handle = h;
 #else
-            auto getFd = reinterpret_cast<PFN_vkGetMemoryFdKHR>(vkGetDeviceProcAddr(d->Device(), "vkGetMemoryFdKHR"));
+            auto getFd =
+                reinterpret_cast<PFN_vkGetMemoryFdKHR>(d->Vki().vkGetDeviceProcAddr(d->Device(), "vkGetMemoryFdKHR"));
             if (!getFd)
                 return VriResult_Unsupported;
             VkMemoryGetFdInfoKHR gi = {VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR};
@@ -310,7 +311,7 @@ namespace vri::vk
             ci.pNext                               = &type;
 
             VkSemaphore sem = VK_NULL_HANDLE;
-            if (vkCreateSemaphore(d->Device(), &ci, nullptr, &sem) != VK_SUCCESS)
+            if (d->Vkd().vkCreateSemaphore(d->Device(), &ci, nullptr, &sem) != VK_SUCCESS)
                 return VriResult_Failure;
             *out = ToHandle(new FenceVK {d, sem});
             return VriResult_Success;
@@ -327,7 +328,7 @@ namespace vri::vk
             FenceVK*  f = Fen(fence);
 #if defined(_WIN32)
             auto getWin32 = reinterpret_cast<PFN_vkGetSemaphoreWin32HandleKHR>(
-                vkGetDeviceProcAddr(d->Device(), "vkGetSemaphoreWin32HandleKHR"));
+                d->Vki().vkGetDeviceProcAddr(d->Device(), "vkGetSemaphoreWin32HandleKHR"));
             if (!getWin32)
                 return VriResult_Unsupported;
             VkSemaphoreGetWin32HandleInfoKHR gi = {VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR};
@@ -338,8 +339,8 @@ namespace vri::vk
                 return VriResult_Failure;
             *outHandle = h;
 #else
-            auto getFd =
-                reinterpret_cast<PFN_vkGetSemaphoreFdKHR>(vkGetDeviceProcAddr(d->Device(), "vkGetSemaphoreFdKHR"));
+            auto getFd = reinterpret_cast<PFN_vkGetSemaphoreFdKHR>(
+                d->Vki().vkGetDeviceProcAddr(d->Device(), "vkGetSemaphoreFdKHR"));
             if (!getFd)
                 return VriResult_Unsupported;
             VkSemaphoreGetFdInfoKHR gi = {VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR};

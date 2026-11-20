@@ -84,6 +84,7 @@ target("vri-tests")
         add_files("test_cooperative_vector_c.c", {languages = "c11"})
         add_cflags("-fshort-enums", {tools = {"gcc", "clang"}})
         add_files("test_debugutils_vk.cpp")
+        add_files("test_devices_vk.cpp")      -- per-device entry points across instances
         add_packages("vulkan-memory-allocator")
         add_files("test_vrs_vk.cpp")          -- variable rate shading (VK_KHR_fragment_shading_rate)
         add_files("test_meshshader_vk.cpp")   -- mesh shaders (VK_EXT_mesh_shader)
