@@ -21,6 +21,7 @@ target("vri-tests")
     add_files("test_device_async.cpp")       -- vriCreateDeviceAsync off the browser
     add_files("test_map_async_xbackend.cpp") -- MapBufferAsync off the browser
     add_files("test_validation_state_xbackend.cpp") -- VriDeviceDesc::nativeValidation and its warning
+    add_files("test_enabled_features_xbackend.cpp") -- enabledFeatures is the grant on every backend
     add_files("test_coordinates.cpp")
     add_files("test_coordinate_rendering.cpp")
     add_files("test_coordinates_c.c", {languages = "c11"})

@@ -93,6 +93,28 @@ namespace
         return failure == 0;
     }
 
+    // A feature this backend does not grant: refused without bestEffort, absent from enabledFeatures with it.
+    bool FeatureProbe(VriGraphicsAPI api)
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = api;
+        dc.enabledFeatures       = VriFeature_RayTracing;
+        dc.bestEffort            = VRI_FALSE;
+        VriDevice*      dev      = nullptr;
+        const VriResult strict   = vriCreateDevice(&dc, &dev);
+        if (dev)
+            vriDestroyDevice(dev);
+        dc.bestEffort = VRI_TRUE;
+        dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        const bool       granted = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                             c.GetDeviceDesc(dev)->enabledFeatures == 0;
+        vriDestroyDevice(dev);
+        return strict == VriResult_Unsupported && granted;
+    }
+
     // Buffer <-> texture copies with padded rows and slices: an odd-width R16F texture and a 3D texture.
     bool CopyProbe()
     {
@@ -482,18 +504,20 @@ int main()
     const bool completion = CompletionProbe();
     const bool mapAsync   = MapAsyncProbe();
     const bool compressed = CompressedProbe();
+    const bool features   = FeatureProbe(VriGraphicsAPI_WebGPU);
     const bool copies     = CopyProbe();
-    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && copies;
-    std::printf(
-        "VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d copies=%d)\n",
-        pass ? "PASS" : "FAIL",
-        ran ? 1 : 0,
-        centerRed ? 1 : 0,
-        compute ? 1 : 0,
-        completion ? 1 : 0,
-        mapAsync ? 1 : 0,
-        compressed ? 1 : 0,
-        copies ? 1 : 0);
+    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies;
+    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
+                "features=%d copies=%d)\n",
+                pass ? "PASS" : "FAIL",
+                ran ? 1 : 0,
+                centerRed ? 1 : 0,
+                compute ? 1 : 0,
+                completion ? 1 : 0,
+                mapAsync ? 1 : 0,
+                compressed ? 1 : 0,
+                features ? 1 : 0,
+                copies ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);
