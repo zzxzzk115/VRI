@@ -51,6 +51,8 @@ target("vri")
         add_packages("vulkan-headers", "vulkan-memory-allocator", "volk", {public = false})
         if is_plat("linux", "bsd") then
             add_syslinks("dl", {public = true}) -- volk opens libvulkan.so.1 with dlopen
+        elseif is_plat("macosx") then
+            add_rules("vulkansdk.rpath") -- where DeviceVK finds an SDK loader outside the system paths
         end
         add_files("backend_vk/**.cpp")
         add_includedirs("backend_vk", {public = false})
