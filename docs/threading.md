@@ -113,7 +113,9 @@ This is the one backend where the model is *stricter* than the general contract 
   deadline. D3D12 registers events only for infinite waits: a timeout cannot cancel a native event registration.
   Timeout precision follows OS scheduling; a zero timeout remains an immediate poll.
 - Browser waits require Asyncify and yield the browser event loop. A timeout may exceed its requested duration
-  by the browser's scheduling granularity; it never manufactures a completed value.
+  by the browser's scheduling granularity; it never manufactures a completed value. Without Asyncify a bounded
+  wait returns `VriResult_Timeout` at once and an unbounded one reports an error; WebGPU devices are then
+  created with `vriCreateDeviceAsync`.
 
 ## Validation aid (opt-in)
 

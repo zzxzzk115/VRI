@@ -655,6 +655,8 @@
                     if (timeoutNs == UINT64_MAX)
                         return VriResult_InvalidArgument;
 #if defined(__EMSCRIPTEN__)
+                    if (!emscripten_has_asyncify())
+                        return VriResult_Timeout;
                     emscripten_sleep(1);
 #else
                     deadline.Pause();
@@ -662,7 +664,16 @@
                     continue;
                 }
 #if defined(__EMSCRIPTEN__)
-                // WebGL permits only a zero native timeout; yield for GPU progress.
+                // WebGL permits only a zero native timeout, and a sync object is signaled only once the
+                // page returns to the browser event loop: yield for GPU progress, which needs Asyncify.
+                if (!emscripten_has_asyncify())
+                {
+                    if (timeoutNs != UINT64_MAX)
+                        return VriResult_Timeout;
+                    f->device->ReportError("WaitForFence: an unbounded wait in the browser needs -sASYNCIFY; poll "
+                                           "GetFenceValue on a later frame instead");
+                    return VriResult_Unsupported;
+                }
                 emscripten_sleep(1);
 #else
                 const GLenum status = glClientWaitSync(

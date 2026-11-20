@@ -166,6 +166,29 @@ xmake build example-cube
 xmake run example-cube   # hosts the page in your browser
 ```
 
+The browser hands out WebGPU adapters and devices only from its event loop. A program decides
+whether it links Emscripten's `-sASYNCIFY` (VRI does not add it):
+
+- Without Asyncify, create the device with `vriCreateDeviceAsync` (`vri::Device::createAsync` in
+  C++); its callback runs from the event loop once the device exists. `vriCreateDevice` still
+  creates WebGL 2 devices and reports `VriResult_Unsupported` for WebGPU. A wait that would have to
+  block for the GPU (`QueueWaitIdle`, `DeviceWaitIdle`, an unbounded `WaitForFence`, mapping a
+  readback buffer) reports an error instead; a bounded fence wait returns `VriResult_Timeout`, so
+  poll fences on a later frame.
+- With Asyncify (the examples link it), `vriCreateDevice` and every wait work as on native
+  platforms, yielding to the browser while they wait.
+
+```cpp
+VriDeviceCreationDesc desc = vriDefaultDeviceCreationDesc();
+desc.graphicsAPI = VriGraphicsAPI_Auto; // WebGPU first, WebGL 2 if the WebGPU request fails
+vriCreateDeviceAsync(&desc, [](void* app, VriResult result, VriDevice* device) {
+    if (result == VriResult_Success)
+        static_cast<App*>(app)->start(device);
+}, &app);
+```
+
+Off the browser `vriCreateDeviceAsync` creates the device before it returns.
+
 ## Coordinate conventions
 
 Initialize device descriptors with `vriDefaultDeviceCreationDesc()`; its size field guards C ABI drift.

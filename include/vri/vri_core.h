@@ -32,6 +32,24 @@ VRI_API uint32_t VRI_CALL vriEnumerateAdapters(VriGraphicsAPI  api,
 
 VRI_API VriResult VRI_CALL vriCreateDevice(const VriDeviceCreationDesc* desc, VriDevice** outDevice);
 
+/*
+ * Create a device and hand it to `callback` instead of returning it. The browser's WebGPU gives out
+ * adapters and devices only from its event loop, so a program linked without -sASYNCIFY creates its
+ * WebGPU device this way (vriCreateDevice reports VriResult_Unsupported for it there).
+ *
+ * `callback` runs exactly once: from the browser event loop while a browser WebGPU device is being
+ * requested, otherwise before vriCreateDeviceAsync returns. `device` is NULL unless `result` is
+ * VriResult_Success; the callback then owns it (vriDestroyDevice). VriGraphicsAPI_Auto goes through
+ * the same backend order as vriCreateDevice, moving on when a WebGPU request fails. `*desc` is
+ * copied; what it points to must stay valid until the callback has run. Returns
+ * VriResult_InvalidArgument, without calling `callback`, when `desc` or `callback` is NULL.
+ */
+typedef void(VRI_CALL* VriDeviceCreatedCallback)(void* userData, VriResult result, VriDevice* device);
+
+VRI_API VriResult VRI_CALL vriCreateDeviceAsync(const VriDeviceCreationDesc* desc,
+                                                VriDeviceCreatedCallback     callback,
+                                                void*                        userData);
+
 VRI_API void VRI_CALL vriDestroyDevice(VriDevice* device);
 
 /*
