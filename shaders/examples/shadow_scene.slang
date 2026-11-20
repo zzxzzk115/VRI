@@ -1,7 +1,8 @@
 // Main pass (examples/shadowmapping): render the scene from the camera, lit by one directional
 // light, with PCF shadows sampled from the light's depth map via a COMPARISON sampler
-// (SampleCmpLevelZero). Each object's model comes from a per-draw push constant. The shadow map
-// is a render-to-texture sampled like examples/offscreen (uv = ndc.xy * 0.5 + 0.5, no Y flip).
+// (SampleCmpLevelZero). Each object's model comes from a per-draw push constant. The device's
+// clip space is Y-up and texture row zero is the top row, so light-space NDC y = +1 was rendered
+// into v = 0: the lookup flips Y (uv = (ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5)).
 // The light-space depth is remapped to [0,1] on WebGL2 (no glClipControl -> window depth is
 // z*0.5+0.5) via params.z; every other backend already has zero-to-one clip depth.
 //
@@ -62,7 +63,7 @@ float samplePcf(float2 uv, float ref)
 float4 fragmentMain(VSOutput i) : SV_Target
 {
     float3 ndc = i.lightClip.xyz / i.lightClip.w;
-    float2 uv = ndc.xy * 0.5 + 0.5;                          // render-to-texture sample (no Y flip)
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5); // NDC y-up -> top-row-first texture
     float ref = (u.params.z > 0.5) ? ndc.z : (ndc.z * 0.5 + 0.5);
     ref -= u.params.x;                                       // constant depth bias (anti-acne)
 
