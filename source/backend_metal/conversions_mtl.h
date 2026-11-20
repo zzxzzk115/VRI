@@ -74,6 +74,15 @@ namespace vri::mtl
             {VriFormat_BC7_UNORM,       MTLPixelFormatBC7_RGBAUnorm},
             {VriFormat_ETC2_RGBA8_UNORM, MTLPixelFormatEAC_RGBA8},
             {VriFormat_ASTC_4x4_UNORM,  MTLPixelFormatASTC_4x4_LDR},
+            {VriFormat_BC1_SRGB,        MTLPixelFormatBC1_RGBA_sRGB},
+            {VriFormat_BC2_SRGB,        MTLPixelFormatBC2_RGBA_sRGB},
+            {VriFormat_BC3_SRGB,        MTLPixelFormatBC3_RGBA_sRGB},
+            {VriFormat_BC7_SRGB,        MTLPixelFormatBC7_RGBAUnorm_sRGB},
+            {VriFormat_BC6H_SFLOAT,     MTLPixelFormatBC6H_RGBFloat},
+            {VriFormat_BC4_SNORM,       MTLPixelFormatBC4_RSnorm},
+            {VriFormat_BC5_SNORM,       MTLPixelFormatBC5_RGSnorm},
+            {VriFormat_ETC2_RGBA8_SRGB, MTLPixelFormatEAC_RGBA8_sRGB},
+            {VriFormat_ASTC_4x4_SRGB,   MTLPixelFormatASTC_4x4_sRGB},
 
             {VriFormat_D16_UNORM,       MTLPixelFormatDepth16Unorm},
             {VriFormat_D32_SFLOAT,      MTLPixelFormatDepth32Float},
@@ -119,6 +128,9 @@ namespace vri::mtl
             case VriFormat_BC1_UNORM: case VriFormat_BC2_UNORM: case VriFormat_BC3_UNORM:
             case VriFormat_BC4_UNORM: case VriFormat_BC5_UNORM: case VriFormat_BC6H_UFLOAT:
             case VriFormat_BC7_UNORM: case VriFormat_ETC2_RGBA8_UNORM: case VriFormat_ASTC_4x4_UNORM:
+            case VriFormat_BC1_SRGB: case VriFormat_BC2_SRGB: case VriFormat_BC3_SRGB: case VriFormat_BC7_SRGB:
+            case VriFormat_BC6H_SFLOAT: case VriFormat_BC4_SNORM: case VriFormat_BC5_SNORM:
+            case VriFormat_ETC2_RGBA8_SRGB: case VriFormat_ASTC_4x4_SRGB:
                 return 4;
             default:
                 return 1;
@@ -131,10 +143,14 @@ namespace vri::mtl
         switch (f)
         {
             case VriFormat_BC1_UNORM: case VriFormat_BC4_UNORM:
+            case VriFormat_BC1_SRGB: case VriFormat_BC4_SNORM:
                 return 8;
             case VriFormat_BC2_UNORM: case VriFormat_BC3_UNORM: case VriFormat_BC5_UNORM:
             case VriFormat_BC6H_UFLOAT: case VriFormat_BC7_UNORM:
             case VriFormat_ETC2_RGBA8_UNORM: case VriFormat_ASTC_4x4_UNORM:
+            case VriFormat_BC2_SRGB: case VriFormat_BC3_SRGB: case VriFormat_BC5_SNORM:
+            case VriFormat_BC6H_SFLOAT: case VriFormat_BC7_SRGB:
+            case VriFormat_ETC2_RGBA8_SRGB: case VriFormat_ASTC_4x4_SRGB:
                 return 16;
             case VriFormat_R8_UNORM: case VriFormat_R8_SNORM: case VriFormat_R8_UINT:
             case VriFormat_R8_SINT:  case VriFormat_S8_UINT:

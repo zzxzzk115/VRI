@@ -312,7 +312,8 @@ namespace vri::mtl
         VriFormatSupportFlags VRI_CALL GetFormatSupport(const VriDevice* device, VriFormat format)
         {
             // Apple GPUs sample ETC2 and ASTC; the Intel and AMD GPUs of older Macs have neither.
-            if (format == VriFormat_ETC2_RGBA8_UNORM || format == VriFormat_ASTC_4x4_UNORM)
+            if (format == VriFormat_ETC2_RGBA8_UNORM || format == VriFormat_ASTC_4x4_UNORM ||
+                format == VriFormat_ETC2_RGBA8_SRGB || format == VriFormat_ASTC_4x4_SRGB)
                 return [Dev(device)->Device() supportsFamily:MTLGPUFamilyApple2] ? VriFormatSupport_Texture :
                                                                                    VriFormatSupport_None;
             if (ToMtlFormat(format) == MTLPixelFormatInvalid && ToMtlVertexFormat(format) == MTLVertexFormatInvalid)

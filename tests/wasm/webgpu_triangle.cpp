@@ -7,6 +7,7 @@
 // Build: xmake f -p wasm --vri_backend_wgpu=y; xmake build vri-webgpu-triangle
 // Run:   emrun (headless Chrome with --enable-unsafe-webgpu) over the .html
 
+#include "tests/compressed_format_probe.h"
 #include "tests/wgpu_completion_probe.h"
 
 #include <vri/vri.h>
@@ -47,6 +48,28 @@ namespace
         }
         vriDestroyDevice(device);
         return failure == 0;
+    }
+
+    // The sRGB and signed block-compressed formats the browser grants survive an upload/readback round trip.
+    bool CompressedProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        bool             ok = vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success;
+        for (const vri::test::CompressedFormat& f : vri::test::kAddedCompressedFormats)
+        {
+            if (!ok || (c.GetFormatSupport(device, f.format) & VriFormatSupport_Texture) == 0)
+                continue;
+            const int failure = vri::test::CheckCompressedRoundTrip(device, c, f);
+            std::printf("VRI_WEBGPU_STEP: %s round trip %s\n", f.name, failure ? "FAILED" : "ok");
+            ok = failure == 0;
+        }
+        vriDestroyDevice(device);
+        return ok;
     }
 
     bool RenderAndProbe(bool& centerRed)
@@ -410,13 +433,15 @@ int main()
     std::printf("VRI_WEBGPU_STEP: compute done\n");
     std::fflush(stdout);
     const bool completion = CompletionProbe();
-    const bool pass       = ran && centerRed && compute && completion;
-    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d)\n",
+    const bool compressed = CompressedProbe();
+    const bool pass       = ran && centerRed && compute && completion && compressed;
+    std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d compressed=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
                 compute ? 1 : 0,
-                completion ? 1 : 0);
+                completion ? 1 : 0,
+                compressed ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);
