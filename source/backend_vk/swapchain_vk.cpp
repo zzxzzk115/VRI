@@ -13,7 +13,7 @@
 #define VK_USE_PLATFORM_METAL_EXT
 #endif
 
-#include <vulkan/vulkan.h>
+#include "vulkan_vk.h"
 
 #include "conversions_vk.h"
 #include "device_vk.h"

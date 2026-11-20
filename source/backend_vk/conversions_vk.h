@@ -1,7 +1,7 @@
 // ConversionsVK.h - VRI enum -> Vulkan enum conversions (Phase 1 subset).
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include "vulkan_vk.h"
 
 #include <vri/vri.h>
 

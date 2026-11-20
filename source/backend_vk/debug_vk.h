@@ -6,7 +6,7 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include <vulkan/vulkan.h>
+#include "vulkan_vk.h"
 
 namespace vri::vk
 {

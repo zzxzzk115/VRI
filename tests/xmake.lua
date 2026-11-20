@@ -74,6 +74,9 @@ target("vri-tests")
     add_files("c_clean_check.c")
     if has_config("vri_backend_vulkan") then
         add_packages("vulkan-headers") -- device-creation extension regression uses native Vulkan types
+        -- That regression also calls Vulkan itself; libvri opens the loader at run time instead.
+        add_rules("vulkansdk")
+        add_packages("volk") -- the backend headers included by the white-box tests
         add_files("test_triangle_vk.cpp")
         add_files("test_core_phase2_vk.cpp")
         add_files("test_features_vk.cpp")

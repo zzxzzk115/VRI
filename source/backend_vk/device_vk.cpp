@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -25,6 +26,13 @@ namespace vri::vk
 {
     namespace
     {
+        // volk opens the loader once per process; every device and EnumerateAdapters share it.
+        bool LoadVulkanLoader()
+        {
+            static const bool loaded = volkInitialize() == VK_SUCCESS;
+            return loaded;
+        }
+
         VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                      VkDebugUtilsMessageTypeFlagsEXT /*types*/,
                                                      const VkDebugUtilsMessengerCallbackDataEXT* data,
@@ -121,6 +129,11 @@ namespace vri::vk
         // didn't already choose one) BEFORE the first Vulkan call, so it is scanned at init.
         if (m_software)
             TrySelectSoftwareICD();
+        if (!LoadVulkanLoader())
+        {
+            ReportWarning("the Vulkan loader (vulkan-1 / libvulkan) could not be opened");
+            return VriResult_Unsupported;
+        }
 
         // OpenXR XR_KHR_vulkan_enable2: adopt the instance/device creation hooks (Vulkan only).
         const auto* hooks = static_cast<const VriVulkanCreateHooks*>(desc.nativeCreateInfo);
@@ -242,6 +255,12 @@ namespace vri::vk
             ReportError("vkCreateInstance failed");
             return VriResult_Failure;
         }
+        // volk's pointers are process-wide, so they are loaded once, from the first device's instance.
+        // Through vkGetInstanceProcAddr they are dispatching entry points: valid for any instance or
+        // device, also after that instance is destroyed. Every device's instance enables the same
+        // surface extensions, so no later device needs a function the first one did not load.
+        static std::once_flag loadOnce;
+        std::call_once(loadOnce, [this] { volkLoadInstance(m_instance); });
 
         if (m_validation && m_debugUtils)
         {
@@ -382,6 +401,20 @@ namespace vri::vk
         VkPhysicalDeviceProperties physProps = {};
         vkGetPhysicalDeviceProperties(m_physicalDevice, &physProps);
         const bool useVk13Core = physProps.apiVersion >= VK_API_VERSION_1_3;
+        // Timeline semaphores, buffer device address and the Vulkan 1.1/1.2 feature structs below
+        // are core 1.2; an older device (common on Android 8-10) cannot run this backend.
+        if (physProps.apiVersion < VK_API_VERSION_1_2)
+        {
+            char message[384];
+            std::snprintf(message,
+                          sizeof(message),
+                          "%s supports Vulkan %u.%u; the Vulkan backend needs 1.2",
+                          physProps.deviceName,
+                          VK_API_VERSION_MAJOR(physProps.apiVersion),
+                          VK_API_VERSION_MINOR(physProps.apiVersion));
+            ReportWarning(message);
+            return VriResult_Unsupported;
+        }
 
         // ---- query supported optional features ----
         VkPhysicalDeviceAccelerationStructureFeaturesKHR asSup = {
@@ -978,6 +1011,11 @@ namespace vri::vk
         const uint32_t minor = props.apiVersion >= VK_API_VERSION_1_3 ? 3 : VK_API_VERSION_MINOR(props.apiVersion);
         ci.vulkanApiVersion  = VK_MAKE_API_VERSION(0, 1, minor, 0);
         ci.flags             = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+        // VMA loads the rest of its entry points from these two (VMA_DYNAMIC_VULKAN_FUNCTIONS).
+        VmaVulkanFunctions functions    = {};
+        functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+        functions.vkGetDeviceProcAddr   = vkGetDeviceProcAddr;
+        ci.pVulkanFunctions             = &functions;
         // Makes VMA chain VkMemoryPriorityAllocateInfoEXT from VmaAllocationCreateInfo::priority;
         // without it every allocation's priority field is silently ignored.
         if (m_hasMemoryPriority)
@@ -1288,6 +1326,8 @@ namespace vri::vk
 
     uint32_t EnumerateAdapters(VriAdapterDesc* outAdapters, uint32_t capacity)
     {
+        if (!LoadVulkanLoader())
+            return 0;
         VkApplicationInfo app    = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.apiVersion           = VK_API_VERSION_1_3;
         VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -1304,17 +1344,21 @@ namespace vri::vk
         VkInstance instance = VK_NULL_HANDLE;
         if (vkCreateInstance(&ici, nullptr, &instance) != VK_SUCCESS)
             return 0;
+        // A table of its own: this instance enables no surface extension, so it must not be the one
+        // volk's process-wide pointers are loaded from.
+        VolkInstanceTable vk = {};
+        volkLoadInstanceTable(&vk, instance);
 
         uint32_t count = 0;
-        vkEnumeratePhysicalDevices(instance, &count, nullptr);
+        vk.vkEnumeratePhysicalDevices(instance, &count, nullptr);
         std::vector<VkPhysicalDevice> devices(count);
-        vkEnumeratePhysicalDevices(instance, &count, devices.data());
+        vk.vkEnumeratePhysicalDevices(instance, &count, devices.data());
 
         const uint32_t fill = outAdapters ? (count < capacity ? count : capacity) : 0;
         for (uint32_t i = 0; i < fill; ++i)
         {
             VkPhysicalDeviceProperties props;
-            vkGetPhysicalDeviceProperties(devices[i], &props);
+            vk.vkGetPhysicalDeviceProperties(devices[i], &props);
             VriAdapterDesc& a = outAdapters[i];
             a                 = VriAdapterDesc {};
             std::strncpy(a.name, props.deviceName, sizeof(a.name) - 1);
@@ -1337,7 +1381,7 @@ namespace vri::vk
             }
 
             VkPhysicalDeviceMemoryProperties mem;
-            vkGetPhysicalDeviceMemoryProperties(devices[i], &mem);
+            vk.vkGetPhysicalDeviceMemoryProperties(devices[i], &mem);
             for (uint32_t h = 0; h < mem.memoryHeapCount; ++h)
             {
                 if (mem.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
@@ -1347,7 +1391,7 @@ namespace vri::vk
             }
         }
 
-        vkDestroyInstance(instance, nullptr);
+        vk.vkDestroyInstance(instance, nullptr);
         return count;
     }
 } // namespace vri::vk
