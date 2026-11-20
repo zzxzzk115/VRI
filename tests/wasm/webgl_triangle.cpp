@@ -8,6 +8,8 @@
 // Build: xmake f -p wasm; xmake build vri-webgl-triangle
 // Run:   emrun (headless Chrome) over the generated .html
 
+#include "tests/buffer_texture_copy_probe.h"
+
 #include <vri/ext/vri_ext_swapchain.h>
 #include <vri/vri.h>
 
@@ -2133,6 +2135,28 @@ namespace
         return true;
     }
 
+    // Buffer <-> texture copies with padded rows and slices: an odd-width R16F texture and a 3D texture.
+    bool CopyProbe()
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = VriGraphicsAPI_OpenGLES;
+        dc.bestEffort            = VRI_TRUE;
+        VriDevice* dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        bool             ok = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success;
+        for (const vri::test::CopyCase& k : vri::test::kCopyCases)
+        {
+            const int failure = ok ? vri::test::CheckBufferTextureRoundTrip(dev, c, k) : __LINE__;
+            if (failure)
+                std::printf("WebGL copy of format %d failed at line %d\n", static_cast<int>(k.format), failure);
+            ok = ok && failure == 0;
+        }
+        vriDestroyDevice(dev);
+        return ok;
+    }
+
     // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
     // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
     // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
@@ -2542,6 +2566,8 @@ int main()
     const bool ranSecond  = SecondContextProbe(secondOk);
     const bool secondPass = ranSecond && secondOk;
 
+    const bool copyPass = CopyProbe();
+
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
     const bool msaaPass = ranMsaa && msaaEdge;
@@ -2551,41 +2577,43 @@ int main()
     const bool swapPass = ranSwap && swapRed;
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
-                      instPass && scissorPass && computeNoPass && secondPass && msaaPass && swapPass;
-    std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
-                "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
-                "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
-                "ran=%d ok=%d | second-context: ran=%d ok=%d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
-                pass ? "PASS" : "FAIL",
-                ranTri,
-                topRed,
-                botRed,
-                ranUbo,
-                centerGreen,
-                ranTex,
-                centerBlue,
-                ranVbuf,
-                centerYellow,
-                ranDepth,
-                depthGreen,
-                ranBlend,
-                blendPurple,
-                ranCull,
-                cullGreen,
-                ranMrt,
-                mrtOk,
-                ranInst,
-                instOk,
-                ranScissor,
-                scissorOk,
-                ranComputeNo,
-                computeNoOk,
-                ranSecond,
-                secondOk,
-                ranMsaa,
-                msaaEdge,
-                ranSwap,
-                swapRed);
+                      instPass && scissorPass && computeNoPass && secondPass && copyPass && msaaPass && swapPass;
+    std::printf(
+        "VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
+        "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
+        "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
+        "ran=%d ok=%d | second-context: ran=%d ok=%d | copies: %d | msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
+        pass ? "PASS" : "FAIL",
+        ranTri,
+        topRed,
+        botRed,
+        ranUbo,
+        centerGreen,
+        ranTex,
+        centerBlue,
+        ranVbuf,
+        centerYellow,
+        ranDepth,
+        depthGreen,
+        ranBlend,
+        blendPurple,
+        ranCull,
+        cullGreen,
+        ranMrt,
+        mrtOk,
+        ranInst,
+        instOk,
+        ranScissor,
+        scissorOk,
+        ranComputeNo,
+        computeNoOk,
+        ranSecond,
+        secondOk,
+        copyPass,
+        ranMsaa,
+        msaaEdge,
+        ranSwap,
+        swapRed);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     // Make emrun return the process exit code so a headless run can be graded.
