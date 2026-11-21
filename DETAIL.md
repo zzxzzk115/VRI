@@ -90,9 +90,25 @@ a binary semaphore per swapchain image that `vkQueuePresentKHR` waits on. Metal 
 command buffer that presents. D3D12, GL and WebGPU ignore the fence. D3D12 presents after the work already
 submitted to the swapchain's queue, but not after work on another queue. GL and WebGPU have one queue and
 present after everything submitted before. On Vulkan, a present without a fence does not wait at all.
-`CreateSwapChain` on Vulkan and WebGPU returns `VriResult_Unsupported` for a format the surface does not
-list, and never substitutes another. D3D12 returns `VriResult_Unsupported` or `VriResult_Failure` for
-formats it cannot present. GL and Metal still substitute RGBA8 and BGRA8 for formats they cannot map.
+`CreateSwapChain` returns `VriResult_Unsupported`, creates nothing and logs no error for a format the backend
+cannot present, so a caller can try formats in turn; no backend substitutes another format. Vulkan and WebGPU
+take the formats the surface lists. D3D12 takes the flip-model formats (RGBA8, BGRA8, RGB10A2, RGBA16F and the
+sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window framebuffer holds; it has no
+BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
+
+Known swapchain limitations:
+
+- D3D12 `Present` ignores `waitFence`. It is ordered after the work already submitted to the swapchain's
+  queue, but not after work submitted to another queue; make that queue's work a dependency of a submission
+  on the swapchain's queue first.
+- Vulkan `AcquireNextTexture` waits on the host until the image is available and ignores `acquireFence` and
+  `signalValue`: it never signals that fence, so do not make a submission wait on it.
+- On Windows with NVIDIA's Vulkan driver (seen with 621.01), destroying a Vulkan swapchain that has never
+  presented ends the process if the D3D12 debug layer is on in it: the driver presents through D3D12, and the
+  layer reports one of the driver's own resources as released while in use (`CORRUPTION`). A D3D12 device created
+  with `enableValidation` turns that layer on for the whole process, and it cannot be turned off again. Native
+  WebGPU is affected too where it runs on Vulkan. Present at least once before destroying a swapchain (`Resize`
+  destroys the previous one), or keep code that enables D3D12 validation in a separate process.
 
 `UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
 are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during

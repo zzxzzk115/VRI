@@ -87,18 +87,20 @@ typedef struct VriSwapChainDesc
 
 typedef struct VriSwapChainInterface
 {
-    /* `format` must be one the window's surface takes. Vulkan and WebGPU return VriResult_Unsupported,
-       creating nothing, when the surface does not list it (WebGPU compares the channel format and takes
-       sRGB from the view), so the caller can try another. D3D12 returns VriResult_Unsupported for a
-       format with no DXGI equivalent and VriResult_Failure for one the flip model rejects. GL and Metal
-       fall back to RGBA8 and BGRA8 respectively for a format they cannot map. */
+    /* A `format` the backend cannot present returns VriResult_Unsupported, creates nothing and logs no
+       error, so the caller can try formats in turn; no backend substitutes another format. Vulkan and
+       WebGPU take the formats the surface lists (WebGPU compares the channel format and takes sRGB from
+       the view). D3D12 takes the flip-model formats RGBA8, BGRA8, RGB10A2 and RGBA16F, sRGB included. GL
+       takes RGBA8, RGBA8 sRGB and BGRA8, the formats of its 8-bit window framebuffer. Metal takes the
+       CAMetalLayer formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F. */
     VriResult(VRI_CALL* CreateSwapChain)(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** outSwapChain);
     void(VRI_CALL* DestroySwapChain)(VriSwapChain* swapChain);
 
     /* Borrowed array of backbuffer textures (owned by the swapchain). */
     VriResult(VRI_CALL* GetSwapChainTextures)(VriSwapChain* swapChain, VriTexture** outTextures, uint32_t* ioCount);
 
-    /* Acquire the next image; signals `acquireFence` to `signalValue` when ready. */
+    /* Acquire the next image; signals `acquireFence` to `signalValue` when ready. Known limitation: Vulkan
+       instead waits on the host until the image is available and never signals `acquireFence`. */
     VriResult(VRI_CALL* AcquireNextTexture)(VriSwapChain* swapChain,
                                             VriFence*     acquireFence,
                                             uint64_t      signalValue,

@@ -3,6 +3,8 @@
 //   presented with no host wait in between, under synchronization validation, which reports a present that no
 //   semaphore orders after the image's last write.
 // - A format the surface does not list is refused instead of replaced.
+#include "swapchain_present_once.h"
+
 #include <doctest/doctest.h>
 
 #include <vri/vri.h>
@@ -258,7 +260,10 @@ TEST_CASE("Vulkan: a swapchain format the surface does not list is refused")
     swapChain = nullptr;
     sd        = SwapChainDesc(hwnd, queue, VriFormat_BGRA8_UNORM);
     REQUIRE(sw.CreateSwapChain(dev, &sd, &swapChain) == VriResult_Success);
+    // Each swapchain presents before it is destroyed, Resize destroying the first: see swapchain_present_once.h.
+    vri::test::PresentOnce(dev, c, sw, swapChain);
     CHECK(sw.Resize(swapChain, kW, kH) == VriResult_Success);
+    vri::test::PresentOnce(dev, c, sw, swapChain);
     sw.DestroySwapChain(swapChain);
 
     DestroyWindow(hwnd);

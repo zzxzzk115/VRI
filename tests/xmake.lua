@@ -81,6 +81,10 @@ target("vri-tests")
     add_files("test_neversilent_xbackend.cpp") -- never-silent contract: no silent no-ops (DX12 CmdCopyTexture/CmdDispatchIndirect)
     add_files("test_debuggroup_xbackend.cpp") -- debug-group markers (DX12 PIX BeginEvent/EndEvent) wrap work without corrupting it
     add_files("c_clean_check.c")
+    if is_plat("windows") then
+        add_files("test_swapchain_formats_xbackend.cpp") -- unpresentable swapchain formats on hidden Win32 windows
+        add_syslinks("user32")
+    end
     if has_config("vri_backend_vulkan") then
         add_packages("vulkan-headers") -- device-creation extension regression uses native Vulkan types
         -- That regression also calls Vulkan itself; libvri opens the loader at run time instead.
