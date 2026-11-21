@@ -11,6 +11,7 @@
 #include "tests/compressed_format_probe.h"
 #include "tests/fence_destroy_probe.h"
 #include "tests/map_async_probe.h"
+#include "tests/queue_wait_probe.h"
 #include "tests/wgpu_completion_probe.h"
 
 #include <vri/vri.h>
@@ -140,6 +141,32 @@ namespace
         }
         vriDestroyDevice(device);
         return ok;
+    }
+
+    // A submission waiting on an earlier submission's fence: both submits succeed in the same turn of the event
+    // loop without a CPU wait (the fence cannot advance before the page yields, so it still reads 0), and the
+    // second submission sees the first's data once the page has yielded. A never-signalled value is refused.
+    bool QueueWaitProbe()
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = VriGraphicsAPI_WebGPU;
+        VriDevice* dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface             c {};
+        vri::test::OrderedWaitResult r;
+        const bool ran = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                         vri::test::RunOrderedWait(dev, c, r) == 0;
+        const VriResult unsignaled = ran ? vri::test::SubmitUnsignaledWait(dev, c) : VriResult_Failure;
+        std::printf("VRI_WEBGPU_STEP: queue wait submits %d/%d, fence after submit %llu, data %d, unsignaled wait %d\n",
+                    static_cast<int>(r.submitA),
+                    static_cast<int>(r.submitB),
+                    static_cast<unsigned long long>(r.fenceAfterSubmit),
+                    r.dataOk ? 1 : 0,
+                    static_cast<int>(unsignaled));
+        vriDestroyDevice(dev);
+        return ran && r.submitA == VriResult_Success && r.submitB == VriResult_Success && r.fenceAfterSubmit == 0 &&
+               r.dataOk && unsignaled == VriResult_InvalidArgument;
     }
 
     // A fence destroyed while its submission is in flight (the browser cannot wait for it first): the queue stays
@@ -526,11 +553,12 @@ int main()
     const bool compressed = CompressedProbe();
     const bool features   = FeatureProbe(VriGraphicsAPI_WebGPU);
     const bool copies     = CopyProbe();
+    const bool queueWait  = QueueWaitProbe();
     const bool fences     = FenceDestroyProbe();
-    const bool pass =
-        ran && centerRed && compute && completion && mapAsync && compressed && features && copies && fences;
+    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies &&
+                      queueWait && fences;
     std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
-                "features=%d copies=%d fences=%d)\n",
+                "features=%d copies=%d queueWait=%d fences=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
@@ -540,6 +568,7 @@ int main()
                 compressed ? 1 : 0,
                 features ? 1 : 0,
                 copies ? 1 : 0,
+                queueWait ? 1 : 0,
                 fences ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)

@@ -11,6 +11,7 @@
 #include "tests/buffer_texture_copy_probe.h"
 #include "tests/gl_compressed_probe.h"
 #include "tests/map_async_probe.h"
+#include "tests/queue_wait_probe.h"
 
 #include <vri/ext/vri_ext_swapchain.h>
 #include <vri/vri.h>
@@ -2276,6 +2277,32 @@ namespace
         return ok;
     }
 
+    // A submission waiting on an earlier submission's fence: both submits succeed in the same turn of the event
+    // loop without a CPU wait (the fence cannot advance before the page yields, so it still reads 0), and the
+    // second submission sees the first's data once the page has yielded. A never-signalled value is refused.
+    bool QueueWaitProbe()
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = VriGraphicsAPI_OpenGLES;
+        VriDevice* dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface             c {};
+        vri::test::OrderedWaitResult r;
+        const bool ran = vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success &&
+                         vri::test::RunOrderedWait(dev, c, r) == 0;
+        const VriResult unsignaled = ran ? vri::test::SubmitUnsignaledWait(dev, c) : VriResult_Failure;
+        std::printf("VRI_WEBGL_STEP: queue wait submits %d/%d, fence after submit %llu, data %d, unsignaled wait %d\n",
+                    static_cast<int>(r.submitA),
+                    static_cast<int>(r.submitB),
+                    static_cast<unsigned long long>(r.fenceAfterSubmit),
+                    r.dataOk ? 1 : 0,
+                    static_cast<int>(unsignaled));
+        vriDestroyDevice(dev);
+        return ran && r.submitA == VriResult_Success && r.submitB == VriResult_Success && r.fenceAfterSubmit == 0 &&
+               r.dataOk && unsignaled == VriResult_InvalidArgument;
+    }
+
     // WebGL2 MSAA: render the solid triangle into a 4x multisample renderbuffer and
     // resolve to a single-sample texture. Antialiasing => some resolved edge pixel has
     // partial red (0 < R < 255), impossible with single-sampling. (WebGL2 has no
@@ -2690,6 +2717,7 @@ int main()
     const bool featurePass    = FeatureProbe(VriGraphicsAPI_OpenGLES);
     const bool copyPass       = CopyProbe();
     const bool compressedPass = CompressedProbe();
+    const bool queueWaitPass  = QueueWaitProbe();
 
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
@@ -2701,12 +2729,12 @@ int main()
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
                       instPass && scissorPass && computeNoPass && secondPass && mapAsyncPass && validationPass &&
-                      featurePass && copyPass && compressedPass && msaaPass && swapPass;
+                      featurePass && copyPass && compressedPass && queueWaitPass && msaaPass && swapPass;
     std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
                 "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | validation-state: %d | features: %d | "
-                "copies: %d | compressed: %d | "
+                "copies: %d | compressed: %d | queue-wait: %d | "
                 "msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ranTri,
@@ -2739,6 +2767,7 @@ int main()
                 featurePass,
                 copyPass,
                 compressedPass,
+                queueWaitPass,
                 ranMsaa,
                 msaaEdge,
                 ranSwap,
