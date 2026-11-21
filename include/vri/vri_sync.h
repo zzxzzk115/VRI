@@ -22,6 +22,10 @@ typedef struct VriFenceSubmitDesc
     VriPipelineStageFlags stages; /* stages that wait / that must complete */
 } VriFenceSubmitDesc;
 
+/* waitFences order work on the GPU: the submission's commands start after each fence reaches its value. The
+   host does not wait. WebGPU and GL have one queue (every VriQueueType is the same one), where submission order
+   already places the work after any earlier submission that signals the value; there a wait on a value that no
+   earlier submission signals is VriResult_InvalidArgument. */
 typedef struct VriQueueSubmitDesc
 {
     const VriFenceSubmitDesc* waitFences;
