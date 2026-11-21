@@ -286,9 +286,12 @@ typedef struct VriCoreInterface
      *
      * `callback` runs exactly once: from the browser event loop for a browser WebGPU buffer other
      * than a host-upload one, otherwise before MapBufferAsync returns, with the result MapBuffer
-     * gives. The buffer must stay alive and unmapped until the callback has run; release the mapping
-     * with UnmapBuffer. Returns VriResult_InvalidArgument, without calling `callback`, when `buffer`
-     * or `callback` is NULL. */
+     * gives. Release the mapping with UnmapBuffer. Destroying the buffer while its browser map is in
+     * flight cancels it: `callback` runs inside DestroyBuffer with VriResult_Failure and NULL data, and
+     * the browser's later answer is dropped. UnmapBuffer during that map makes the browser abort it:
+     * `callback` then runs from the event loop with VriResult_Failure, and the device reports an
+     * error. The device must outlive the buffer. Returns VriResult_InvalidArgument, without calling
+     * `callback`, when `buffer` or `callback` is NULL. */
     VriResult(VRI_CALL* MapBufferAsync)(VriBuffer*              buffer,
                                         uint64_t                offset,
                                         uint64_t                size,
