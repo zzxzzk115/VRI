@@ -23,8 +23,12 @@ namespace vri::vk
         VkExtent2D              extent;
         VkPresentModeKHR        presentMode;
         std::vector<TextureVK*> textures; // wrap swapchain images (not owned)
-        VkFence                 acquireFence;
-        uint32_t                currentIndex;
+        // Binary semaphores, one per image, that Present signals once its wait fence is reached and hands to
+        // vkQueuePresentKHR. The one for an image is signalled again only after that image has been acquired again,
+        // and so after the present that waited on it.
+        std::vector<VkSemaphore> presentSemaphores;
+        VkFence                  acquireFence;
+        uint32_t                 currentIndex;
         // original creation request (reused on Resize)
         VriFormat      requestedFormat;
         uint32_t       requestedTextureNum;

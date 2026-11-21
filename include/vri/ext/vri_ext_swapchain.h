@@ -87,6 +87,11 @@ typedef struct VriSwapChainDesc
 
 typedef struct VriSwapChainInterface
 {
+    /* `format` must be one the window's surface takes. Vulkan and WebGPU return VriResult_Unsupported,
+       creating nothing, when the surface does not list it (WebGPU compares the channel format and takes
+       sRGB from the view), so the caller can try another. D3D12 returns VriResult_Unsupported for a
+       format with no DXGI equivalent and VriResult_Failure for one the flip model rejects. GL and Metal
+       fall back to RGBA8 and BGRA8 respectively for a format they cannot map. */
     VriResult(VRI_CALL* CreateSwapChain)(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** outSwapChain);
     void(VRI_CALL* DestroySwapChain)(VriSwapChain* swapChain);
 
@@ -98,7 +103,16 @@ typedef struct VriSwapChainInterface
                                             VriFence*     acquireFence,
                                             uint64_t      signalValue,
                                             uint32_t*     outIndex);
+    /* Presents the image acquired last. With `waitFence`, the present waits on the GPU until the fence
+       reaches `waitValue`, so the app does not wait for its render work on the host. Vulkan turns the
+       wait into a binary semaphore for vkQueuePresentKHR, and Metal encodes an event wait. D3D12, GL and
+       WebGPU ignore the fence: D3D12 presents after the work already submitted to the swapchain's queue,
+       but not after work on another queue; GL and WebGPU have one queue and present after all work
+       already submitted. With a NULL `waitFence`, Vulkan presents without waiting, so wait for the
+       render work on the host first. */
     VriResult(VRI_CALL* Present)(VriSwapChain* swapChain, VriFence* waitFence, uint64_t waitValue);
+    /* Rebuilds the images at the new size with the creation format. On Vulkan it returns
+       VriResult_Unsupported, keeping the old images, if the surface no longer lists that format. */
     VriResult(VRI_CALL* Resize)(VriSwapChain* swapChain, uint32_t width, uint32_t height);
 
     /* The extent the swapchain was ACTUALLY created with. May differ from the size passed to

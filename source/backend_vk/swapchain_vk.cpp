@@ -1,8 +1,8 @@
 // swapchain_vk.cpp - Vulkan swapchain (presentation) implementation.
 //
-// Phase-1 swapchain: correct but serialized (the app CPU-waits its render fence
-// before Present, so no binary-semaphore frame pipelining yet). A pipelined
-// path with per-frame binary acquire/present semaphores is a later refinement.
+// AcquireNextTexture waits on the host until the image is available. Present waits on the GPU: given a fence, it
+// submits a wait for the fence's value that signals the image's binary semaphore, and vkQueuePresentKHR waits on
+// that semaphore, so the app does not wait for its render work before presenting.
 
 #if defined(_WIN32)
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -29,6 +29,7 @@ namespace vri::vk
         inline SwapChainVK* SC(VriSwapChain* h) { return reinterpret_cast<SwapChainVK*>(h); }
         inline DeviceVK*    Dev(VriDevice* h) { return reinterpret_cast<DeviceVK*>(h); }
         inline QueueVK*     Q(VriQueue* h) { return reinterpret_cast<QueueVK*>(h); }
+        inline FenceVK*     Fen(VriFence* h) { return reinterpret_cast<FenceVK*>(h); }
 
 #if !defined(_WIN32) && !defined(__APPLE__)
         // Android / Wayland / Xlib surface creation without pulling <android/native_window.h>,
@@ -134,11 +135,15 @@ namespace vri::vk
             return surface;
         }
 
+        // The caller has waited for the device to go idle, so no present still waits on these semaphores.
         void DestroyTextures(SwapChainVK* sc)
         {
             for (TextureVK* t : sc->textures)
                 delete t; // images are owned by the swapchain, not freed here
             sc->textures.clear();
+            for (VkSemaphore semaphore : sc->presentSemaphores)
+                sc->device->Vkd().vkDestroySemaphore(sc->device->Device(), semaphore, nullptr);
+            sc->presentSemaphores.clear();
         }
 
         VriResult BuildSwapchain(SwapChainVK*   sc,
@@ -160,17 +165,23 @@ namespace vri::vk
             std::vector<VkSurfaceFormatKHR> formats(formatCount);
             d->Vki().vkGetPhysicalDeviceSurfaceFormatsKHR(phys, sc->surface, &formatCount, formats.data());
 
+            // The requested format, or Unsupported: the caller's texture views and pipelines are built for it, and
+            // it may try another one. A surface always lists at least one format, so an empty list means the query
+            // failed; the swapchain is then created with the requested format and vkCreateSwapchainKHR decides.
             const VkFormat     wanted = ToVkFormat(format);
-            VkSurfaceFormatKHR chosen =
-                formats.empty() ? VkSurfaceFormatKHR {wanted, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR} : formats[0];
+            VkSurfaceFormatKHR chosen = {wanted, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+            bool               listed = formats.empty();
             for (const VkSurfaceFormatKHR& f : formats)
             {
                 if (f.format == wanted)
                 {
                     chosen = f;
+                    listed = true;
                     break;
                 }
             }
+            if (!listed)
+                return VriResult_Unsupported;
 
             // present mode: map the requested VriPresentMode -> VkPresentModeKHR, falling back to FIFO
             // (the only mode guaranteed present) with a warning if the surface lacks the requested one.
@@ -272,8 +283,21 @@ namespace vri::vk
             d->Vkd().vkGetSwapchainImagesKHR(d->Device(), sc->swapchain, &count, images.data());
 
             sc->textures.reserve(count);
+            sc->presentSemaphores.reserve(count);
             for (VkImage image : images)
             {
+                const VkSemaphoreCreateInfo sci       = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+                VkSemaphore                 semaphore = VK_NULL_HANDLE;
+                if (d->Vkd().vkCreateSemaphore(d->Device(), &sci, nullptr, &semaphore) != VK_SUCCESS)
+                {
+                    // The old swapchain is already gone; leave none rather than one without semaphores.
+                    DestroyTextures(sc);
+                    d->Vkd().vkDestroySwapchainKHR(d->Device(), sc->swapchain, nullptr);
+                    sc->swapchain = VK_NULL_HANDLE;
+                    return VriResult_Failure;
+                }
+                sc->presentSemaphores.push_back(semaphore);
+
                 TextureVK* t  = new TextureVK {};
                 t->device     = d;
                 t->image      = image;
@@ -394,14 +418,39 @@ namespace vri::vk
             return VriResult_Success;
         }
 
-        VriResult VRI_CALL Present(VriSwapChain* swapChain, VriFence* /*waitFence*/, uint64_t /*waitValue*/)
+        VriResult VRI_CALL Present(VriSwapChain* swapChain, VriFence* waitFence, uint64_t waitValue)
         {
             SwapChainVK*     sc = SC(swapChain);
             VkPresentInfoKHR pi = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-            pi.swapchainCount   = 1;
-            pi.pSwapchains      = &sc->swapchain;
-            pi.pImageIndices    = &sc->currentIndex;
-            VkResult r          = sc->device->Vkd().vkQueuePresentKHR(sc->presentQueue, &pi);
+            if (waitFence)
+            {
+                if (Fen(waitFence)->device != sc->device)
+                    return VriResult_InvalidArgument;
+                // vkQueuePresentKHR waits only on binary semaphores: an empty submission turns the fence's value
+                // into the image's binary semaphore.
+                const VkSemaphore* ready = &sc->presentSemaphores[sc->currentIndex]; // read by vkQueuePresentKHR below
+                VkSemaphoreSubmitInfo wait   = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                wait.semaphore               = Fen(waitFence)->timeline;
+                wait.value                   = waitValue;
+                wait.stageMask               = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                VkSemaphoreSubmitInfo signal = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                signal.semaphore             = *ready;
+                signal.stageMask             = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                VkSubmitInfo2 si             = {VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+                si.waitSemaphoreInfoCount    = 1;
+                si.pWaitSemaphoreInfos       = &wait;
+                si.signalSemaphoreInfoCount  = 1;
+                si.pSignalSemaphoreInfos     = &signal;
+                const VkResult submitted     = sc->device->Ext().QueueSubmit2(sc->presentQueue, 1, &si, VK_NULL_HANDLE);
+                if (submitted != VK_SUCCESS)
+                    return submitted == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
+                pi.waitSemaphoreCount = 1;
+                pi.pWaitSemaphores    = ready;
+            }
+            pi.swapchainCount = 1;
+            pi.pSwapchains    = &sc->swapchain;
+            pi.pImageIndices  = &sc->currentIndex;
+            VkResult r        = sc->device->Vkd().vkQueuePresentKHR(sc->presentQueue, &pi);
             if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
                 return VriResult_OutOfDate;
             return r == VK_SUCCESS ? VriResult_Success : VriResult_Failure;

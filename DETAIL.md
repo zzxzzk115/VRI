@@ -84,6 +84,16 @@ more arrives from the browser. `UnmapBuffer` before then aborts the map, and the
 `VriResult_Failure`. Every other backend maps on the calling thread and calls back before returning, so wait
 for the work (a fence) first, as for `MapBuffer`.
 
+`Present(swapChain, waitFence, waitValue)` waits on the GPU for `waitFence` to reach `waitValue`, so a frame
+can be submitted and presented without a host wait. Vulkan submits that wait on the present queue, signalling
+a binary semaphore per swapchain image that `vkQueuePresentKHR` waits on. Metal encodes the wait in the
+command buffer that presents. D3D12, GL and WebGPU ignore the fence. D3D12 presents after the work already
+submitted to the swapchain's queue, but not after work on another queue. GL and WebGPU have one queue and
+present after everything submitted before. On Vulkan, a present without a fence does not wait at all.
+`CreateSwapChain` on Vulkan and WebGPU returns `VriResult_Unsupported` for a format the surface does not
+list, and never substitutes another. D3D12 returns `VriResult_Unsupported` or `VriResult_Failure` for
+formats it cannot present. GL and Metal still substitute RGBA8 and BGRA8 for formats they cannot map.
+
 `UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
 are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during
 layout creation instead of silently binding only the first element. WebGPU also rejects partially-bound and
