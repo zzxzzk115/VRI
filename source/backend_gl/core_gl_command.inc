@@ -1167,12 +1167,20 @@ VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit
         if (Fen(signal.fence)->device != q->device || signal.value <= Fen(signal.fence)->submittedValue)
             return VriResult_InvalidArgument;
     }
+    // One context runs its commands in the order they are recorded: a wait on a value an earlier submission
+    // signals is already ordered on the GPU and needs no host wait. A value no submission signals can never arrive
+    // before this one.
     for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
     {
-        const auto&     wait   = submit->waitFences[i];
-        const VriResult status = WaitForFence(wait.fence, wait.value, UINT64_MAX);
-        if (status != VriResult_Success)
-            return status;
+        const auto&    wait = submit->waitFences[i];
+        const FenceGL* f    = Fen(wait.fence);
+        if (f->failed)
+            return VriResult_Failure;
+        if (wait.value > f->submittedValue)
+        {
+            q->device->ReportError("QueueSubmit: a wait fence value that no earlier submission signals");
+            return VriResult_InvalidArgument;
+        }
     }
     for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
     {

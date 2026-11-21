@@ -1863,12 +1863,20 @@ namespace vri::wgpu
             wgpuDevicePoll(q->device->Device(), false, nullptr);
 #endif
             DrainCompletions(q);
+            // Every logical queue is the one native queue, which runs submissions in submission order: a wait on a
+            // value an earlier submission signals is already ordered on the GPU and needs no host wait. A value no
+            // submission signals can never arrive before this one.
             for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
             {
-                const auto&     wait   = submit->waitFences[i];
-                const VriResult status = WaitForFence(wait.fence, wait.value, UINT64_MAX);
-                if (status != VriResult_Success)
-                    return status;
+                const auto& wait = submit->waitFences[i];
+                FenceWGPU*  f    = Fen(wait.fence);
+                if (f->failed.load(std::memory_order_acquire))
+                    return VriResult_DeviceLost;
+                if (wait.value > f->submittedValue)
+                {
+                    q->device->ReportError("QueueSubmit: a wait fence value that no earlier submission signals");
+                    return VriResult_InvalidArgument;
+                }
             }
 
             std::vector<WGPUCommandBuffer> commands;
