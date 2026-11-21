@@ -428,13 +428,13 @@ namespace vri::vk
                     return VriResult_InvalidArgument;
                 // vkQueuePresentKHR waits only on binary semaphores: an empty submission turns the fence's value
                 // into the image's binary semaphore.
-                VkSemaphore           ready  = sc->presentSemaphores[sc->currentIndex];
+                const VkSemaphore* ready = &sc->presentSemaphores[sc->currentIndex]; // read by vkQueuePresentKHR below
                 VkSemaphoreSubmitInfo wait   = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
                 wait.semaphore               = Fen(waitFence)->timeline;
                 wait.value                   = waitValue;
                 wait.stageMask               = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 VkSemaphoreSubmitInfo signal = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
-                signal.semaphore             = ready;
+                signal.semaphore             = *ready;
                 signal.stageMask             = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 VkSubmitInfo2 si             = {VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
                 si.waitSemaphoreInfoCount    = 1;
@@ -445,7 +445,7 @@ namespace vri::vk
                 if (submitted != VK_SUCCESS)
                     return submitted == VK_ERROR_DEVICE_LOST ? VriResult_DeviceLost : VriResult_Failure;
                 pi.waitSemaphoreCount = 1;
-                pi.pWaitSemaphores    = &ready;
+                pi.pWaitSemaphores    = ready;
             }
             pi.swapchainCount = 1;
             pi.pSwapchains    = &sc->swapchain;
