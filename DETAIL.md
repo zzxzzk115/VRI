@@ -65,7 +65,9 @@ OpenGL retains its current-native-context requirement; immutable convention quer
 `UINT64_MAX`. `VriResult_Timeout` leaves the completed value unchanged. `Wait()` remains the infinite-wait
 convenience entry and reports errors through the device callback. A successful submit accepts work; it does
 not establish completion. Keep command storage, descriptors, resources and signaled fences alive until their
-last GPU use has completed. Host waits, object destruction and new submissions must follow the
+last GPU use has completed. The one exception is a fence on the WebGPU and GL backends, where a browser host
+cannot wait for the GPU: it may be destroyed while a submission that signals it is still in flight. Vulkan,
+D3D12 and Metal keep the rule. Host waits, object destruction and new submissions must follow the
 [threading contract](docs/threading.md).
 
 Vulkan/D3D12/Metal use native timeline primitives. GL tracks `GLsync` objects instead of publishing requested

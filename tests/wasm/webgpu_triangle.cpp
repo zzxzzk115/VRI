@@ -9,6 +9,7 @@
 
 #include "tests/buffer_texture_copy_probe.h"
 #include "tests/compressed_format_probe.h"
+#include "tests/fence_destroy_probe.h"
 #include "tests/map_async_probe.h"
 #include "tests/wgpu_completion_probe.h"
 
@@ -139,6 +140,25 @@ namespace
         }
         vriDestroyDevice(device);
         return ok;
+    }
+
+    // A fence destroyed while its submission is in flight (the browser cannot wait for it first): the queue stays
+    // usable, and a later fence still completes.
+    bool FenceDestroyProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        int              failure = __LINE__;
+        if (vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success)
+            failure = vri::test::CheckFenceDestroyedInFlight(device, c);
+        if (failure)
+            std::printf("WebGPU fence destroyed in flight failed at line %d\n", failure);
+        vriDestroyDevice(device);
+        return failure == 0;
     }
 
     bool RenderAndProbe(bool& centerRed)
@@ -506,9 +526,11 @@ int main()
     const bool compressed = CompressedProbe();
     const bool features   = FeatureProbe(VriGraphicsAPI_WebGPU);
     const bool copies     = CopyProbe();
-    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies;
+    const bool fences     = FenceDestroyProbe();
+    const bool pass =
+        ran && centerRed && compute && completion && mapAsync && compressed && features && copies && fences;
     std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
-                "features=%d copies=%d)\n",
+                "features=%d copies=%d fences=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
@@ -517,7 +539,8 @@ int main()
                 mapAsync ? 1 : 0,
                 compressed ? 1 : 0,
                 features ? 1 : 0,
-                copies ? 1 : 0);
+                copies ? 1 : 0,
+                fences ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);
