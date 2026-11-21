@@ -365,7 +365,8 @@ namespace vri::wgpu
             BufferWGPU* b = Buf(buffer);
 #if defined(__EMSCRIPTEN__)
             // Destroying the buffer cancels its MapBufferAsync: VRI's callback runs here, once, with failure. The
-            // browser's later answer finds the request cancelled and only frees it.
+            // browser's answer (an abort, from wgpuBufferRelease below) finds the request cancelled and only frees it.
+            // A buffer has at most one: UnmapBuffer's abort calls back inside wgpuBufferUnmap and clears pendingMap.
             if (AsyncMapWGPU* request = std::exchange(b->pendingMap, nullptr))
             {
                 request->cancelled = true;

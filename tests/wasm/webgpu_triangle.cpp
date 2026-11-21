@@ -190,20 +190,12 @@ namespace
     }
 
     // DestroyBuffer while a MapBufferAsync is in flight cancels it: one failed callback before DestroyBuffer
-    // returns, nothing more once the page yields, and the device keeps working.
+    // returns, nothing more once the page yields, and the device keeps working. UnmapBuffer aborts a map inside the
+    // call.
     bool MapCancelProbe()
     {
-        int       unmapCalls  = 0;
-        VriResult unmapResult = VriResult_Success;
-        int       unmapErrors = 0;
-        const int failure     = vri::test::CheckMapCancelledByDestroy(unmapCalls, unmapResult, unmapErrors);
-        std::printf("VRI_WEBGPU_STEP: map cancelled by destroy %s (line %d); unmap during the map: %d callback(s), "
-                    "result %d, %d error(s)\n",
-                    failure ? "FAILED" : "ok",
-                    failure,
-                    unmapCalls,
-                    static_cast<int>(unmapResult),
-                    unmapErrors);
+        const int failure = vri::test::CheckMapCancelledByDestroy();
+        std::printf("VRI_WEBGPU_STEP: map cancelled by destroy %s (line %d)\n", failure ? "FAILED" : "ok", failure);
         return failure == 0;
     }
 

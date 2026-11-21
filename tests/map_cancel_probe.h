@@ -1,12 +1,11 @@
-// Browser WebGPU: what becomes of a MapBufferAsync that is still in flight. DestroyBuffer cancels it: the callback
-// runs once, with VriResult_Failure, before DestroyBuffer returns, and the browser's late answer neither calls back
-// again nor reports an error. UnmapBuffer while in flight is recorded too. Only meaningful in the browser, where
-// the map completes from the event loop.
+// Browser WebGPU: what becomes of a MapBufferAsync that has not called back yet. DestroyBuffer cancels it: the
+// callback runs once, with VriResult_Failure, before DestroyBuffer returns, and nothing more arrives, neither a
+// second callback nor an error. UnmapBuffer aborts it inside the call, so a map issued after it is the only one
+// left for DestroyBuffer to cancel. Only meaningful in the browser, where a map completes from the event loop.
 #pragma once
 
 #include <vri/vri.h>
 
-#include <cstdio>
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #endif
@@ -52,9 +51,10 @@ namespace vri::test
         return c.CreateBuffer(device, &bd, &buffer) == VriResult_Success ? buffer : nullptr;
     }
 
-    // Returns 0 when DestroyBuffer cancelled the map as specified, else the failing line. `unmapCalls`,
-    // `unmapResult` and `unmapErrors` report what UnmapBuffer during the map led to, once the page had yielded.
-    inline int CheckMapCancelledByDestroy(int& unmapCalls, VriResult& unmapResult, int& unmapErrors)
+    inline bool Failed(const MapCancelState& state) { return state.calls == 1 && state.result != VriResult_Success; }
+
+    // Returns 0 when in-flight maps ended as specified, else the failing line.
+    inline int CheckMapCancelledByDestroy()
     {
         int                   errors    = 0;
         VriCallbackInterface  callbacks = {&errors, CountMapErrors};
@@ -69,34 +69,44 @@ namespace vri::test
             return __LINE__;
 
         int failure = 0;
-        // DestroyBuffer with the map in flight: one failed callback before it returns.
+        // DestroyBuffer with the map in flight: one failed callback before it returns, nothing after.
         MapCancelState destroyed;
         VriBuffer*     buffer = CreateReadback(device, c);
         if (!buffer || c.MapBufferAsync(buffer, 0, 256, RecordCancelledMap, &destroyed) != VriResult_Success)
             failure = __LINE__;
         if (!failure && destroyed.calls != 0)
             failure = __LINE__; // the browser map cannot have completed yet
-        c.DestroyBuffer(buffer);
-        if (!failure && (destroyed.calls != 1 || destroyed.result == VriResult_Success || destroyed.data))
+        if (buffer)
+            c.DestroyBuffer(buffer);
+        if (!failure && (!Failed(destroyed) || destroyed.data))
             failure = __LINE__;
-        YieldToBrowser(); // the browser's answer to the cancelled map arrives here
+        YieldToBrowser();
         if (!failure && (destroyed.calls != 1 || errors != 0))
             failure = __LINE__;
 
-        // UnmapBuffer with the map in flight: recorded, not required to succeed.
-        MapCancelState unmapped;
-        const int      errorsBeforeUnmap = errors;
-        buffer                           = CreateReadback(device, c);
-        if (!failure && buffer && c.MapBufferAsync(buffer, 0, 256, RecordCancelledMap, &unmapped) == VriResult_Success)
+        // UnmapBuffer aborts the map inside the call and reports an error; DestroyBuffer then cancels only the map
+        // issued after it.
+        MapCancelState aborted;
+        MapCancelState remapped;
+        buffer = CreateReadback(device, c);
+        if (!failure &&
+            (!buffer || c.MapBufferAsync(buffer, 0, 256, RecordCancelledMap, &aborted) != VriResult_Success))
+            failure = __LINE__;
+        if (!failure)
         {
             c.UnmapBuffer(buffer);
-            YieldToBrowser();
+            if (!Failed(aborted) || errors != 1)
+                failure = __LINE__;
         }
-        unmapCalls  = unmapped.calls;
-        unmapResult = unmapped.result;
-        unmapErrors = errors - errorsBeforeUnmap;
+        if (!failure && c.MapBufferAsync(buffer, 0, 256, RecordCancelledMap, &remapped) != VriResult_Success)
+            failure = __LINE__;
         if (buffer)
             c.DestroyBuffer(buffer);
+        if (!failure && (aborted.calls != 1 || !Failed(remapped)))
+            failure = __LINE__;
+        YieldToBrowser();
+        if (!failure && (aborted.calls != 1 || remapped.calls != 1 || errors != 1))
+            failure = __LINE__;
 
         // The device is still usable: a fresh map completes.
         MapCancelState fresh;

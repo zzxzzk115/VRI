@@ -78,9 +78,10 @@ queues. WebGL/WebGPU host waits yield to the browser through Emscripten Asyncify
 without it, an unbounded wait reports an error and a bounded one returns `VriResult_Timeout`.
 `MapBufferAsync` reads a browser WebGPU buffer back without a wait: the browser maps it once the work already
 submitted that uses it has finished, and the callback runs from the event loop. Destroying the buffer before
-then cancels the map: the callback runs once, inside `DestroyBuffer`, with `VriResult_Failure`, and the
-browser's later answer is ignored. Every other backend maps on the calling thread and calls back before
-returning, so wait for the work (a fence) first, as for `MapBuffer`.
+then cancels the map: the callback runs once, inside `DestroyBuffer`, with `VriResult_Failure`, and nothing
+more arrives from the browser. `UnmapBuffer` before then aborts the map, and the callback runs inside it with
+`VriResult_Failure`. Every other backend maps on the calling thread and calls back before returning, so wait
+for the work (a fence) first, as for `MapBuffer`.
 
 `UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
 are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during
