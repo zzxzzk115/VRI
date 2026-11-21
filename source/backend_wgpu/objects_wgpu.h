@@ -51,6 +51,24 @@ namespace vri::wgpu
         std::vector<WGPUBuffer> tempUploads;
     };
 
+#if defined(__EMSCRIPTEN__)
+    struct BufferWGPU;
+    // One browser MapBufferAsync request, alive until wgpuBufferMapAsync's callback has run. DestroyBuffer cancels it
+    // (VRI's callback runs there; the browser's later answer only frees this record), and destroying the device
+    // clears `device` so that answer never reaches it.
+    struct AsyncMapWGPU
+    {
+        DeviceWGPU*             device;
+        BufferWGPU*             buffer;
+        WGPUMapMode             mode;
+        uint64_t                offset;
+        uint64_t                range;
+        VriBufferMappedCallback callback;
+        void*                   userData;
+        bool                    cancelled = false;
+    };
+#endif
+
     struct BufferWGPU
     {
         DeviceWGPU* device;
@@ -64,6 +82,9 @@ namespace vri::wgpu
         uint8_t* shadow    = nullptr; // non-null => use the shadow + queueWriteBuffer path
         uint64_t mapOffset = 0;       // current MapBuffer range, flushed on Unmap
         uint64_t mapLen    = 0;
+#if defined(__EMSCRIPTEN__)
+        AsyncMapWGPU* pendingMap = nullptr; // the MapBufferAsync in flight, if any
+#endif
     };
 
     struct TextureWGPU

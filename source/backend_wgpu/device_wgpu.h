@@ -34,6 +34,11 @@ namespace vri::wgpu
         bool                 HasTimestamp() const { return m_hasTimestamp; }
         bool                 HasFloat32Filterable() const { return m_hasFloat32Filterable; }
 
+#if defined(__EMSCRIPTEN__)
+        // Browser MapBufferAsync requests in flight; the device's destruction detaches them from it.
+        std::vector<AsyncMapWGPU*>& PendingMaps() { return m_pendingMaps; }
+#endif
+
         void ReportError(const char* message) const;
         void ReportWarning(const char* message) const;
         // Route a backend diagnostic (native WebGPU error/warning) to the app's callback.
@@ -61,6 +66,9 @@ namespace vri::wgpu
         InitCallback             m_initDone     = nullptr;
         void*                    m_initUserData = nullptr;
         VriCoordinateConventions m_coordinates  = {};
+#if defined(__EMSCRIPTEN__)
+        std::vector<AsyncMapWGPU*> m_pendingMaps;
+#endif
     };
 
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);

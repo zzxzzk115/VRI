@@ -11,6 +11,7 @@
 #include "tests/compressed_format_probe.h"
 #include "tests/fence_destroy_probe.h"
 #include "tests/map_async_probe.h"
+#include "tests/map_cancel_probe.h"
 #include "tests/queue_wait_probe.h"
 #include "tests/wgpu_completion_probe.h"
 
@@ -185,6 +186,16 @@ namespace
         if (failure)
             std::printf("WebGPU fence destroyed in flight failed at line %d\n", failure);
         vriDestroyDevice(device);
+        return failure == 0;
+    }
+
+    // DestroyBuffer while a MapBufferAsync is in flight cancels it: one failed callback before DestroyBuffer
+    // returns, nothing more once the page yields, and the device keeps working. UnmapBuffer aborts a map inside the
+    // call.
+    bool MapCancelProbe()
+    {
+        const int failure = vri::test::CheckMapCancelledByDestroy();
+        std::printf("VRI_WEBGPU_STEP: map cancelled by destroy %s (line %d)\n", failure ? "FAILED" : "ok", failure);
         return failure == 0;
     }
 
@@ -555,10 +566,11 @@ int main()
     const bool copies     = CopyProbe();
     const bool queueWait  = QueueWaitProbe();
     const bool fences     = FenceDestroyProbe();
+    const bool mapCancel  = MapCancelProbe();
     const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies &&
-                      queueWait && fences;
+                      queueWait && fences && mapCancel;
     std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
-                "features=%d copies=%d queueWait=%d fences=%d)\n",
+                "features=%d copies=%d queueWait=%d fences=%d mapCancel=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
@@ -569,7 +581,8 @@ int main()
                 features ? 1 : 0,
                 copies ? 1 : 0,
                 queueWait ? 1 : 0,
-                fences ? 1 : 0);
+                fences ? 1 : 0,
+                mapCancel ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);

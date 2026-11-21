@@ -79,6 +79,12 @@ namespace vri::wgpu
 
     DeviceWGPU::~DeviceWGPU()
     {
+#if defined(__EMSCRIPTEN__)
+        // A buffer outliving its device is the caller's error, but the browser's answer to its in-flight map must
+        // not reach the destroyed device.
+        for (AsyncMapWGPU* request : m_pendingMaps)
+            request->device = nullptr;
+#endif
         if (m_device)
             PollDevice(m_device);
         // Release the queue too (wgpuDeviceGetQueue returns an owned ref that holds the

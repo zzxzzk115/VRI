@@ -363,6 +363,18 @@ namespace vri::wgpu
             if (!buffer)
                 return;
             BufferWGPU* b = Buf(buffer);
+#if defined(__EMSCRIPTEN__)
+            // Destroying the buffer cancels its MapBufferAsync: VRI's callback runs here, once, with failure. The
+            // browser's answer (an abort, from wgpuBufferRelease below) finds the request cancelled and only frees it.
+            // A buffer has at most one: UnmapBuffer's abort calls back inside wgpuBufferUnmap and clears pendingMap.
+            if (AsyncMapWGPU* request = std::exchange(b->pendingMap, nullptr))
+            {
+                request->cancelled = true;
+                if (request->device)
+                    std::erase(request->device->PendingMaps(), request);
+                request->callback(request->userData, VriResult_Failure, nullptr);
+            }
+#endif
             b->device->Objects().Untrack(buffer);
             delete[] b->shadow;
             wgpuBufferRelease(b->buffer);
@@ -435,32 +447,28 @@ namespace vri::wgpu
         }
 
 #if defined(__EMSCRIPTEN__)
-        // One browser MapBufferAsync request, alive until its callback has run.
-        struct AsyncMap
-        {
-            DeviceWGPU*             device;
-            WGPUBuffer              buffer;
-            WGPUMapMode             mode;
-            uint64_t                offset;
-            uint64_t                range;
-            VriBufferMappedCallback callback;
-            void*                   userData;
-        };
-
         void OnAsyncMap(WGPUMapAsyncStatus status, WGPUStringView message, void* ud1, void*)
         {
-            const std::unique_ptr<AsyncMap> request(static_cast<AsyncMap*>(ud1));
+            const std::unique_ptr<AsyncMapWGPU> request(static_cast<AsyncMapWGPU*>(ud1));
+            if (request->cancelled) // DestroyBuffer already called back; the buffer is gone
+                return;
+            request->buffer->pendingMap = nullptr;
+            if (request->device)
+                std::erase(request->device->PendingMaps(), request.get());
             if (status != WGPUMapAsyncStatus_Success)
             {
-                std::string text = "MapBufferAsync: wgpuBufferMapAsync failed";
-                if (message.data && message.length)
-                    text.append(": ").append(
-                        message.data, message.length == WGPU_STRLEN ? std::strlen(message.data) : message.length);
-                request->device->ReportError(text.c_str());
+                if (request->device)
+                {
+                    std::string text = "MapBufferAsync: wgpuBufferMapAsync failed";
+                    if (message.data && message.length)
+                        text.append(": ").append(
+                            message.data, message.length == WGPU_STRLEN ? std::strlen(message.data) : message.length);
+                    request->device->ReportError(text.c_str());
+                }
                 request->callback(request->userData, VriResult_Failure, nullptr);
                 return;
             }
-            void* data = MappedRange(request->buffer, request->mode, request->offset, request->range);
+            void* data = MappedRange(request->buffer->buffer, request->mode, request->offset, request->range);
             request->callback(request->userData, data ? VriResult_Success : VriResult_Failure, data);
         }
 #endif
@@ -477,9 +485,11 @@ namespace vri::wgpu
             BufferWGPU* b = buffer ? Buf(buffer) : nullptr;
             if (b && callback && !b->shadow)
             {
-                const WGPUMapMode mode  = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
-                const uint64_t    range = size ? size : WGPU_WHOLE_MAP_SIZE;
-                auto* request           = new AsyncMap {b->device, b->buffer, mode, offset, range, callback, userData};
+                const WGPUMapMode mode    = b->mapMode != WGPUMapMode_None ? b->mapMode : WGPUMapMode_Read;
+                const uint64_t    range   = size ? size : WGPU_WHOLE_MAP_SIZE;
+                auto*             request = new AsyncMapWGPU {b->device, b, mode, offset, range, callback, userData};
+                b->pendingMap             = request;
+                b->device->PendingMaps().push_back(request);
                 WGPUBufferMapCallbackInfo cb = {};
                 cb.mode                      = kCallbackMode;
                 cb.callback                  = OnAsyncMap;

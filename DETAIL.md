@@ -73,12 +73,16 @@ D3D12 and Metal keep the rule. Host waits, object destruction and new submission
 Vulkan/D3D12/Metal use native timeline primitives. GL tracks `GLsync` objects instead of publishing requested
 values at submission. It still records immediately on the current context; submission waits cannot reorder
 commands already recorded. WebGPU publishes completed values from queue completion callbacks, in submission
-order. Its logical queue types share one native queue; dependency waits are host waits, not independent GPU
-queues. WebGL/WebGPU host waits yield to the browser through Emscripten Asyncify; in a program linked
-without it, an unbounded wait reports an error and a bounded one returns `VriResult_Timeout`.
+order. Its logical queue types share one native queue, as GL's do, so submission order already places a
+submission after the earlier ones that signal its wait fences and `QueueSubmit` does not wait on the host.
+WebGL/WebGPU host waits (`Wait`, `WaitForFence`) yield to the browser through Emscripten Asyncify; in a program
+linked without it, an unbounded wait reports an error and a bounded one returns `VriResult_Timeout`.
 `MapBufferAsync` reads a browser WebGPU buffer back without a wait: the browser maps it once the work already
-submitted that uses it has finished, and the callback runs from the event loop. Every other backend maps on
-the calling thread and calls back before returning, so wait for the work (a fence) first, as for `MapBuffer`.
+submitted that uses it has finished, and the callback runs from the event loop. Destroying the buffer before
+then cancels the map: the callback runs once, inside `DestroyBuffer`, with `VriResult_Failure`, and nothing
+more arrives from the browser. `UnmapBuffer` before then aborts the map, and the callback runs inside it with
+`VriResult_Failure`. Every other backend maps on the calling thread and calls back before returning, so wait
+for the work (a fence) first, as for `MapBuffer`.
 
 `UpdateDescriptorRanges` preserves previously written ranges. Declaration order and shader binding numbers
 are independent. GL and WebGPU support one descriptor per range; unsupported descriptor arrays fail during
