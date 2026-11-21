@@ -2,7 +2,7 @@
 set_project("VRI")
 
 -- set project version
-set_version("0.3.3")
+set_version("0.3.4")
 
 -- set language version: C++ 23
 set_languages("cxx23")
