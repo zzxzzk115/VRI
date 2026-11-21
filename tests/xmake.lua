@@ -104,6 +104,7 @@ target("vri-tests")
     end
     if has_config("vri_backend_wgpu") then
         add_files("test_device_wgpu.cpp")
+        add_files("test_fence_destroy_wgpu.cpp") -- a fence destroyed with its submission in flight
         add_files("test_triangle_wgpu.cpp")
         add_files("test_compute_storage_wgpu.cpp")
         add_files("test_compressed_copy_wgpu.cpp")

@@ -9,6 +9,7 @@
 
 #include "tests/buffer_texture_copy_probe.h"
 #include "tests/compressed_format_probe.h"
+#include "tests/fence_destroy_probe.h"
 #include "tests/map_async_probe.h"
 #include "tests/queue_wait_probe.h"
 #include "tests/wgpu_completion_probe.h"
@@ -166,6 +167,25 @@ namespace
         vriDestroyDevice(dev);
         return ran && r.submitA == VriResult_Success && r.submitB == VriResult_Success && r.fenceAfterSubmit == 0 &&
                r.dataOk && unsignaled == VriResult_InvalidArgument;
+    }
+
+    // A fence destroyed while its submission is in flight (the browser cannot wait for it first): the queue stays
+    // usable, and a later fence still completes.
+    bool FenceDestroyProbe()
+    {
+        auto creation        = vriDefaultDeviceCreationDesc();
+        creation.graphicsAPI = VriGraphicsAPI_WebGPU;
+        VriDevice* device    = nullptr;
+        if (vriCreateDevice(&creation, &device) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        int              failure = __LINE__;
+        if (vriGetInterface(device, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success)
+            failure = vri::test::CheckFenceDestroyedInFlight(device, c);
+        if (failure)
+            std::printf("WebGPU fence destroyed in flight failed at line %d\n", failure);
+        vriDestroyDevice(device);
+        return failure == 0;
     }
 
     bool RenderAndProbe(bool& centerRed)
@@ -534,10 +554,11 @@ int main()
     const bool features   = FeatureProbe(VriGraphicsAPI_WebGPU);
     const bool copies     = CopyProbe();
     const bool queueWait  = QueueWaitProbe();
-    const bool pass =
-        ran && centerRed && compute && completion && mapAsync && compressed && features && copies && queueWait;
+    const bool fences     = FenceDestroyProbe();
+    const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies &&
+                      queueWait && fences;
     std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
-                "features=%d copies=%d queueWait=%d)\n",
+                "features=%d copies=%d queueWait=%d fences=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
@@ -547,7 +568,8 @@ int main()
                 compressed ? 1 : 0,
                 features ? 1 : 0,
                 copies ? 1 : 0,
-                queueWait ? 1 : 0);
+                queueWait ? 1 : 0,
+                fences ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);

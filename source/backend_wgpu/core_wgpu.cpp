@@ -1197,8 +1197,23 @@ namespace vri::wgpu
             *out = ToHandle(new FenceWGPU {Dev(device), initialValue, initialValue});
             return VriResult_Success;
         }
-        void VRI_CALL DestroyFence(VriFence* fence) { delete Fen(fence); }
-        bool          DrainCompletions(QueueWGPU* queue)
+        void VRI_CALL DestroyFence(VriFence* fence)
+        {
+            if (!fence)
+                return;
+            FenceWGPU* f = Fen(fence);
+            // A submission that signals this fence may still be in flight (the browser cannot wait for it). Its
+            // completion record stays until its callback has run; drop this fence from it so draining it later never
+            // writes through the destroyed fence.
+            QueueWGPU* queue = f->device->GetQueue(VriQueueType_Graphics);
+            {
+                std::lock_guard lock(queue->completionMutex);
+                for (auto& completion : queue->completions)
+                    std::erase_if(completion->signals, [f](const auto& signal) { return signal.first == f; });
+            }
+            delete f;
+        }
+        bool DrainCompletions(QueueWGPU* queue)
         {
             std::lock_guard lock(queue->completionMutex);
             // Native callbacks can arrive out of order. Publish only the completed
