@@ -493,15 +493,9 @@ namespace vri::mtl
             const uint32_t sampleNum = desc->sampleNum;
             const uint32_t layerNum = desc->layerNum;
             const bool is3D = desc->type == VriTextureType_3D;
-            const bool isCube = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
-            const bool is1D = desc->type == VriTextureType_1D || desc->type == VriTextureType_1DArray;
+            const bool isArray = desc->type == VriTextureType_1DArray || desc->type == VriTextureType_2DArray;
+            // The type alone picks the Metal type: CheckTextureDesc refuses a 1D or 2D texture of more than one layer.
             td.textureType = ToMtlTextureType(desc->type, sampleNum);
-            // An array of more than one layer takes the array type, and the multisample array type when it has
-            // samples (ToMtlTextureType maps 2DArray to the plain one). A 1D or 2D texture with more than one
-            // layer never gets here: CheckTextureDesc refuses it.
-            if (!is3D && !isCube && layerNum > 1)
-                td.textureType = is1D ? MTLTextureType1DArray
-                               : (sampleNum > 1 ? MTLTextureType2DMultisampleArray : MTLTextureType2DArray);
             td.pixelFormat = ToMtlFormat(desc->format);
             td.width = desc->width;
             td.height = desc->height;
@@ -510,7 +504,7 @@ namespace vri::mtl
             td.sampleCount = sampleNum;
             if (desc->type == VriTextureType_CubeArray)
                 td.arrayLength = layerNum / 6; // a non-zero multiple of 6 (CheckTextureDesc)
-            else if (!is3D && !isCube && layerNum > 1)
+            else if (isArray)
                 td.arrayLength = layerNum;
 
             MTLTextureUsage usage = MTLTextureUsageUnknown;

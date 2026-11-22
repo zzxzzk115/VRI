@@ -337,9 +337,27 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
         *out = nullptr;
         return VriResult_Unsupported;
     }
+    // Texture types this backend cannot create as described are refused rather than created as another type.
+    // GLES and WebGL have no 1D textures, and desktop GL's are not wired here (texture1DMaxDim is 0).
+    if (desc->type == VriTextureType_1D || desc->type == VriTextureType_1DArray)
+    {
+        Dev(device)->ReportError("CreateTexture: GL has no 1D textures here; use a 2D texture 1 texel high");
+        *out = nullptr;
+        return VriResult_Unsupported;
+    }
+    // A multisample array would need GL_TEXTURE_2D_MULTISAMPLE_ARRAY and per-layer attachments, which this backend
+    // does not have; GLES and WebGL multisample through renderbuffers, which cannot be arrays.
+    if (desc->type == VriTextureType_2DArray && desc->sampleNum > 1)
+    {
+        Dev(device)->ReportError("CreateTexture: GL has no multisample 2DArray textures here");
+        *out = nullptr;
+        return VriResult_Unsupported;
+    }
+    // See GlFeatures::cubeMapArray: desktop GL 4.0+ only; ES shaders are ESSL 300, which cannot sample one.
     if (desc->type == VriTextureType_CubeArray && !Dev(device)->Features().cubeMapArray)
     {
-        Dev(device)->ReportError("CreateTexture: this GL context has no cube map arrays (desktop GL 4.0+ only)");
+        Dev(device)->ReportError("CreateTexture: GL has cube map arrays on desktop GL 4.0+ only, not on GLES or "
+                                 "WebGL");
         *out = nullptr;
         return VriResult_Unsupported;
     }
@@ -361,12 +379,10 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     const bool    ms       = desc->sampleNum > 1;
     const bool    isCube   = desc->type == VriTextureType_Cube;
     const bool    isVolume = !ms && desc->type == VriTextureType_3D;
-    // The type picks the target, not the layer count: a 2DArray of one layer is still sampled as an array. A
-    // 1DArray is a 2D array of 1-texel-high layers. A cube map array is stored like a 2D array of layer-faces
-    // (layer * 6 + face); glTexStorage3D takes the layer-face count.
+    // The type picks the target, not the layer count: a 2DArray of one layer is still sampled as an array. A cube
+    // map array is stored like a 2D array of layer-faces (layer * 6 + face); glTexStorage3D takes their count.
     const bool cubeArray = desc->type == VriTextureType_CubeArray;
-    const bool isArray   = !ms && (desc->type == VriTextureType_2DArray || desc->type == VriTextureType_1DArray ||
-                                 cubeArray);
+    const bool isArray   = desc->type == VriTextureType_2DArray || cubeArray;
 
     // Immutable storage: GL 4.2+ and always present on GLES3/WebGL2; false only on macOS GL 4.1.
     const bool texStorage = Dev(device)->Features().textureStorage;

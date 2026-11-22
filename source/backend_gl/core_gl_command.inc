@@ -1115,7 +1115,7 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     // Array, cube and 3D textures attach one layer (glFramebufferTexture2D rejects them); plain 2D
     // uses the 2D attach.
     const bool layerAttach = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP ||
-                             t->target == GL_TEXTURE_CUBE_MAP_ARRAY || t->target == GL_TEXTURE_3D || t->layerNum > 1;
+                             t->target == GL_TEXTURE_CUBE_MAP_ARRAY || t->target == GL_TEXTURE_3D;
 
     // WebGL2 glReadPixels only accepts GL_RGBA (+ GL_UNSIGNED_BYTE); GL_BGRA is
     // rejected (INVALID_ENUM -> zeroed readback). The BGRA8 backbuffer is GL_RGBA8

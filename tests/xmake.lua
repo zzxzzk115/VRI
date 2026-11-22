@@ -32,6 +32,7 @@ target("vri-tests")
     add_files("test_formatsupport_xbackend.cpp") -- GetFormatSupport answers per format, not from a constant
     add_files("test_resource_desc_xbackend.cpp") -- invalid buffer/texture descriptions refused alike everywhere
     add_files("test_cube_array_xbackend.cpp") -- a CubeArray of two cubes holds twelve distinct layer-faces
+    add_files("test_texture_types_gl.cpp")    -- GL refuses 1D, multisample-array and (on GLES) cube-array textures
     add_files("test_compressed_formats_xbackend.cpp") -- sRGB/signed BC, ETC2 and ASTC formats
     add_files("test_validation.cpp")          -- VRI Validation layer catches misuse
     add_files("test_buffer_dimensions_metal.cpp")
