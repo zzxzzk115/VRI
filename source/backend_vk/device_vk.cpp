@@ -939,7 +939,8 @@ namespace vri::vk
             const char* memExt = "VK_KHR_external_memory_fd";
             const char* semExt = "VK_KHR_external_semaphore_fd";
 #endif
-            const bool ok = hasExt(memExt) && hasExt(semExt);
+            // The extensions alone do not mean the device exports anything (see ExportsMemoryAndFences).
+            const bool ok = hasExt(memExt) && hasExt(semExt) && ExportsMemoryAndFences(m_vki, m_physicalDevice);
             if (ok)
             {
                 if (hasExt("VK_KHR_external_memory"))

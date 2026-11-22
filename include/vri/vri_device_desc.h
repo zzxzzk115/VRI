@@ -127,7 +127,9 @@ typedef struct VriDeviceDesc
     VriBool  hasFragmentShaderBarycentric;
     VriBool  hasCustomBorderColor;
     VriBool  hasShaderWaveOps;           /* subgroup/wave intrinsics (WaveActiveSum, ballots, ...) */
-    VriBool  hasExternalMemory;          /* external memory/semaphore export (see ext/vri_ext_external.h) */
+    /* The device exports memory and timeline fences (see ext/vri_ext_external.h). Whether one particular
+       buffer or texture description can be exported is answered when it is created. */
+    VriBool  hasExternalMemory;
     VriBool  hasTimestampQueries;        /* point timestamps: VriQueryType_Timestamp + CmdWriteTimestamp */
     VriBool  hasTimestampRangeQueries;   /* VriQueryType_TimestampRange pools (Metal; see ext/vri_ext_query.h) */
     VriBool  hasPipelineStatistics;      /* pipeline-statistics query pools (see ext/vri_ext_query.h) */
