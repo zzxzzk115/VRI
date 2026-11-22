@@ -14,6 +14,8 @@
 #include "device_d3d12.h"
 #include "objects_d3d12.h"
 
+#include "core/resource_desc_checks.h"
+
 namespace vri::d3d12
 {
     namespace
@@ -45,6 +47,11 @@ namespace vri::d3d12
             if (!desc || !out || !MemTypeOk(handleType))
                 return VriResult_InvalidArgument;
             DeviceD3D12* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckBufferDesc("CreateExportableBuffer", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
 
             // Shareable committed resource: DEFAULT (device-local) heap, SHARED flag.
             const bool            uav = (desc->usage & VriBufferUsage_StorageBuffer) != 0;
@@ -52,7 +59,7 @@ namespace vri::d3d12
             hp.Type                   = D3D12_HEAP_TYPE_DEFAULT;
             D3D12_RESOURCE_DESC rd    = {};
             rd.Dimension              = D3D12_RESOURCE_DIMENSION_BUFFER;
-            rd.Width                  = desc->size ? desc->size : 1;
+            rd.Width                  = desc->size;
             rd.Height                 = 1;
             rd.DepthOrArraySize       = 1;
             rd.MipLevels              = 1;
@@ -89,7 +96,12 @@ namespace vri::d3d12
         {
             if (!desc || !out || !MemTypeOk(handleType))
                 return VriResult_InvalidArgument;
-            DeviceD3D12*         d  = Dev(device);
+            DeviceD3D12* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckTextureDesc("CreateExportableTexture", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
             if (fi.format == DXGI_FORMAT_UNKNOWN)
             {
@@ -101,12 +113,12 @@ namespace vri::d3d12
             hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
             D3D12_RESOURCE_DESC rd   = {};
             rd.Dimension             = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            rd.Width                 = desc->width ? desc->width : 1;
-            rd.Height                = desc->height ? desc->height : 1;
-            rd.DepthOrArraySize      = static_cast<UINT16>(desc->layerNum ? desc->layerNum : 1);
-            rd.MipLevels             = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
+            rd.Width                 = desc->width;
+            rd.Height                = desc->height;
+            rd.DepthOrArraySize      = static_cast<UINT16>(desc->layerNum);
+            rd.MipLevels             = static_cast<UINT16>(desc->mipNum);
             rd.Format                = fi.format;
-            rd.SampleDesc.Count      = desc->sampleNum ? desc->sampleNum : 1;
+            rd.SampleDesc.Count      = desc->sampleNum;
             rd.Layout                = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             if (desc->usage & VriTextureUsage_ColorAttachment)
                 rd.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -131,7 +143,7 @@ namespace vri::d3d12
             t->srvFormat = fi.format;
             t->texelSize = fi.texelSize;
             t->width     = desc->width;
-            t->height    = desc->height ? desc->height : 1;
+            t->height    = desc->height;
             t->depth     = 1;
             t->mipNum    = rd.MipLevels;
             t->layerNum  = rd.DepthOrArraySize;

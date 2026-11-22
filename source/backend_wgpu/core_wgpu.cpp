@@ -7,6 +7,7 @@
 
 #include "wgpu_native.h" // native-only polling and browser callback mode
 
+#include "core/resource_desc_checks.h"
 #include "core/synchronization.h"
 
 #include <algorithm>
@@ -321,7 +322,12 @@ namespace vri::wgpu
         // ---- resources -----------------------------------------------------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
-            DeviceWGPU*     d           = Dev(device);
+            DeviceWGPU* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckBufferDesc("CreateBuffer", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             WGPUBufferUsage usage       = ToWgpuBufferUsage(desc->usage);
             WGPUMapMode     mapMode     = WGPUMapMode_None;
             bool            shadowWrite = false;
@@ -505,7 +511,12 @@ namespace vri::wgpu
 
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
-            DeviceWGPU*           d    = Dev(device);
+            DeviceWGPU* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckTextureDesc("CreateTexture", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             WGPUTextureDescriptor td   = {};
             td.usage                   = ToWgpuTextureUsage(desc->usage);
             td.dimension               = desc->type == VriTextureType_3D ? WGPUTextureDimension_3D :
@@ -513,12 +524,11 @@ namespace vri::wgpu
                                                                            WGPUTextureDimension_1D :
                                                                            WGPUTextureDimension_2D;
             td.size.width              = desc->width;
-            td.size.height             = desc->height ? desc->height : 1u;
-            td.size.depthOrArrayLayers = desc->type == VriTextureType_3D ? (desc->depth ? desc->depth : 1u) :
-                                                                           (desc->layerNum ? desc->layerNum : 1u);
+            td.size.height             = desc->height;
+            td.size.depthOrArrayLayers = desc->type == VriTextureType_3D ? desc->depth : desc->layerNum;
             td.format                  = ToWgpuFormat(desc->format);
-            td.mipLevelCount           = desc->mipNum ? desc->mipNum : 1u;
-            td.sampleCount             = desc->sampleNum ? desc->sampleNum : 1u;
+            td.mipLevelCount           = desc->mipNum;
+            td.sampleCount             = desc->sampleNum;
 
             WGPUTexture texture = wgpuDeviceCreateTexture(d->Device(), &td);
             if (!texture)

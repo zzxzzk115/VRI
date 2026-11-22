@@ -48,9 +48,8 @@
         // resources with one slice per layer.
         void SetTextureExtent(D3D12_RESOURCE_DESC& rd, const VriTextureDesc* desc)
         {
-            const UINT   height = desc->height ? desc->height : 1;
-            const UINT16 layers = static_cast<UINT16>(desc->layerNum ? desc->layerNum : 1);
-            rd.Width            = desc->width ? desc->width : 1;
+            const UINT16 layers = static_cast<UINT16>(desc->layerNum);
+            rd.Width            = desc->width;
             switch (desc->type)
             {
                 case VriTextureType_1D:
@@ -61,12 +60,12 @@
                     break;
                 case VriTextureType_3D:
                     rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
-                    rd.Height           = height;
-                    rd.DepthOrArraySize = static_cast<UINT16>(desc->depth ? desc->depth : 1);
+                    rd.Height           = desc->height;
+                    rd.DepthOrArraySize = static_cast<UINT16>(desc->depth);
                     break;
                 default:
                     rd.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-                    rd.Height           = height;
+                    rd.Height           = desc->height;
                     rd.DepthOrArraySize = layers;
                     break;
             }

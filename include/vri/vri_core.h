@@ -98,7 +98,18 @@ typedef struct VriCoreInterface
     VriResult(VRI_CALL* BeginCommandBuffer)(VriCommandBuffer* cmd);
     VriResult(VRI_CALL* EndCommandBuffer)(VriCommandBuffer* cmd);
 
-    /* resources */
+    /* resources
+       CreateBuffer, CreateTexture, their exportable variants and the Get*MemoryDesc queries refuse a
+       description that no backend can create as described, on every backend alike: they return
+       VriResult_InvalidArgument (the queries a zero VriMemoryDesc), create nothing and report one error
+       naming the field. Refused are a size of 0, a size that is not a multiple of a non-zero
+       structureStride, an extent, layer, mip or sample count of 0, a 1D or 2D texture of more than 1 layer
+       (use the array type), a Cube of other than 6 layers, a CubeArray of other than a multiple of 6, a
+       3D texture of more than 1 layer, depth other than 1 on any other type, height other than 1 on a 1D
+       or 1DArray texture, more mips than
+       floor(log2(largest extent)) + 1, and attachment or storage usage that does not fit the format's kind
+       (a depth/stencil format as a color attachment or storage texture, a color format as a
+       depth/stencil attachment). Device limits are not checked here. */
     VriResult(VRI_CALL* CreateBuffer)(VriDevice* device, const VriBufferDesc* desc, VriBuffer** outBuffer);
     void(VRI_CALL* DestroyBuffer)(VriBuffer* buffer);
     void*(VRI_CALL* MapBuffer)(VriBuffer* buffer, uint64_t offset, uint64_t size);

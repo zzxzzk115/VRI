@@ -63,7 +63,12 @@ VriResult VRI_CALL GetVideoMemoryInfo(const VriDevice* device, VriMemoryLocation
 
 VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
 {
-    DeviceD3D12*          d     = Dev(device);
+    DeviceD3D12* d = Dev(device);
+    if (core::RejectDesc(*d, core::CheckBufferDesc("CreateBuffer", *desc)))
+    {
+        *out = nullptr;
+        return VriResult_InvalidArgument;
+    }
     D3D12_HEAP_TYPE       heap  = D3D12_HEAP_TYPE_DEFAULT;
     D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
     if (desc->memoryLocation == VriMemoryLocation_HostUpload)
@@ -90,7 +95,7 @@ VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, Vr
     hp.Type                  = heap;
     D3D12_RESOURCE_DESC rd   = {};
     rd.Dimension             = D3D12_RESOURCE_DIMENSION_BUFFER;
-    rd.Width                 = desc->size ? desc->size : 1;
+    rd.Width                 = desc->size;
     rd.Height                = 1;
     rd.DepthOrArraySize      = 1;
     rd.MipLevels             = 1;
@@ -163,7 +168,12 @@ uint64_t VRI_CALL GetBufferDeviceAddress(const VriBuffer*) { return 0; }
 
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
-    DeviceD3D12*         d  = Dev(device);
+    DeviceD3D12* d = Dev(device);
+    if (core::RejectDesc(*d, core::CheckTextureDesc("CreateTexture", *desc)))
+    {
+        *out = nullptr;
+        return VriResult_InvalidArgument;
+    }
     const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
     if (fi.format == DXGI_FORMAT_UNKNOWN)
     {
@@ -175,9 +185,9 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     hp.Type                  = D3D12_HEAP_TYPE_DEFAULT;
     D3D12_RESOURCE_DESC rd   = {};
     SetTextureExtent(rd, desc);
-    rd.MipLevels        = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
+    rd.MipLevels        = static_cast<UINT16>(desc->mipNum);
     rd.Format           = fi.format;
-    rd.SampleDesc.Count = desc->sampleNum ? desc->sampleNum : 1;
+    rd.SampleDesc.Count = desc->sampleNum;
     rd.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     // A depth target that is ALSO sampled (shadow map) must use a TYPELESS resource so it
     // can carry both a typed DSV and a typed SRV (D3D12 forbids a D*_ format SRV directly).

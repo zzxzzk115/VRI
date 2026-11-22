@@ -130,6 +130,11 @@ VriResult VRI_CALL EndCommandBuffer(VriCommandBuffer*) { return VriResult_Succes
 // ---- resources -----------------------------------------------------
 VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
 {
+    if (core::RejectDesc(*Dev(device), core::CheckBufferDesc("CreateBuffer", *desc)))
+    {
+        *out = nullptr;
+        return VriResult_InvalidArgument;
+    }
     GLuint     id        = 0;
     GLenum     usage     = GL_STATIC_DRAW;
     GLbitfield mapAccess = 0;
@@ -313,6 +318,11 @@ void TexImageAllocate(GLenum          target,
 
 VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
 {
+    if (core::RejectDesc(*Dev(device), core::CheckTextureDesc("CreateTexture", *desc)))
+    {
+        *out = nullptr;
+        return VriResult_InvalidArgument;
+    }
     const GLCompressedFormat compressed = ToGLCompressedFormat(desc->format);
     if (compressed.internalFormat != 0 && !CompressedFormatAvailable(Dev(device)->Features(), desc->format))
     {
@@ -330,11 +340,11 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     // A compressed texture has no pixel format or type: glCompressedTexSubImage* fills it.
     const GLFormat gf =
         compressed.internalFormat != 0 ? GLFormat {compressed.internalFormat, 0, 0, 0} : ToGLFormat(desc->format);
-    const GLsizei mips     = static_cast<GLsizei>(desc->mipNum ? desc->mipNum : 1u);
+    const GLsizei mips     = static_cast<GLsizei>(desc->mipNum);
     const GLsizei w        = static_cast<GLsizei>(desc->width);
-    const GLsizei h        = static_cast<GLsizei>(desc->height ? desc->height : 1u);
-    const GLsizei layers   = static_cast<GLsizei>(desc->layerNum ? desc->layerNum : 1u);
-    const GLsizei depth    = static_cast<GLsizei>(desc->depth ? desc->depth : 1u);
+    const GLsizei h        = static_cast<GLsizei>(desc->height);
+    const GLsizei layers   = static_cast<GLsizei>(desc->layerNum);
+    const GLsizei depth    = static_cast<GLsizei>(desc->depth);
     const bool    ms       = desc->sampleNum > 1;
     const bool    isCube   = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
     const bool    isVolume = !ms && desc->type == VriTextureType_3D;
@@ -476,7 +486,7 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     t->glType         = gf.type;
     t->internalFormat = gf.internalFormat;
     t->width          = desc->width;
-    t->height         = desc->height ? desc->height : 1u;
+    t->height         = desc->height;
     t->depth          = isVolume ? static_cast<uint32_t>(depth) : 1u;
     t->mipNum         = static_cast<uint32_t>(mips);
     t->layerNum       = static_cast<uint32_t>(layers);

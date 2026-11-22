@@ -13,10 +13,12 @@
         {
             if (!o)
                 return;
-            *o                     = VriMemoryDesc {};
+            *o = VriMemoryDesc {};
+            if (core::RejectDesc(*Dev(device), core::CheckBufferDesc("GetBufferMemoryDesc", *desc)))
+                return;
             D3D12_RESOURCE_DESC rd = {};
             rd.Dimension           = D3D12_RESOURCE_DIMENSION_BUFFER;
-            rd.Width               = desc->size ? desc->size : 1;
+            rd.Width               = desc->size;
             rd.Height              = 1;
             rd.DepthOrArraySize    = 1;
             rd.MipLevels           = 1;
@@ -38,7 +40,9 @@
         {
             if (!o)
                 return;
-            *o                      = VriMemoryDesc {};
+            *o = VriMemoryDesc {};
+            if (core::RejectDesc(*Dev(device), core::CheckTextureDesc("GetTextureMemoryDesc", *desc)))
+                return;
             const DxgiFormatInfo fi = ToDxgiFormat(desc->format);
             if (fi.format == DXGI_FORMAT_UNKNOWN)
             {
@@ -47,9 +51,9 @@
             }
             D3D12_RESOURCE_DESC  rd = {};
             SetTextureExtent(rd, desc);
-            rd.MipLevels            = static_cast<UINT16>(desc->mipNum ? desc->mipNum : 1);
+            rd.MipLevels            = static_cast<UINT16>(desc->mipNum);
             rd.Format               = fi.format;
-            rd.SampleDesc.Count     = desc->sampleNum ? desc->sampleNum : 1;
+            rd.SampleDesc.Count     = desc->sampleNum;
             rd.Layout               = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             // Mirror CreateTexture's typeless substitution + flags so the allocation info matches the
             // resource that BindTextureMemory will place (the clear value doesn't affect the size).

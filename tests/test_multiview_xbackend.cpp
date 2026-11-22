@@ -49,7 +49,7 @@ namespace
 
         // 2-layer color array target + a 2D-array view spanning both layers.
         VriTextureDesc td {};
-        td.type           = VriTextureType_2D;
+        td.type           = VriTextureType_2DArray;
         td.format         = VriFormat_RGBA8_UNORM;
         td.width          = kW;
         td.height         = kH;
