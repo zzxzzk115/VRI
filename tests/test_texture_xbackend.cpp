@@ -135,6 +135,8 @@ namespace
         ranges[0].descriptorNum  = 1;
         ranges[0].descriptorType = VriDescriptorType_Texture;
         ranges[0].shaderStages   = VriShaderStage_Fragment;
+        // WebGPU bakes the sampled view dimension into the bind-group layout.
+        ranges[0].viewType = sampledType == VriTextureType_2DArray ? VriTextureViewType_2DArray : VriTextureViewType_2D;
         ranges[1].baseRegister   = 1;
         ranges[1].descriptorNum  = 1;
         ranges[1].descriptorType = VriDescriptorType_Sampler;
