@@ -331,24 +331,6 @@ VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit
     }
     return FAILED(q->device->Device()->GetDeviceRemovedReason()) ? VriResult_DeviceLost : VriResult_Success;
 }
-VriResult WaitQueueIdle(QueueD3D12* q)
-{
-    if (!q->idleFence)
-        return VriResult_Failure;
-    const uint64_t value = ++q->idleValue;
-    if (FAILED(q->queue->Signal(q->idleFence.Get(), value)))
-        return VriResult_DeviceLost;
-    if (q->idleFence->GetCompletedValue() == UINT64_MAX)
-        return VriResult_DeviceLost;
-    if (q->idleFence->GetCompletedValue() < value)
-    {
-        if (FAILED(q->idleFence->SetEventOnCompletion(value, q->idleEvent)))
-            return VriResult_Failure;
-        if (WaitForSingleObject(q->idleEvent, INFINITE) != WAIT_OBJECT_0)
-            return VriResult_Failure;
-    }
-    return q->idleFence->GetCompletedValue() == UINT64_MAX ? VriResult_DeviceLost : VriResult_Success;
-}
 VriResult VRI_CALL QueueWaitIdle(VriQueue* queue)
 {
     return queue ? WaitQueueIdle(Q(queue)) : VriResult_InvalidArgument;

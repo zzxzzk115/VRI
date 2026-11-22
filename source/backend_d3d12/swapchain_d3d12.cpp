@@ -1,6 +1,7 @@
 #include "swapchain_d3d12.h"
 
 #include "conversions_d3d12.h"
+#include "core_d3d12.h"
 #include "device_d3d12.h"
 
 namespace vri::d3d12
@@ -85,6 +86,7 @@ namespace vri::d3d12
 
             SwapChainD3D12* s = new SwapChainD3D12 {};
             s->device         = d;
+            s->queue          = reinterpret_cast<QueueD3D12*>(desc->queue);
             s->width          = desc->width ? desc->width : 1;
             s->height         = desc->height ? desc->height : 1;
             s->format         = desc->format;
@@ -135,6 +137,10 @@ namespace vri::d3d12
             if (!swapChain)
                 return;
             SwapChainD3D12* s = SC(swapChain);
+            // A present runs on the queue after the frame's own work, so the caller's fence does not cover it; wait
+            // until the queue has finished it before the buffers go.
+            if (WaitQueueIdle(s->queue) != VriResult_Success)
+                s->device->ReportError("DestroySwapChain: waiting for the swapchain's queue failed");
             ReleaseBackbuffers(s);
             delete s;
         }
@@ -182,6 +188,9 @@ namespace vri::d3d12
         VriResult VRI_CALL Resize(VriSwapChain* swapChain, uint32_t width, uint32_t height)
         {
             SwapChainD3D12* s = SC(swapChain);
+            // As in DestroySwapChain: the last present may still be running on the queue.
+            if (const VriResult waited = WaitQueueIdle(s->queue); waited != VriResult_Success)
+                return waited;
             ReleaseBackbuffers(s); // all backbuffer references must be released before ResizeBuffers
             s->width  = width ? width : 1;
             s->height = height ? height : 1;

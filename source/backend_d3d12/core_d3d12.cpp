@@ -15,6 +15,25 @@
 
 namespace vri::d3d12
 {
+    VriResult WaitQueueIdle(QueueD3D12* q)
+    {
+        if (!q->idleFence)
+            return VriResult_Failure;
+        const uint64_t value = ++q->idleValue;
+        if (FAILED(q->queue->Signal(q->idleFence.Get(), value)))
+            return VriResult_DeviceLost;
+        if (q->idleFence->GetCompletedValue() == UINT64_MAX)
+            return VriResult_DeviceLost;
+        if (q->idleFence->GetCompletedValue() < value)
+        {
+            if (FAILED(q->idleFence->SetEventOnCompletion(value, q->idleEvent)))
+                return VriResult_Failure;
+            if (WaitForSingleObject(q->idleEvent, INFINITE) != WAIT_OBJECT_0)
+                return VriResult_Failure;
+        }
+        return q->idleFence->GetCompletedValue() == UINT64_MAX ? VriResult_DeviceLost : VriResult_Success;
+    }
+
     namespace
     {
         // The VriCoreInterface implementation is split across the section includes below to keep

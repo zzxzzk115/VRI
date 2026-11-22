@@ -108,6 +108,10 @@ is measured by hand: clear an 8-bit sRGB swapchain to linear 0.2158605 (sRGB 128
 128/255, present, capture the screen (`adb exec-out screencap` on Android, `PrintWindow` with
 `PW_RENDERFULLCONTENT` on Windows) and read pixels away from any UI. Both must read 128.
 
+`Resize` and `DestroySwapChain` may follow a `Present` at once. A present runs on the queue after the frame's own
+work, so the frame's fence does not cover it; the backend waits for the present queue (Vulkan, D3D12) or relies on
+the API keeping images alive until the GPU is done (WebGPU, GL, Metal).
+
 Known swapchain limitations:
 
 - D3D12 `Present` ignores `waitFence`. It is ordered after the work already submitted to the swapchain's

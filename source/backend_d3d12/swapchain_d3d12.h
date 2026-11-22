@@ -24,6 +24,7 @@ namespace vri::d3d12
     struct SwapChainD3D12
     {
         DeviceD3D12*               device = nullptr;
+        QueueD3D12*                queue  = nullptr; // the queue presents run on (CreateSwapChainForHwnd)
         ComPtr<IDXGISwapChain3>    swapchain;
         std::vector<TextureD3D12*> textures; // backbuffers wrapped as VRI textures (owned)
         uint32_t                   width = 0, height = 0;
