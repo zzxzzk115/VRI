@@ -27,6 +27,53 @@
 #endif
         }
 
+        // GL keeps one flag per error kind until glGetError reads it. Reading them before a creation means an error
+        // read after it belongs to that creation; a context returns at most a handful.
+        inline void ClearGLErrors()
+        {
+            for (int i = 0; i < 8; ++i)
+                if (glGetError() == GL_NO_ERROR)
+                    return;
+        }
+
+        inline const char* GLErrorName(GLenum error)
+        {
+            switch (error)
+            {
+                case GL_INVALID_ENUM:
+                    return "GL_INVALID_ENUM";
+                case GL_INVALID_VALUE:
+                    return "GL_INVALID_VALUE";
+                case GL_INVALID_OPERATION:
+                    return "GL_INVALID_OPERATION";
+                case GL_INVALID_FRAMEBUFFER_OPERATION:
+                    return "GL_INVALID_FRAMEBUFFER_OPERATION";
+                case GL_OUT_OF_MEMORY:
+                    return "GL_OUT_OF_MEMORY";
+                default:
+                    return "an unknown GL error";
+            }
+        }
+
+        // Reports the error a creation left, if any, as "<function>: <name> (0x...) creating the <what>".
+        inline bool CreationFailed(const DeviceGL* device, const char* function, const char* what)
+        {
+            const GLenum error = glGetError();
+            if (error == GL_NO_ERROR)
+                return false;
+            char message[160];
+            std::snprintf(message,
+                          sizeof(message),
+                          "%s: %s (0x%04X) creating the %s",
+                          function,
+                          GLErrorName(error),
+                          static_cast<unsigned>(error),
+                          what);
+            device->ReportError(message);
+            ClearGLErrors();
+            return true;
+        }
+
         // ESSL/WebGL has no gl_BaseVertex / gl_BaseInstance, but Slang lowers
         // SV_VertexID/SV_InstanceID as (VertexIndex - BaseVertex) etc. and SPIRV-Cross
         // also synthesizes a base for the Vulkan VertexIndex builtin -> it throws for

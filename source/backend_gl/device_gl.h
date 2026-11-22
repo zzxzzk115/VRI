@@ -99,6 +99,10 @@ namespace vri::gl
         bool astc = false; // KHR_texture_compression_astc_ldr, WEBGL_compressed_texture_astc
         // glCopyImageSubData (desktop GL 4.3): copies texels, compressed blocks included, without a framebuffer.
         bool copyImage = false;
+        // GL_TEXTURE_CUBE_MAP_ARRAY: desktop GL 4.0+ only. GLES 3.2 has the texture too, but shaders here are
+        // ESSL 300 on every ES context (the WebGL2 baseline), which has no samplerCubeArray, and SPIRV-Cross adds
+        // no extension for it; WebGL2 has no cube map arrays at all.
+        bool cubeMapArray = false;
     };
 
     class DeviceGL final : public core::DeviceBase

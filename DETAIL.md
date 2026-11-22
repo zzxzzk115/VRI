@@ -82,6 +82,14 @@ A refused description returns `VriResult_InvalidArgument` and creates nothing (t
 
 Device limits, such as the largest texture dimension, are not part of this check.
 
+On GL, a CubeArray is a `GL_TEXTURE_CUBE_MAP_ARRAY`, whose layer-face `layer * 6 + face` is the VRI layer, and
+needs desktop GL 4.0 or later. GLES and WebGL refuse it with `VriResult_Unsupported`: WebGL 2 has no cube map
+arrays, and GLES 3.2 has them, but VRI's ES shaders are ESSL 300, which cannot sample one. Before 0.3.8, GL
+created a single cube for any CubeArray. GL's `CreateTexture` and `CreateBuffer` also read `glGetError` after
+creating the object. On an error they delete it and return `VriResult_Failure`, with an error that names the
+GL error, for example `CreateTexture: GL_OUT_OF_MEMORY (0x0505) creating the texture`. Errors that earlier
+calls left in the context are cleared first, so they are not taken for the creation's.
+
 Known limitation: WebGPU validates a texture or buffer itself, and when that validation fails, `CreateTexture` /
 `CreateBuffer` still return `VriResult_Success`. WebGPU hands back an error object rather than nothing, and its
 error arrives later, through the device's uncaptured-error callback, in the log. The descriptions listed above

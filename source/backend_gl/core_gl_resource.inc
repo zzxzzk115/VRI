@@ -135,6 +135,7 @@ VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, Vr
         *out = nullptr;
         return VriResult_InvalidArgument;
     }
+    ClearGLErrors();
     GLuint     id        = 0;
     GLenum     usage     = GL_STATIC_DRAW;
     GLbitfield mapAccess = 0;
@@ -174,6 +175,12 @@ VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, Vr
         glBindBuffer(target, id);
         glBufferData(target, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
         glBindBuffer(target, 0);
+    }
+    if (CreationFailed(Dev(device), "CreateBuffer", "buffer"))
+    {
+        glDeleteBuffers(1, &id); // deleting also unmaps a persistent mapping
+        *out = nullptr;
+        return VriResult_Failure;
     }
     BufferGL* b      = new BufferGL {};
     b->device        = Dev(device);
@@ -330,6 +337,12 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
         *out = nullptr;
         return VriResult_Unsupported;
     }
+    if (desc->type == VriTextureType_CubeArray && !Dev(device)->Features().cubeMapArray)
+    {
+        Dev(device)->ReportError("CreateTexture: this GL context has no cube map arrays (desktop GL 4.0+ only)");
+        *out = nullptr;
+        return VriResult_Unsupported;
+    }
     // S3TC, RGTC and ETC2 have no 3D textures, and BPTC and ASTC have them only through further extensions.
     if (compressed.internalFormat != 0 && desc->type == VriTextureType_3D)
     {
@@ -346,15 +359,21 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     const GLsizei layers   = static_cast<GLsizei>(desc->layerNum);
     const GLsizei depth    = static_cast<GLsizei>(desc->depth);
     const bool    ms       = desc->sampleNum > 1;
-    const bool    isCube   = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
+    const bool    isCube   = desc->type == VriTextureType_Cube;
     const bool    isVolume = !ms && desc->type == VriTextureType_3D;
-    const bool    isArray  = !ms && !isCube && !isVolume && layers > 1; // 2D array texture
+    // The type picks the target, not the layer count: a 2DArray of one layer is still sampled as an array. A
+    // 1DArray is a 2D array of 1-texel-high layers. A cube map array is stored like a 2D array of layer-faces
+    // (layer * 6 + face); glTexStorage3D takes the layer-face count.
+    const bool cubeArray = desc->type == VriTextureType_CubeArray;
+    const bool isArray   = !ms && (desc->type == VriTextureType_2DArray || desc->type == VriTextureType_1DArray ||
+                                 cubeArray);
 
     // Immutable storage: GL 4.2+ and always present on GLES3/WebGL2; false only on macOS GL 4.1.
     const bool texStorage = Dev(device)->Features().textureStorage;
 #if !defined(VRI_GL_ES_HEADERS)                   // DSA (4.5) entry points are undeclared in the GLES3/WebGL2 headers
     const bool dsa = Dev(device)->Features().dsa; // GL 4.5: glCreateTextures + glTextureStorage, no bind-to-edit
 #endif
+    ClearGLErrors();
     GLuint id             = 0;
     GLenum target         = GL_TEXTURE_2D;
     bool   isRenderbuffer = false;
@@ -439,8 +458,8 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
     }
     else if (isArray)
     {
-        // 2D array texture (GLES3/WebGL2 + desktop): glTexStorage3D, depth = layer count.
-        target = GL_TEXTURE_2D_ARRAY;
+        // 2D array texture (GLES3/WebGL2 + desktop) or cube map array: glTexStorage3D, depth = layer count.
+        target = cubeArray ? GL_TEXTURE_CUBE_MAP_ARRAY : GL_TEXTURE_2D_ARRAY;
 #if !defined(VRI_GL_ES_HEADERS)
         if (dsa)
         {
@@ -475,6 +494,15 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
         else
             TexImageAllocate(GL_TEXTURE_2D, gf, mips, w, h, 0, /*is3D*/ false, /*isCube*/ false);
         glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    if (CreationFailed(Dev(device), "CreateTexture", "texture"))
+    {
+        if (isRenderbuffer)
+            glDeleteRenderbuffers(1, &id);
+        else
+            glDeleteTextures(1, &id);
+        *out = nullptr;
+        return VriResult_Failure;
     }
 
     TextureGL* t      = new TextureGL {};

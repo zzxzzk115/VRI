@@ -995,7 +995,8 @@ void UploadCompressed(const TextureGL* t, const BufferGL* src, const VriBufferTe
     const uint64_t     sliceRows = region.bufferImageHeight ? (uint64_t(region.bufferImageHeight) + 3) / 4 : blocksHigh;
     const uint64_t     rowBytes  = rowBlocks * t->blockBytes;
     const uint64_t     bandRows  = rowBlocks == blocksWide ? blocksHigh : 1; // block rows per call
-    const bool         layered   = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_3D;
+    const bool         layered   = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP_ARRAY ||
+                         t->target == GL_TEXTURE_3D;
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, src->id);
     glBindTexture(t->target, t->id);
     for (GLsizei slice = 0; slice < c.slices; ++slice)
@@ -1042,7 +1043,9 @@ void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*,
     TextureGL*         t       = Tex(dst);
     const CopyRegionGL c       = ResolveCopyRegion(t, region->texture);
     const void*        off     = reinterpret_cast<const void*>(static_cast<uintptr_t>(region->bufferOffset));
-    const bool         layered = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_3D; // z = layer / slice
+    // z = layer / slice; a cube map array's z is the layer-face (layer * 6 + face).
+    const bool layered = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP_ARRAY ||
+                         t->target == GL_TEXTURE_3D;
     const bool         cube    = t->target == GL_TEXTURE_CUBE_MAP;                               // z = face
     const GLint        mip     = static_cast<GLint>(region->texture.mip);
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, Buf(src)->id); // PBO source binding stays global even with DSA
@@ -1112,7 +1115,7 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     // Array, cube and 3D textures attach one layer (glFramebufferTexture2D rejects them); plain 2D
     // uses the 2D attach.
     const bool layerAttach = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP ||
-                             t->target == GL_TEXTURE_3D || t->layerNum > 1;
+                             t->target == GL_TEXTURE_CUBE_MAP_ARRAY || t->target == GL_TEXTURE_3D || t->layerNum > 1;
 
     // WebGL2 glReadPixels only accepts GL_RGBA (+ GL_UNSIGNED_BYTE); GL_BGRA is
     // rejected (INVALID_ENUM -> zeroed readback). The BGRA8 backbuffer is GL_RGBA8

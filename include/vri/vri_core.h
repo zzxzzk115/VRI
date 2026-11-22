@@ -109,7 +109,8 @@ typedef struct VriCoreInterface
        or 1DArray texture, more mips than
        floor(log2(largest extent)) + 1, and attachment or storage usage that does not fit the format's kind
        (a depth/stencil format as a color attachment or storage texture, a color format as a
-       depth/stencil attachment). Device limits are not checked here. */
+       depth/stencil attachment). Device limits are not checked here. A valid CubeArray is
+       VriResult_Unsupported on GLES and WebGL (GL has cube map arrays on desktop GL 4.0+ only). */
     VriResult(VRI_CALL* CreateBuffer)(VriDevice* device, const VriBufferDesc* desc, VriBuffer** outBuffer);
     void(VRI_CALL* DestroyBuffer)(VriBuffer* buffer);
     void*(VRI_CALL* MapBuffer)(VriBuffer* buffer, uint64_t offset, uint64_t size);
