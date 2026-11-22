@@ -176,6 +176,91 @@ namespace
             static_cast<Messages*>(userArg)->errors.emplace_back(message ? message : "");
     }
 
+    VriTextureDesc CubeOfFourLayers() { return Texture(VriTextureType_Cube, 64, 64, 1, 4); }
+
+    VriBufferDesc EmptyBuffer()
+    {
+        VriBufferDesc bd {};
+        bd.usage          = VriBufferUsage_StorageBuffer;
+        bd.memoryLocation = VriMemoryLocation_Device;
+        return bd;
+    }
+
+    bool IsZero(const VriMemoryDesc& m) { return m.size == 0 && m.alignment == 0 && m.memoryTypeMask == 0; }
+
+    // The explicit-memory queries refuse the same descriptions: a zero VriMemoryDesc and one error with their own
+    // name. GL and WebGPU have no explicit memory and do not read the description.
+    void CheckMemoryQueries(VriGraphicsAPI          api,
+                            const char*             name,
+                            const VriCoreInterface& c,
+                            VriDevice*              dev,
+                            Messages&               messages)
+    {
+        if (api != VriGraphicsAPI_Vulkan && api != VriGraphicsAPI_D3D12 && api != VriGraphicsAPI_Metal)
+            return;
+        INFO(std::string(name) << ": memory queries");
+        const VriTextureDesc badTexture = CubeOfFourLayers();
+        VriMemoryDesc        m {};
+        m.size           = 1;
+        m.alignment      = 1;
+        m.memoryTypeMask = 1;
+        messages.errors.clear();
+        c.GetTextureMemoryDesc(dev, &badTexture, VriMemoryLocation_Device, &m);
+        CHECK(IsZero(m));
+        REQUIRE(messages.errors.size() == 1);
+        CHECK(messages.errors[0] == "GetTextureMemoryDesc: a Cube has 6 layers, not 4 (layerNum)");
+
+        const VriBufferDesc badBuffer = EmptyBuffer();
+        m.size                        = 1;
+        m.alignment                   = 1;
+        m.memoryTypeMask              = 1;
+        messages.errors.clear();
+        c.GetBufferMemoryDesc(dev, &badBuffer, VriMemoryLocation_Device, &m);
+        CHECK(IsZero(m));
+        REQUIRE(messages.errors.size() == 1);
+        CHECK(messages.errors[0] == "GetBufferMemoryDesc: a buffer is at least 1 byte, not 0 (size)");
+
+        // A valid description still gets its requirements.
+        const VriTextureDesc goodTexture = Texture2D();
+        messages.errors.clear();
+        c.GetTextureMemoryDesc(dev, &goodTexture, VriMemoryLocation_Device, &m);
+        CHECK(m.size > 0);
+        CHECK(messages.errors.empty());
+    }
+
+    // The exportable variants refuse them too, where the device exports memory (Vulkan and D3D12).
+    void CheckExportable(VriGraphicsAPI api, const char* name, VriDevice* dev, Messages& messages)
+    {
+        VriExternalInterface ext {};
+        if (vriGetInterface(dev, VRI_INTERFACE_EXTERNAL, sizeof(ext), &ext) != VriResult_Success)
+        {
+            MESSAGE("[" << std::string(name) << "] no exportable memory - exportable checks skipped");
+            return;
+        }
+        INFO(std::string(name) << ": exportable");
+#if defined(_WIN32)
+        const VriExternalHandleType handle =
+            api == VriGraphicsAPI_D3D12 ? VriExternalHandleType_D3D12Resource : VriExternalHandleType_OpaqueWin32;
+#else
+        const VriExternalHandleType handle = VriExternalHandleType_OpaqueFd;
+#endif
+        const VriTextureDesc badTexture = CubeOfFourLayers();
+        VriTexture*          texture    = reinterpret_cast<VriTexture*>(&messages);
+        messages.errors.clear();
+        CHECK(ext.CreateExportableTexture(dev, &badTexture, handle, &texture) == VriResult_InvalidArgument);
+        CHECK(texture == nullptr);
+        REQUIRE(messages.errors.size() == 1);
+        CHECK(messages.errors[0] == "CreateExportableTexture: a Cube has 6 layers, not 4 (layerNum)");
+
+        const VriBufferDesc badBuffer = EmptyBuffer();
+        VriBuffer*          buffer    = reinterpret_cast<VriBuffer*>(&messages);
+        messages.errors.clear();
+        CHECK(ext.CreateExportableBuffer(dev, &badBuffer, handle, &buffer) == VriResult_InvalidArgument);
+        CHECK(buffer == nullptr);
+        REQUIRE(messages.errors.size() == 1);
+        CHECK(messages.errors[0] == "CreateExportableBuffer: a buffer is at least 1 byte, not 0 (size)");
+    }
+
     void CheckBackend(VriGraphicsAPI api, const char* name)
     {
         Messages             messages;
@@ -184,7 +269,8 @@ namespace
         callbacks.userArg              = &messages;
         VriDeviceCreationDesc dc       = vriDefaultDeviceCreationDesc();
         dc.graphicsAPI                 = api;
-        dc.bestEffort                  = VRI_TRUE;
+        dc.bestEffort                  = VRI_TRUE; // also grants ExternalMemory only where the device has it
+        dc.enabledFeatures             = VriFeature_ExternalMemory;
         dc.callbackInterface           = &callbacks;
         VriDevice* dev                 = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
@@ -245,6 +331,8 @@ namespace
                     c.DestroyBuffer(buffer);
             }
         }
+        CheckMemoryQueries(api, name, c, dev, messages);
+        CheckExportable(api, name, dev, messages);
         vriDestroyDevice(dev);
     }
 } // namespace
