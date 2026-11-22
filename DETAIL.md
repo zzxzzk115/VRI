@@ -96,6 +96,15 @@ take the formats the surface lists. D3D12 takes the flip-model formats (RGBA8, B
 sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window framebuffer holds; it has no
 BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
 
+A Vulkan swapchain takes its composite alpha, image usage and size from what the surface reports. Alpha is opaque
+where the surface supports it. Otherwise it is inherit, then pre-multiplied, then post-multiplied, and
+`CreateSwapChain` fails with an error if the surface supports none. Android emulator surfaces support only
+inherit, so there the window system decides what the backbuffer's alpha means; write alpha = 1 to keep the window
+opaque on every platform. Swapchain textures are color attachments everywhere, and transfer sources and
+destinations only where the surface supports that. A surface without them logs a warning, and copies to or from
+its textures are invalid. A surface that leaves the size to the swapchain gets the requested size clamped to its
+limits.
+
 Rendering into an sRGB texture stores display-encoded bytes on every backend; desktop GL enables
 `GL_FRAMEBUFFER_SRGB` for that, as GLES and WebGL always encode. This is a behavior change in 0.3.6: before it,
 desktop GL stored the linear value unencoded (a clear to linear 0.2158605 read back as 55, not 128). Copies,

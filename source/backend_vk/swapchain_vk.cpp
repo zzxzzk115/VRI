@@ -19,6 +19,7 @@
 #include "device_vk.h"
 #include "swapchain_vk.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <vector>
 
@@ -228,15 +229,26 @@ namespace vri::vk
                 mode = VK_PRESENT_MODE_FIFO_KHR;
             }
 
-            // extent
-            VkExtent2D extent = caps.currentExtent;
-            if (extent.width == 0xFFFFFFFFu)
-            {
-                extent.width  = width;
-                extent.height = height;
-            }
+            const VkExtent2D extent = ChooseExtent(caps, width, height);
             if (extent.width == 0 || extent.height == 0)
                 return VriResult_Failure; // minimized; caller retries on resize
+
+            const VkCompositeAlphaFlagBitsKHR compositeAlpha = ChooseCompositeAlpha(caps.supportedCompositeAlpha);
+            if (compositeAlpha == 0)
+            {
+                char msg[128];
+                std::snprintf(msg,
+                              sizeof(msg),
+                              "CreateSwapChain: the surface supports no composite alpha mode "
+                              "(supportedCompositeAlpha 0x%x)",
+                              static_cast<unsigned>(caps.supportedCompositeAlpha));
+                d->ReportError(msg);
+                return VriResult_Failure;
+            }
+            const VkImageUsageFlags usage = ChooseImageUsage(caps.supportedUsageFlags);
+            if ((usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0 || (usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
+                d->ReportWarning("CreateSwapChain: the surface's images do not support both transfer usages; copies "
+                                 "to or from the swapchain textures are invalid on it");
 
             uint32_t imageCount = textureNum < caps.minImageCount ? caps.minImageCount : textureNum;
             if (caps.maxImageCount != 0 && imageCount > caps.maxImageCount)
@@ -249,16 +261,15 @@ namespace vri::vk
             ci.imageColorSpace          = chosen.colorSpace;
             ci.imageExtent              = extent;
             ci.imageArrayLayers         = 1;
-            ci.imageUsage =
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-            ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            ci.imageUsage               = usage;
+            ci.imageSharingMode         = VK_SHARING_MODE_EXCLUSIVE;
             // The application renders upright. Declaring the identity transform leaves a rotated display, such as a
             // phone held sideways, to the compositor; passing the current transform would promise images that are
             // already rotated.
             ci.preTransform   = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0 ?
                                     VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR :
                                     caps.currentTransform;
-            ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+            ci.compositeAlpha = compositeAlpha;
             ci.presentMode    = mode;
             ci.clipped        = VK_TRUE;
             ci.oldSwapchain   = sc->swapchain;
@@ -488,4 +499,34 @@ namespace vri::vk
     } // namespace
 
     const VriSwapChainInterface* GetSwapChainInterfaceVK() { return &g_swapChainVK; }
+
+    VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR supported)
+    {
+        // Some surfaces offer only the alpha behavior the platform's compositor decides (Android emulator surfaces
+        // report inherit alone); the swapchain then has to take that instead of opaque.
+        constexpr VkCompositeAlphaFlagBitsKHR kOrder[] = {
+            VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+            VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+            VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        };
+        for (VkCompositeAlphaFlagBitsKHR mode : kOrder)
+            if ((supported & mode) != 0)
+                return mode;
+        return static_cast<VkCompositeAlphaFlagBitsKHR>(0);
+    }
+
+    VkImageUsageFlags ChooseImageUsage(VkImageUsageFlags supported)
+    {
+        return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+               (supported & (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+    }
+
+    VkExtent2D ChooseExtent(const VkSurfaceCapabilitiesKHR& caps, uint32_t width, uint32_t height)
+    {
+        if (caps.currentExtent.width != 0xFFFFFFFFu)
+            return caps.currentExtent;
+        return {std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width),
+                std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height)};
+    }
 } // namespace vri::vk

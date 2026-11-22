@@ -92,7 +92,12 @@ typedef struct VriSwapChainInterface
        WebGPU take the formats the surface lists (WebGPU compares the channel format and takes sRGB from
        the view). D3D12 takes the flip-model formats RGBA8, BGRA8, RGB10A2 and RGBA16F, sRGB included. GL
        takes RGBA8, RGBA8 sRGB and BGRA8, the formats of its 8-bit window framebuffer. Metal takes the
-       CAMetalLayer formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F. */
+       CAMetalLayer formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
+       Vulkan presents opaque where the surface supports it; a surface that does not (Android emulator
+       surfaces support only inherit) gets inherit, then pre-multiplied, then post-multiplied alpha, and
+       creation fails if it supports none. The window system then decides what alpha means, so write
+       alpha = 1 to keep the window opaque everywhere. Vulkan swapchain textures support copies to and
+       from them only where the surface allows transfers; a surface that does not logs a warning. */
     VriResult(VRI_CALL* CreateSwapChain)(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** outSwapChain);
     /* DestroySwapChain and Resize may follow a Present at once: the backend keeps the swapchain's images
        alive until the GPU, the queued presents included, is done with them, so the caller need not wait for
