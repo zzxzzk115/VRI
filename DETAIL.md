@@ -152,6 +152,13 @@ them on reset or destruction.
   compute but no ray-tracing hardware — VRI traces rays in a **compute shader** instead (🟡). Where
   there's no compute at all (WebGL 2 / OpenGL ES), ray tracing is unavailable.
 - **Bindless on Metal** is implemented but currently unverified (no Apple hardware in CI).
+- **Desktop WebGPU** runs on wgpu-native from webgpu-sdk. wgpu-native picks the native API itself, and
+  VRI does not choose one: a machine with a Vulkan driver runs WebGPU on Vulkan, and a Windows machine
+  without one, such as the CI runner, runs it on Direct3D 12 (WARP). The test suite therefore exercises
+  WebGPU on Direct3D 12 only in CI, not on a local GPU. webgpu-sdk v0.1.3 builds wgpu-native with a fix
+  for 3D buffer ↔ texture copies whose buffer pads each slice (`bufferImageHeight` larger than the copy
+  height), which wgpu-native's Direct3D 12 backend misplaced. VRI issues such copies as one copy rather
+  than slice by slice.
 - **External memory / interop** exports OS handles (Win32 / fd) for a buffer/texture's backing
   memory and for timeline fences (`ext/vri_ext_external.h`), so a **CUDA** kernel — or OptiX,
   NVENC, another process, or another graphics API — can import the same memory and timeline.
