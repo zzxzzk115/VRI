@@ -124,16 +124,15 @@ TEST_CASE("GL reports the error a texture creation leaves, and the next creation
     VriCoreInterface c {};
     REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
 
-    // Valid for the shared check (one mip), but wider than GL_MAX_TEXTURE_SIZE: glTexStorage2D gives
-    // GL_INVALID_VALUE.
-    const uint32_t maxDim = c.GetDeviceDesc(dev)->texture2DMaxDim;
-    REQUIRE(maxDim > 0);
+    // Valid for the shared check (one mip), but 2^30 texels wide, about 16 GiB of RGBA8: every implementation refuses
+    // it. Not twice the reported GL_MAX_TEXTURE_SIZE: the Android emulator's GLES forwards to the host GPU, which
+    // accepts textures wider than the limit the emulator reports.
     VriTextureDesc tooWide = Texture(VriTextureType_2D, 4, 1, 1);
-    tooWide.width          = maxDim * 2;
+    tooWide.width          = 1u << 30;
     messages.errors.clear();
     VriTexture*     texture = reinterpret_cast<VriTexture*>(&messages); // must be reset
     const VriResult r       = c.CreateTexture(dev, &tooWide, &texture);
-    CHECK(r == VriResult_Failure);
+    CHECK((r == VriResult_Failure || r == VriResult_OutOfMemory));
     CHECK(texture == nullptr);
     REQUIRE(messages.errors.size() == 1);
     CHECK(messages.errors[0].rfind("CreateTexture: GL_", 0) == 0);
