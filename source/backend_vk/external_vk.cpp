@@ -19,6 +19,8 @@
 
 #include "core/resource_desc_checks.h"
 
+#include <cstdio>
+
 namespace vri::vk
 {
     namespace
@@ -55,6 +57,49 @@ namespace vri::vk
 #else
             return VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 #endif
+        }
+
+        const char* HandleName()
+        {
+#if defined(_WIN32)
+            return "OPAQUE_WIN32";
+#else
+            return "OPAQUE_FD";
+#endif
+        }
+
+        // Whether a buffer of `usage` can be exported with the platform's handle type.
+        bool BufferExportable(const VolkInstanceTable& vki, VkPhysicalDevice pd, VkBufferUsageFlags usage)
+        {
+            VkPhysicalDeviceExternalBufferInfo info = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO};
+            info.usage                              = usage;
+            info.handleType                         = MemHandleBit();
+            VkExternalBufferProperties properties   = {VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES};
+            vki.vkGetPhysicalDeviceExternalBufferProperties(pd, &info, &properties);
+            return (properties.externalMemoryProperties.externalMemoryFeatures &
+                    VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
+        }
+
+        // Whether an image created with `ici` can be exported with the platform's handle type.
+        bool ImageExportable(const VolkInstanceTable& vki, VkPhysicalDevice pd, const VkImageCreateInfo& ici)
+        {
+            VkPhysicalDeviceExternalImageFormatInfo external = {
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO};
+            external.handleType                        = MemHandleBit();
+            VkPhysicalDeviceImageFormatInfo2 info      = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2};
+            info.pNext                                 = &external;
+            info.format                                = ici.format;
+            info.type                                  = ici.imageType;
+            info.tiling                                = ici.tiling;
+            info.usage                                 = ici.usage;
+            info.flags                                 = ici.flags;
+            VkExternalImageFormatProperties exportable = {VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES};
+            VkImageFormatProperties2        properties = {VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2};
+            properties.pNext                           = &exportable;
+            if (vki.vkGetPhysicalDeviceImageFormatProperties2(pd, &info, &properties) != VK_SUCCESS)
+                return false;
+            return (exportable.externalMemoryProperties.externalMemoryFeatures &
+                    VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
         }
 
         // Desired memory property flags for a memory location. Exportable resources are
@@ -112,11 +157,24 @@ namespace vri::vk
             extBci.handleTypes                      = MemHandleBit();
 
             const VkBufferUsageFlags vkUsage = ToVkBufferUsage(desc->usage);
-            VkBufferCreateInfo       bci     = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-            bci.pNext                        = &extBci;
-            bci.size                         = desc->size;
-            bci.usage                        = vkUsage;
-            bci.sharingMode                  = VK_SHARING_MODE_EXCLUSIVE;
+            if (!BufferExportable(d->Vki(), d->PhysicalDevice(), vkUsage))
+            {
+                char msg[160];
+                std::snprintf(msg,
+                              sizeof(msg),
+                              "CreateExportableBuffer: this device cannot export a buffer of usage 0x%x as an %s "
+                              "handle",
+                              static_cast<unsigned>(desc->usage),
+                              HandleName());
+                d->ReportError(msg);
+                *out = nullptr;
+                return VriResult_Unsupported;
+            }
+            VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            bci.pNext              = &extBci;
+            bci.size               = desc->size;
+            bci.usage              = vkUsage;
+            bci.sharingMode        = VK_SHARING_MODE_EXCLUSIVE;
 
             VkBuffer buffer = VK_NULL_HANDLE;
             if (d->Vkd().vkCreateBuffer(d->Device(), &bci, nullptr, &buffer) != VK_SUCCESS)
@@ -195,6 +253,21 @@ namespace vri::vk
             ici.initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
             if (desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray)
                 ici.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+            if (!ImageExportable(d->Vki(), d->PhysicalDevice(), ici))
+            {
+                char msg[192];
+                std::snprintf(msg,
+                              sizeof(msg),
+                              "CreateExportableTexture: this device cannot export a texture of VriFormat %d, type %d "
+                              "and usage 0x%x as an %s handle",
+                              static_cast<int>(desc->format),
+                              static_cast<int>(desc->type),
+                              static_cast<unsigned>(desc->usage),
+                              HandleName());
+                d->ReportError(msg);
+                *out = nullptr;
+                return VriResult_Unsupported;
+            }
 
             VkImage image = VK_NULL_HANDLE;
             if (d->Vkd().vkCreateImage(d->Device(), &ici, nullptr, &image) != VK_SUCCESS)
@@ -377,4 +450,19 @@ namespace vri::vk
     } // namespace
 
     const VriExternalInterface* GetExternalInterfaceVK() { return &g_externalVK; }
+
+    bool ExportsMemoryAndFences(const VolkInstanceTable& vki, VkPhysicalDevice physicalDevice)
+    {
+        VkSemaphoreTypeCreateInfo timeline         = {VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
+        timeline.semaphoreType                     = VK_SEMAPHORE_TYPE_TIMELINE;
+        VkPhysicalDeviceExternalSemaphoreInfo info = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO};
+        info.pNext                                 = &timeline;
+        info.handleType                            = SemHandleBit();
+        VkExternalSemaphoreProperties semaphore    = {VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES};
+        vki.vkGetPhysicalDeviceExternalSemaphoreProperties(physicalDevice, &info, &semaphore);
+        if ((semaphore.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) == 0)
+            return false;
+        return BufferExportable(
+            vki, physicalDevice, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    }
 } // namespace vri::vk

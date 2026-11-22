@@ -6,6 +6,13 @@
  * VK_KHR_external_semaphore_{win32,fd}). Enable with VriFeature_ExternalMemory at device
  * creation and check VriDeviceDesc::hasExternalMemory.
  *
+ * On Vulkan the feature is granted only when the driver says it exports a timeline semaphore and a
+ * transfer-only buffer with the platform's handle type: the export extensions alone are not enough
+ * (the Android emulator lists them and exports nothing). CreateExportableBuffer/Texture then ask the
+ * driver about the description's own usage, format and type, and return VriResult_Unsupported with an
+ * error, creating nothing, when it cannot export that one. D3D12 shares through NT handles, which every
+ * D3D12 device supports; a resource it cannot share fails at creation.
+ *
  * VRI does NOT depend on CUDA. This interface exports an OS handle (Win32 HANDLE / POSIX
  * fd) for a buffer/texture's backing memory and for a timeline fence, which the
  * application then imports into CUDA (cudaImportExternalMemory / cudaImportExternalSemaphore),
