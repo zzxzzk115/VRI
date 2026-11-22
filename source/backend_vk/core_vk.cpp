@@ -1717,14 +1717,15 @@ namespace vri::vk
             const VriTextureRegionDesc source      = region ? region->src : VriTextureRegionDesc {};
             const VriTextureRegionDesc destination = region ? region->dst : VriTextureRegionDesc {};
             VkImageCopy                c {};
-            c.srcSubresource.aspectMask     = region ? ToVkAspect(source.aspect) : VK_IMAGE_ASPECT_COLOR_BIT;
+            // No region, or no aspect named, copies every aspect of the format (a depth texture's depth).
+            c.srcSubresource.aspectMask     = source.aspect ? ToVkAspect(source.aspect) : AspectsOf(s->format);
             c.srcSubresource.mipLevel       = source.mip;
             c.srcSubresource.baseArrayLayer = source.baseLayer;
             c.srcSubresource.layerCount     = source.layerNum ? source.layerNum : 1;
-            c.dstSubresource.aspectMask     = region ? ToVkAspect(destination.aspect) : VK_IMAGE_ASPECT_COLOR_BIT;
-            c.dstSubresource.mipLevel       = destination.mip;
+            c.dstSubresource.aspectMask = destination.aspect ? ToVkAspect(destination.aspect) : AspectsOf(d->format);
+            c.dstSubresource.mipLevel   = destination.mip;
             c.dstSubresource.baseArrayLayer = destination.baseLayer;
-            c.dstSubresource.layerCount     = destination.layerNum ? destination.layerNum : c.srcSubresource.layerCount;
+            c.dstSubresource.layerCount     = c.srcSubresource.layerCount; // the source region sets the count
             c.srcOffset                     = {source.x, source.y, source.z};
             c.dstOffset                     = {destination.x, destination.y, destination.z};
             c.extent = {source.width ? source.width : std::max(s->extent.width >> source.mip, 1u),

@@ -6,9 +6,9 @@
 #define VRI_COMMAND_H
 
 #include "vri_base.h"
-#include "vri_handles.h"
 #include "vri_enums.h"
 #include "vri_flags.h"
+#include "vri_handles.h"
 #include "vri_resource.h" /* VriClearValue (also used by VriTextureDesc::optimizedClearValue) */
 
 VRI_EXTERN_C_BEGIN
@@ -34,7 +34,7 @@ typedef struct VriRect
 /* ---- dynamic rendering attachments ------------------------------------ */
 typedef struct VriAttachmentDesc
 {
-    VriDescriptor*       view;        /* a texture view descriptor */
+    VriDescriptor*       view; /* a texture view descriptor */
     VriAttachmentLoadOp  loadOp;
     VriAttachmentStoreOp storeOp;
     VriClearValue        clearValue;
@@ -45,8 +45,8 @@ typedef struct VriAttachmentsDesc
 {
     const VriAttachmentDesc* colors;
     uint32_t                 colorNum;
-    const VriAttachmentDesc* depth;    /* NULL = none */
-    const VriAttachmentDesc* stencil;  /* NULL = none */
+    const VriAttachmentDesc* depth;   /* NULL = none */
+    const VriAttachmentDesc* stencil; /* NULL = none */
     VriRect                  renderArea;
     uint32_t                 layerNum;
     uint32_t                 viewMask; /* multiview; 0 = single view */
@@ -112,7 +112,7 @@ typedef struct VriTextureBarrierDesc
     VriAccessLayoutStage after;
     VriImageAspectFlags  aspect;
     uint32_t             baseMip;
-    uint32_t             mipNum;   /* 0 = all */
+    uint32_t             mipNum; /* 0 = all */
     uint32_t             baseLayer;
     uint32_t             layerNum; /* 0 = all */
 } VriTextureBarrierDesc;
@@ -133,6 +133,9 @@ typedef struct VriBufferCopyDesc
     uint64_t size;
 } VriBufferCopyDesc;
 
+/* A region of one mip of a texture. A zero width, height or depth is that mip's full extent, and a zero
+   layerNum is one layer. In CmdCopyTexture the source region sets the size and the layer count; the
+   destination region gives only its offset, mip and base layer. */
 typedef struct VriTextureRegionDesc
 {
     uint32_t            mip;
@@ -142,7 +145,7 @@ typedef struct VriTextureRegionDesc
     int32_t             x;
     int32_t             y;
     int32_t             z;
-    uint32_t            width;  /* 0 = full extent */
+    uint32_t            width; /* 0 = full extent */
     uint32_t            height;
     uint32_t            depth;
 } VriTextureRegionDesc;

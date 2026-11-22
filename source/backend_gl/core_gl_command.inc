@@ -863,36 +863,6 @@ void VRI_CALL CmdCopyBuffer(VriCommandBuffer*, VriBuffer* dst, VriBuffer* src, c
     glBindBuffer(rt, 0);
     glBindBuffer(wt, 0);
 }
-void CopyCompressedTexture(const TextureGL* d, const TextureGL* s, const VriTextureCopyDesc* region);
-
-void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
-{
-    // glCopyImageSubData is GL 4.3 / GLES 3.2; use a portable framebuffer
-    // blit so the path also works on GLES 3.0 / WebGL2.
-    const TextureGL* s = reinterpret_cast<const TextureGL*>(src);
-    const TextureGL* d = reinterpret_cast<const TextureGL*>(dst);
-    if (s->blockBytes != 0 || d->blockBytes != 0) // not colour-renderable: no framebuffer blit
-    {
-        CopyCompressedTexture(d, s, region);
-        return;
-    }
-    const RawFramebufferBytesGL raw(*s->device);
-    GLuint                      fbos[2] = {0, 0};
-    glGenFramebuffers(2, fbos);
-    // One layer each, the region's base layers (layer 0 without a region), at mip 0 and the source's full extent:
-    // the rest of the region is not honoured on GL.
-    const GLint srcLayer = region ? static_cast<GLint>(region->src.baseLayer) : 0;
-    const GLint dstLayer = region ? static_cast<GLint>(region->dst.baseLayer) : 0;
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
-    AttachTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *s, 0, srcLayer);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[1]);
-    AttachTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *d, 0, dstLayer);
-    const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
-    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glDeleteFramebuffers(2, fbos);
-}
 // The texels a buffer<->texture copy covers at its mip. A zero width/height/depth is the mip's full
 // extent. `z`/`slices` are depth slices for a 3D texture, else layers (cube faces).
 struct CopyRegionGL
@@ -952,20 +922,15 @@ private:
     bool m_pack;
 };
 
-// A copy between block-compressed textures, which cannot be framebuffer attachments. Desktop GL 4.3 copies their
-// blocks with glCopyImageSubData; GLES and WebGL have no copy for them, so there the copy is refused.
-void CopyCompressedTexture(const TextureGL* d, const TextureGL* s, const VriTextureCopyDesc* region)
+// A copy with glCopyImageSubData (desktop GL 4.3+): any format, compressed, depth/stencil and multisample included,
+// and the whole region in one call. The source region gives the size; the destination gives its offset, mip and
+// base layer.
+void CopyImageRegion(const TextureGL* d, const TextureGL* s, const VriTextureRegionDesc& from,
+                     const VriTextureRegionDesc& to)
 {
-    if (!s->device->Features().copyImage)
-    {
-        s->device->ReportError("CmdCopyTexture: a block-compressed texture cannot be copied on GLES or WebGL");
-        return;
-    }
 #if !defined(VRI_GL_ES_HEADERS)
-    const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
-    const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
-    const CopyRegionGL         sc   = ResolveCopyRegion(s, from);
-    const CopyRegionGL         dc   = ResolveCopyRegion(d, to);
+    const CopyRegionGL sc = ResolveCopyRegion(s, from);
+    const CopyRegionGL dc = ResolveCopyRegion(d, to);
     glCopyImageSubData(s->id,
                        s->target,
                        static_cast<GLint>(from.mip),
@@ -981,7 +946,111 @@ void CopyCompressedTexture(const TextureGL* d, const TextureGL* s, const VriText
                        sc.width,
                        sc.height,
                        sc.slices);
+#else
+    (void)d;
+    (void)s;
+    (void)from;
+    (void)to;
 #endif
+}
+
+// The framebuffer attachment point and blit mask of a texture's format.
+struct BlitTargetGL
+{
+    GLenum attachment;
+    GLbitfield mask;
+};
+BlitTargetGL BlitTargetOf(const TextureGL& t)
+{
+    if (t.glFormat == GL_DEPTH_STENCIL)
+        return {GL_DEPTH_STENCIL_ATTACHMENT, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT};
+    if (t.glFormat == GL_DEPTH_COMPONENT)
+        return {GL_DEPTH_ATTACHMENT, GL_DEPTH_BUFFER_BIT};
+    return {GL_COLOR_ATTACHMENT0, GL_COLOR_BUFFER_BIT};
+}
+
+// A copy through framebuffer blits (GLES, WebGL and desktop GL 4.1): one blit per layer or 3D slice, the source
+// region onto the destination's offset at the same size, with GL_NEAREST (which depth and stencil blits require).
+// Reports and stops when a framebuffer is incomplete, which is how GL says the format cannot be blitted.
+void BlitRegion(const TextureGL* d, const TextureGL* s, const VriTextureRegionDesc& from,
+                const VriTextureRegionDesc& to)
+{
+    const CopyRegionGL          sc = ResolveCopyRegion(s, from);
+    const CopyRegionGL          dc = ResolveCopyRegion(d, to);
+    const BlitTargetGL          bt = BlitTargetOf(*s);
+    const RawFramebufferBytesGL raw(*s->device);
+    GLuint                      fbos[2] = {0, 0};
+    glGenFramebuffers(2, fbos);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[1]);
+    const GLenum colorBuffer = bt.mask == GL_COLOR_BUFFER_BIT ? GL_COLOR_ATTACHMENT0 : GL_NONE;
+    glReadBuffer(colorBuffer);
+    glDrawBuffers(1, &colorBuffer);
+    for (GLsizei slice = 0; slice < sc.slices; ++slice)
+    {
+        AttachTextureLayer(GL_READ_FRAMEBUFFER, bt.attachment, *s, static_cast<GLint>(from.mip), sc.z + slice);
+        AttachTextureLayer(GL_DRAW_FRAMEBUFFER, bt.attachment, *d, static_cast<GLint>(to.mip), dc.z + slice);
+        const GLenum readStatus = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+        const GLenum drawStatus = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+        if (readStatus != GL_FRAMEBUFFER_COMPLETE || drawStatus != GL_FRAMEBUFFER_COMPLETE)
+        {
+            char message[192];
+            std::snprintf(message,
+                          sizeof(message),
+                          "CmdCopyTexture: this GL context cannot blit the format (framebuffer status 0x%04X / 0x%04X); "
+                          "copying it needs glCopyImageSubData (desktop GL 4.3+)",
+                          static_cast<unsigned>(readStatus),
+                          static_cast<unsigned>(drawStatus));
+            s->device->ReportError(message);
+            break;
+        }
+        glBlitFramebuffer(sc.x,
+                          sc.y,
+                          sc.x + sc.width,
+                          sc.y + sc.height,
+                          dc.x,
+                          dc.y,
+                          dc.x + sc.width,
+                          dc.y + sc.height,
+                          bt.mask,
+                          GL_NEAREST);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(2, fbos);
+}
+
+void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
+{
+    const TextureGL*           s    = reinterpret_cast<const TextureGL*>(src);
+    const TextureGL*           d    = reinterpret_cast<const TextureGL*>(dst);
+    const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
+    const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
+    if (s->device->Features().copyImage)
+    {
+        CopyImageRegion(d, s, from, to);
+        return;
+    }
+    // Without glCopyImageSubData, what a blit cannot copy is refused rather than copied wrong.
+    if (s->blockBytes != 0 || d->blockBytes != 0) // not framebuffer attachments
+    {
+        s->device->ReportError("CmdCopyTexture: a block-compressed texture cannot be copied on GLES, WebGL or GL 4.1");
+        return;
+    }
+    // GLES and WebGL multisample through renderbuffers; desktop GL through multisample textures.
+    const auto multisample = [](const TextureGL* t) {
+#if defined(VRI_GL_ES_HEADERS)
+        return t->isRenderbuffer;
+#else
+        return t->isRenderbuffer || t->target == GL_TEXTURE_2D_MULTISAMPLE;
+#endif
+    };
+    if (multisample(s) || multisample(d)) // a multisample blit is a resolve, and cannot write a multisample target
+    {
+        s->device->ReportError("CmdCopyTexture: a multisample texture cannot be copied on GLES, WebGL or GL 4.1");
+        return;
+    }
+    BlitRegion(d, s, from, to);
 }
 
 // A block-compressed upload. glCompressedTexSubImage* takes whole blocks and, on ES and WebGL, no buffer
@@ -1107,6 +1176,20 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
                                "(GLES and WebGL have no glGetCompressedTexImage)");
         return;
     }
+    // Depth reads through the depth attachment, on desktop GL only: glReadPixels reads no depth on GLES and WebGL.
+    // Packed depth-stencil formats are not read back on GL (it maps no stencil-only format).
+    const bool depth = t->glFormat == GL_DEPTH_COMPONENT;
+    if (depth && b->device->IsES())
+    {
+        b->device->ReportError("CmdReadbackTextureToBuffer: GLES and WebGL cannot read a depth texture back "
+                               "(their glReadPixels reads no depth)");
+        return;
+    }
+    if (t->glFormat == GL_DEPTH_STENCIL)
+    {
+        b->device->ReportError("CmdReadbackTextureToBuffer: GL reads back depth-only textures, not depth-stencil ones");
+        return;
+    }
     const CopyRegionGL c   = ResolveCopyRegion(t, region->texture);
     const GLint        mip = static_cast<GLint>(region->texture.mip);
     // glReadPixels reads one image; layers and 3D slices are read one by one into consecutive slices.
@@ -1130,8 +1213,8 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     const PixelStoreGL store(true, *region);
     for (GLsizei slice = 0; slice < c.slices; ++slice)
     {
-        AttachTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *t, mip, c.z + slice);
-        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        AttachTextureLayer(GL_FRAMEBUFFER, depth ? GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0, *t, mip, c.z + slice);
+        glReadBuffer(depth ? GL_NONE : GL_COLOR_ATTACHMENT0);
         const uint64_t offset = region->bufferOffset + sliceBytes * static_cast<uint64_t>(slice);
         glReadPixels(
             c.x, c.y, c.width, c.height, readFmt, t->glType, reinterpret_cast<void*>(static_cast<uintptr_t>(offset)));

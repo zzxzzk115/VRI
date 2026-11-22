@@ -101,6 +101,39 @@ TEST_CASE("GL refuses the texture types it cannot create as described")
                          messages,
                          cubes,
                          "CreateTexture: GL has cube map arrays on desktop GL 4.0+ only, not on GLES or WebGL");
+
+        // GLES's glReadPixels reads no depth, so a depth readback is refused rather than left empty.
+        INFO("depth readback on GLES");
+        VriTextureDesc depth = Texture(VriTextureType_2D, 64, 1, 1);
+        depth.format         = VriFormat_D32_SFLOAT;
+        depth.usage          = VriTextureUsage_DepthStencilAttachment | VriTextureUsage_TransferSrc;
+        VriTexture* texture  = nullptr;
+        REQUIRE(c.CreateTexture(dev, &depth, &texture) == VriResult_Success);
+        VriBufferDesc bd {};
+        bd.size             = 64 * 64 * 4;
+        bd.usage            = VriBufferUsage_TransferDst;
+        bd.memoryLocation   = VriMemoryLocation_HostReadback;
+        VriBuffer* readback = nullptr;
+        REQUIRE(c.CreateBuffer(dev, &bd, &readback) == VriResult_Success);
+        VriCommandAllocator* alloc = nullptr;
+        VriCommandBuffer*    cmd   = nullptr;
+        REQUIRE(c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc) == VriResult_Success);
+        REQUIRE(c.CreateCommandBuffer(alloc, &cmd) == VriResult_Success);
+        REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
+        VriBufferTextureCopyDesc rb {};
+        rb.texture.aspect   = VriImageAspect_Depth;
+        rb.texture.layerNum = 1;
+        messages.errors.clear();
+        c.CmdReadbackTextureToBuffer(cmd, readback, texture, &rb);
+        REQUIRE(messages.errors.size() == 1);
+        CHECK(
+            messages.errors[0] ==
+            "CmdReadbackTextureToBuffer: GLES and WebGL cannot read a depth texture back (their glReadPixels reads no "
+            "depth)");
+        c.EndCommandBuffer(cmd);
+        c.DestroyCommandAllocator(alloc);
+        c.DestroyBuffer(readback);
+        c.DestroyTexture(texture);
     }
     vriDestroyDevice(dev);
 }

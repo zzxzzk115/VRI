@@ -617,39 +617,46 @@ void VRI_CALL CmdCopyBuffer(VriCommandBuffer* cmd, VriBuffer* dst, VriBuffer* sr
 // Texture->texture copy. The app barriers src to CopySource and dst to CopyDestination, so
 // this just issues CopyTextureRegion between the selected subresources (subresource = mip +
 // layer * mipNum, matching CmdUploadBufferToTexture), once per layer of src.layerNum (0 or 1 =
-// one layer). A zero-width src region copies the whole subresource (pSrcBox = nullptr); a
-// non-zero width copies that sub-box.
+// one layer). A zero width, height or depth is the source mip's full extent. A copy of the whole
+// subresource passes no box: depth-stencil and multisample resources accept only that.
 void VRI_CALL CmdCopyTexture(VriCommandBuffer* cmd, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
 {
-    CommandBufferD3D12* c = CB(cmd);
-    TextureD3D12*       d = Tex(dst);
-    TextureD3D12*       s = Tex(src);
+    CommandBufferD3D12*        c    = CB(cmd);
+    TextureD3D12*              d    = Tex(dst);
+    TextureD3D12*              s    = Tex(src);
+    const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
+    const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
 
-    const UINT dx = region ? static_cast<UINT>(region->dst.x) : 0;
-    const UINT dy = region ? static_cast<UINT>(region->dst.y) : 0;
-    const UINT dz = region ? static_cast<UINT>(region->dst.z) : 0;
-    D3D12_BOX  box = {};
-    if (region && region->src.width)
-    {
-        box.left   = static_cast<UINT>(region->src.x);
-        box.top    = static_cast<UINT>(region->src.y);
-        box.front  = static_cast<UINT>(region->src.z);
-        box.right  = box.left + region->src.width;
-        box.bottom = box.top + (region->src.height ? region->src.height : 1);
-        box.back   = box.front + (region->src.depth ? region->src.depth : 1);
-    }
-    const UINT layers = region && region->src.layerNum ? region->src.layerNum : 1;
+    const auto atMip = [&](uint32_t extent) { return (std::max)(extent >> from.mip, 1u); };
+    const UINT mipWidth  = atMip(s->width);
+    const UINT mipHeight = atMip(s->height);
+    const UINT mipDepth  = s->dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? atMip(s->depth) : 1u;
+    D3D12_BOX  box       = {};
+    box.left             = static_cast<UINT>(from.x);
+    box.top              = static_cast<UINT>(from.y);
+    box.front            = static_cast<UINT>(from.z);
+    box.right            = box.left + (from.width ? from.width : mipWidth);
+    box.bottom           = box.top + (from.height ? from.height : mipHeight);
+    box.back             = box.front + (from.depth ? from.depth : mipDepth);
+    const bool whole     = box.left == 0 && box.top == 0 && box.front == 0 && box.right == mipWidth &&
+                       box.bottom == mipHeight && box.back == mipDepth;
+    const UINT layers = from.layerNum ? from.layerNum : 1;
     for (UINT layer = 0; layer < layers; ++layer)
     {
         D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
         dstLoc.pResource                   = d->resource.Get();
         dstLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        dstLoc.SubresourceIndex = region ? region->dst.mip + (region->dst.baseLayer + layer) * d->mipNum : 0;
+        dstLoc.SubresourceIndex            = to.mip + (to.baseLayer + layer) * d->mipNum;
         D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
         srcLoc.pResource                   = s->resource.Get();
         srcLoc.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        srcLoc.SubresourceIndex = region ? region->src.mip + (region->src.baseLayer + layer) * s->mipNum : 0;
-        c->list->CopyTextureRegion(&dstLoc, dx, dy, dz, &srcLoc, region && region->src.width ? &box : nullptr);
+        srcLoc.SubresourceIndex            = from.mip + (from.baseLayer + layer) * s->mipNum;
+        c->list->CopyTextureRegion(&dstLoc,
+                                   static_cast<UINT>(to.x),
+                                   static_cast<UINT>(to.y),
+                                   static_cast<UINT>(to.z),
+                                   &srcLoc,
+                                   whole ? nullptr : &box);
     }
 }
 void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer*               cmd,
