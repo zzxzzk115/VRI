@@ -118,30 +118,38 @@ namespace vri::gl
             s->textures.clear();
         }
 
-#if defined(__EMSCRIPTEN__)
+        // An sRGB backbuffer presents through a draw that encodes its linear color. A blit would decode it on the
+        // read and write the linear value into the window framebuffer, which holds display-encoded bytes: GLES and
+        // WebGL always do, and so did desktop GL here (sRGB 128 showed as 55).
         bool CreateSrgbPresent(SwapChainGL* swapchain)
         {
             if (swapchain->format != VriFormat_RGBA8_SRGB && swapchain->format != VriFormat_BGRA8_SRGB)
             {
                 return true;
             }
-            const char* sources[] = {
-                R"(#version 300 es
-void main()
+#if defined(__APPLE__)
+            const char* desktopVersion = "#version 410 core\n";
+#else
+            const char* desktopVersion = "#version 330 core\n";
+#endif
+            const char* version  = swapchain->device->IsES() ? "#version 300 es\n" : desktopVersion;
+            const char* bodies[] = {
+                R"(void main()
 {
     vec2 position = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
     gl_Position = vec4(position * 2.0 - 1.0, 0.0, 1.0);
 }
 )",
-                R"(#version 300 es
-precision highp float;
+                R"(precision highp float;
 uniform sampler2D image;
+uniform vec2 targetSize;
 out vec4 color;
 
 void main()
 {
-    ivec2 pixel = ivec2(gl_FragCoord.xy);
-    pixel.y = textureSize(image, 0).y - 1 - pixel.y;
+    ivec2 size = textureSize(image, 0);
+    ivec2 pixel = min(ivec2(gl_FragCoord.xy * vec2(size) / targetSize), size - 1);
+    pixel.y = size.y - 1 - pixel.y;
     vec4 sampleColor = texelFetch(image, pixel, 0);
     vec3 linear = max(sampleColor.rgb, vec3(0.0));
     vec3 srgb = mix(1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055,
@@ -154,8 +162,9 @@ void main()
             swapchain->presentProgram = glCreateProgram();
             for (int index = 0; index < 2; ++index)
             {
-                const GLuint shader = glCreateShader(types[index]);
-                glShaderSource(shader, 1, &sources[index], nullptr);
+                const GLuint shader     = glCreateShader(types[index]);
+                const char*  sources[2] = {version, bodies[index]};
+                glShaderSource(shader, 2, sources, nullptr);
                 glCompileShader(shader);
                 GLint compiled = 0;
                 glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
@@ -180,14 +189,15 @@ void main()
                 swapchain->device->ReportError(log);
                 return false;
             }
+            swapchain->presentTargetSize = glGetUniformLocation(swapchain->presentProgram, "targetSize");
             glGenVertexArrays(1, &swapchain->presentVao);
             return true;
         }
 
-        void PresentSrgb(SwapChainGL* s, const TextureGL* image)
+        // Draws `image` over the bound draw framebuffer (the window's), `width` x `height`, upright, encoding it
+        // to sRGB; restores the GL state it touches.
+        void PresentSrgb(SwapChainGL* s, const TextureGL* image, GLsizei width, GLsizei height)
         {
-            // WebGL's default framebuffer stores display-encoded bytes. A blit from an sRGB
-            // attachment decodes them, so explicitly encode the sampled linear color once.
             GLint     program     = 0;
             GLint     vao         = 0;
             GLint     active      = 0;
@@ -200,21 +210,24 @@ void main()
             glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
             glGetIntegerv(GL_VIEWPORT, viewport);
             glGetBooleanv(GL_COLOR_WRITEMASK, mask);
-            const GLboolean blend = glIsEnabled(GL_BLEND);
-            const GLboolean depth = glIsEnabled(GL_DEPTH_TEST);
-            const GLboolean cull  = glIsEnabled(GL_CULL_FACE);
+            const GLboolean blend   = glIsEnabled(GL_BLEND);
+            const GLboolean depth   = glIsEnabled(GL_DEPTH_TEST);
+            const GLboolean cull    = glIsEnabled(GL_CULL_FACE);
+            const GLboolean stencil = glIsEnabled(GL_STENCIL_TEST);
             glActiveTexture(GL_TEXTURE0);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
             glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
             glBindTexture(GL_TEXTURE_2D, image->id);
             glBindSampler(0, 0);
             glUseProgram(s->presentProgram);
+            glUniform2f(s->presentTargetSize, static_cast<GLfloat>(width), static_cast<GLfloat>(height));
             glBindVertexArray(s->presentVao);
             glDisable(GL_BLEND);
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_CULL_FACE);
+            glDisable(GL_STENCIL_TEST);
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            glViewport(0, 0, s->width, s->height);
+            glViewport(0, 0, width, height);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             glColorMask(mask[0], mask[1], mask[2], mask[3]);
@@ -230,13 +243,55 @@ void main()
             {
                 glEnable(GL_CULL_FACE);
             }
+            if (stencil)
+            {
+                glEnable(GL_STENCIL_TEST);
+            }
             glUseProgram(program);
             glBindVertexArray(vao);
             glBindTexture(GL_TEXTURE_2D, texture);
             glBindSampler(0, sampler);
             glActiveTexture(active);
         }
-#endif
+
+        // Writes `image`, bound as the read framebuffer, to the bound window framebuffer at `width` x `height`,
+        // upright. The window framebuffer takes the bytes as they are: an sRGB-capable one would encode them
+        // again.
+        void CopyToWindow(SwapChainGL* s, const TextureGL* image, GLint width, GLint height, GLenum filter)
+        {
+            const RawFramebufferBytesGL raw(*s->device);
+            if (s->presentProgram)
+                PresentSrgb(s, image, width, height);
+            else
+                glBlitFramebuffer(0,
+                                  0,
+                                  static_cast<GLint>(s->width),
+                                  static_cast<GLint>(s->height),
+                                  0,
+                                  height,
+                                  width,
+                                  0,
+                                  GL_COLOR_BUFFER_BIT,
+                                  filter);
+        }
+
+        void VRI_CALL DestroySwapChain(VriSwapChain* swapChain);
+
+        // The window-system-independent end of CreateSwapChain: backbuffers, the present FBO and, for sRGB, the
+        // present program. Destroys `s` and returns VriResult_Failure if the program does not build.
+        VriResult FinishSwapChain(SwapChainGL* s, uint32_t n, VriSwapChain** out)
+        {
+            for (uint32_t i = 0; i < n; ++i)
+                s->textures.push_back(CreateBackbuffer(s->device, s->width, s->height, s->format));
+            glGenFramebuffers(1, &s->blitFbo);
+            if (!CreateSrgbPresent(s))
+            {
+                DestroySwapChain(ToHandle(s));
+                return VriResult_Failure;
+            }
+            *out = ToHandle(s);
+            return VriResult_Success;
+        }
 
         VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
         {
@@ -327,11 +382,7 @@ void main()
             s->height       = h;
             s->format       = desc->format;
             s->swapInterval = GlSwapInterval(d, desc->presentMode);
-            for (uint32_t i = 0; i < n; ++i)
-                s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
-            glGenFramebuffers(1, &s->blitFbo);
-            *out = ToHandle(s);
-            return VriResult_Success;
+            return FinishSwapChain(s, n, out);
 #elif defined(_WIN32) && !defined(__EMSCRIPTEN__)
             if (desc->window.type != VriWindowSystem_Win32)
             {
@@ -384,11 +435,7 @@ void main()
             s->height       = h;
             s->format       = desc->format;
             s->swapInterval = GlSwapInterval(d, desc->presentMode);
-            for (uint32_t i = 0; i < n; ++i)
-                s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
-            glGenFramebuffers(1, &s->blitFbo);
-            *out = ToHandle(s);
-            return VriResult_Success;
+            return FinishSwapChain(s, n, out);
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
             // X11/GLX: present by retargeting the device's GLX context to the app window
             // (same idea as Win32). The window's visual must be compatible with the
@@ -407,11 +454,7 @@ void main()
             s->height       = h;
             s->format       = desc->format;
             s->swapInterval = GlSwapInterval(d, desc->presentMode);
-            for (uint32_t i = 0; i < n; ++i)
-                s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
-            glGenFramebuffers(1, &s->blitFbo);
-            *out = ToHandle(s);
-            return VriResult_Success;
+            return FinishSwapChain(s, n, out);
 #elif defined(__EMSCRIPTEN__)
             // Web: the device's WebGL2 context already owns the canvas (its default
             // framebuffer). Backbuffers are offscreen textures; Present blits the acquired
@@ -430,18 +473,8 @@ void main()
             // The GL device's WebGL2 context comes from a 1x1 GLFW window, so the canvas
             // drawing buffer starts at 1x1. Size it to the swapchain or the present blit
             // (640x480 -> canvas) lands on a single pixel and nothing is visible.
-            if (!CreateSrgbPresent(s))
-            {
-                glDeleteProgram(s->presentProgram);
-                delete s;
-                return VriResult_Failure;
-            }
             emscripten_set_canvas_element_size(s->canvasSelector.c_str(), static_cast<int>(w), static_cast<int>(h));
-            for (uint32_t i = 0; i < n; ++i)
-                s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
-            glGenFramebuffers(1, &s->blitFbo);
-            *out = ToHandle(s);
-            return VriResult_Success;
+            return FinishSwapChain(s, n, out);
 #elif defined(__APPLE__)
             // macOS/NSOpenGL: present retargets the device's NSOpenGL context to the
             // window's content view (see Present). Backbuffers are offscreen textures.
@@ -457,11 +490,7 @@ void main()
             s->height       = h;
             s->format       = desc->format;
             s->swapInterval = GlSwapInterval(d, desc->presentMode);
-            for (uint32_t i = 0; i < n; ++i)
-                s->textures.push_back(CreateBackbuffer(d, w, h, desc->format));
-            glGenFramebuffers(1, &s->blitFbo);
-            *out = ToHandle(s);
-            return VriResult_Success;
+            return FinishSwapChain(s, n, out);
 #else
             (void)d;
             (void)desc;
@@ -480,7 +509,6 @@ void main()
                 return;
             SwapChainGL* s = Swap(swapChain);
             DestroyBackbuffers(s);
-#if defined(__EMSCRIPTEN__)
             if (s->presentProgram)
             {
                 glDeleteProgram(s->presentProgram);
@@ -489,7 +517,6 @@ void main()
             {
                 glDeleteVertexArrays(1, &s->presentVao);
             }
-#endif
             if (s->blitFbo)
                 glDeleteFramebuffers(1, &s->blitFbo);
 #if defined(VRI_GL_EGL)
@@ -568,7 +595,7 @@ void main()
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // the window's default framebuffer (no glDrawBuffer in ES)
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw may have left it on
-            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
+            CopyToWindow(s, bb, w, h, GL_LINEAR);
             eglSwapBuffers(dpy, win);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             // Restore the device drawable (EGL_NO_SURFACE when surfaceless, else its pbuffer).
@@ -611,7 +638,7 @@ void main()
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            CopyToWindow(s, bb, w, h, GL_LINEAR);
             SwapBuffers(hdc); // honors the WGL_EXT_swap_control interval set above
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             wglMakeCurrent(devDc, rc); // restore the device's drawable so later rendering is unaffected
@@ -646,7 +673,7 @@ void main()
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
+            CopyToWindow(s, bb, w, h, GL_LINEAR);
             glXSwapBuffers(s->xdisplay, s->xwindow);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             glXMakeCurrent(s->xdisplay, devDrawable, rc); // restore the device's drawable
@@ -662,14 +689,7 @@ void main()
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            if (s->presentProgram)
-            {
-                PresentSrgb(s, bb);
-            }
-            else
-            {
-                glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
-            }
+            CopyToWindow(s, bb, w, h, GL_NEAREST);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             return VriResult_Success;
 #elif defined(__APPLE__)
@@ -694,16 +714,7 @@ void main()
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
             // src is VRI top-left origin, dst (FBO 0) is GL bottom-left -> flip Y; scale to the backing size.
-            glBlitFramebuffer(0,
-                              0,
-                              static_cast<GLint>(s->width),
-                              static_cast<GLint>(s->height),
-                              0,
-                              vh,
-                              vw,
-                              0,
-                              GL_COLOR_BUFFER_BIT,
-                              GL_LINEAR);
+            CopyToWindow(s, bb, vw, vh, GL_LINEAR);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             vriNSGLEndPresent(d->Window(), s->swapInterval);
             return VriResult_Success;

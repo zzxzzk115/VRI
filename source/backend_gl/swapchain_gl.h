@@ -33,9 +33,11 @@ namespace vri::gl
         uint32_t                currentIndex = 0;
         int                     swapInterval = 1; // swap interval: 1 = Fifo (vsync), 0 = Immediate (no vsync)
         GLuint                  blitFbo      = 0; // read FBO holding the backbuffer for the present blit
+        // sRGB backbuffers present through this program instead of the blit (see CreateSrgbPresent).
+        GLuint presentProgram    = 0;
+        GLuint presentVao        = 0;
+        GLint  presentTargetSize = -1; // `targetSize` uniform: the window framebuffer size the draw covers
 #if defined(__EMSCRIPTEN__)
-        GLuint      presentProgram = 0;
-        GLuint      presentVao     = 0;
         std::string canvasSelector = "#canvas"; // sized to the swapchain so the present blit fills it
 #elif defined(_WIN32)
         void* hwnd = nullptr; // HWND target window

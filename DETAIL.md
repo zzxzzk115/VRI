@@ -96,6 +96,20 @@ take the formats the surface lists. D3D12 takes the flip-model formats (RGBA8, B
 sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window framebuffer holds; it has no
 BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
 
+Rendering into an sRGB texture stores display-encoded bytes on every backend; desktop GL enables
+`GL_FRAMEBUFFER_SRGB` for that, as GLES and WebGL always encode. This is a behavior change in 0.3.6: before it,
+desktop GL stored the linear value unencoded (a clear to linear 0.2158605 read back as 55, not 128). Copies,
+readback and Present move bytes through a framebuffer with `GL_FRAMEBUFFER_SRGB` off, so they keep every byte. An
+MSAA resolve is not a copy: it averages the samples, and for an sRGB target it does so in linear space on every
+backend (a pixel half covered by white over black resolves to 188, not 128). GL presents an sRGB swapchain
+through a draw that encodes the backbuffer's linear color into the window framebuffer, because a blit would decode
+it and write the linear value. A UNORM swapchain is still blitted.
+
+The swapchain tests check API results and read back backbuffers; none reads what reaches the screen. Screen output
+is measured by hand: clear an 8-bit sRGB swapchain to linear 0.2158605 (sRGB 128) and an 8-bit UNORM one to
+128/255, present, capture the screen (`adb exec-out screencap` on Android, `PrintWindow` with
+`PW_RENDERFULLCONTENT` on Windows) and read pixels away from any UI. Both must read 128.
+
 `Resize` and `DestroySwapChain` may follow a `Present` at once. A present runs on the queue after the frame's own
 work, so the frame's fence does not cover it; the backend waits for the present queue (Vulkan, D3D12) or relies on
 the API keeping images alive until the GPU is done (WebGPU, GL, Metal).

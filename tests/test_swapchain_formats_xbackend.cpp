@@ -116,6 +116,9 @@ TEST_CASE("Swapchain formats: GL refuses formats its window framebuffer does not
 {
     // GL presents through the window's 8-bit RGBA framebuffer and has no BGRA sRGB format.
     Check(VriGraphicsAPI_OpenGL, "OpenGL", {VriFormat_R8_UNORM, VriFormat_BGRA8_SRGB}, VriFormat_RGBA8_UNORM);
+    // An sRGB swapchain presents through the encoding draw: its program builds and the present logs no error. What
+    // reaches the screen is measured by hand (DETAIL.md, "Swapchain tests").
+    Check(VriGraphicsAPI_OpenGL, "OpenGL sRGB", {}, VriFormat_RGBA8_SRGB);
 }
 
 TEST_CASE("Swapchain formats: WebGPU refuses formats its surface does not list")
