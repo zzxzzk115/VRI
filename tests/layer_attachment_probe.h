@@ -3,7 +3,7 @@
 // - a 2DArray of one layer, cleared;
 // - a 2DArray of two layers, layer 0 then layer 1 cleared to different colors (a pass that ignored the view's layer
 //   would leave layer 0 with layer 1's color);
-// - a 2DArray of one layer copied into another;
+// - a 2DArray of one layer copied into another, with a region and with none (the whole texture);
 // - each face of a Cube cleared to its own color.
 // GL attached these with glFramebufferTexture2D and the texture's own target, which an array target or a cube is
 // not, and its DSA path attached layer 0 whatever the view said.
@@ -66,8 +66,9 @@ namespace vri::test
         VriTexture* pair   = makeTexture(VriTextureType_2DArray, 2);
         VriTexture* source = makeTexture(VriTextureType_2DArray, 1);
         VriTexture* copy   = makeTexture(VriTextureType_2DArray, 1);
+        VriTexture* whole  = makeTexture(VriTextureType_2DArray, 1); // copied with no region
         VriTexture* cube   = makeTexture(VriTextureType_Cube, 6);
-        if (!single || !pair || !source || !copy || !cube)
+        if (!single || !pair || !source || !copy || !whole || !cube)
             return __LINE__;
 
         std::vector<Clear> clears = {
@@ -83,6 +84,7 @@ namespace vri::test
             {pair, 0, {0, 0, 255, 255}},
             {pair, 1, {255, 0, 0, 255}},
             {copy, 0, {255, 255, 0, 255}},
+            {whole, 0, {255, 255, 0, 255}},
         };
         for (uint32_t face = 0; face < 6; ++face)
             expects.push_back({cube, face, {static_cast<uint8_t>(40 * (face + 1)), 0, 255, 255}});
@@ -129,7 +131,8 @@ namespace vri::test
             return __LINE__;
         for (VriTexture* t : {single, pair, source, cube})
             barrier(t, VriAccess_None, VriLayout_Undefined, VriAccess_ColorAttachmentWrite, VriLayout_ColorAttachment);
-        barrier(copy, VriAccess_None, VriLayout_Undefined, VriAccess_CopyDestinationWrite, VriLayout_CopyDestination);
+        for (VriTexture* t : {copy, whole})
+            barrier(t, VriAccess_None, VriLayout_Undefined, VriAccess_CopyDestinationWrite, VriLayout_CopyDestination);
         for (const Clear& cl : clears)
         {
             VriTextureViewDesc vd {};
@@ -172,11 +175,13 @@ namespace vri::test
         region.dst.aspect   = VriImageAspect_Color;
         region.dst.layerNum = 1;
         c.CmdCopyTexture(cmd, copy, source, &region);
-        barrier(copy,
-                VriAccess_CopyDestinationWrite,
-                VriLayout_CopyDestination,
-                VriAccess_CopySourceRead,
-                VriLayout_CopySource);
+        c.CmdCopyTexture(cmd, whole, source, nullptr); // no region: the whole texture
+        for (VriTexture* t : {copy, whole})
+            barrier(t,
+                    VriAccess_CopyDestinationWrite,
+                    VriLayout_CopyDestination,
+                    VriAccess_CopySourceRead,
+                    VriLayout_CopySource);
         for (size_t i = 0; i < expects.size(); ++i)
         {
             VriBufferTextureCopyDesc rb {};

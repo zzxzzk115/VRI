@@ -879,12 +879,14 @@ void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src
     const RawFramebufferBytesGL raw(*s->device);
     GLuint                      fbos[2] = {0, 0};
     glGenFramebuffers(2, fbos);
-    // One layer each, the region's base layers, at mip 0 and the source's full extent: the rest of the region is
-    // not honoured on GL.
+    // One layer each, the region's base layers (layer 0 without a region), at mip 0 and the source's full extent:
+    // the rest of the region is not honoured on GL.
+    const GLint srcLayer = region ? static_cast<GLint>(region->src.baseLayer) : 0;
+    const GLint dstLayer = region ? static_cast<GLint>(region->dst.baseLayer) : 0;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
-    AttachTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *s, 0, static_cast<GLint>(region->src.baseLayer));
+    AttachTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *s, 0, srcLayer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[1]);
-    AttachTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *d, 0, static_cast<GLint>(region->dst.baseLayer));
+    AttachTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *d, 0, dstLayer);
     const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
