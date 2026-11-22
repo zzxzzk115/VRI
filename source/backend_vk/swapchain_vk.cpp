@@ -245,10 +245,24 @@ namespace vri::vk
                 d->ReportError(msg);
                 return VriResult_Failure;
             }
-            const VkImageUsageFlags usage = ChooseImageUsage(caps.supportedUsageFlags);
-            if ((usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0 || (usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
-                d->ReportWarning("CreateSwapChain: the surface's images do not support both transfer usages; copies "
-                                 "to or from the swapchain textures are invalid on it");
+            const VkImageUsageFlags usage         = ChooseImageUsage(caps.supportedUsageFlags);
+            const bool              noSource      = (usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0;
+            const bool              noDestination = (usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0;
+            if (noSource || noDestination)
+            {
+                const char* missing = "transfer destination; copies into";
+                if (noSource && noDestination)
+                    missing = "transfer source and destination; copies from and into";
+                else if (noSource)
+                    missing = "transfer source; copies from";
+                char msg[192];
+                std::snprintf(msg,
+                              sizeof(msg),
+                              "CreateSwapChain: the surface's images do not support %s the swapchain textures are "
+                              "invalid on it",
+                              missing);
+                d->ReportWarning(msg);
+            }
 
             uint32_t imageCount = textureNum < caps.minImageCount ? caps.minImageCount : textureNum;
             if (caps.maxImageCount != 0 && imageCount > caps.maxImageCount)
