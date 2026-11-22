@@ -97,20 +97,39 @@ namespace
         return buffer;
     }
 
+    // The stages and access that use a texture in `layout`; both sides of a barrier take them, so the earlier
+    // write is made visible to the next operation.
+    VriAccessLayoutStage Scope(VriLayout layout)
+    {
+        VriAccessLayoutStage scope {};
+        scope.layout = layout;
+        switch (layout)
+        {
+            case VriLayout_ColorAttachment:
+                scope.access = VriAccess_ColorAttachmentWrite;
+                scope.stages = VriPipelineStage_ColorAttachmentOutput;
+                break;
+            case VriLayout_CopySource:
+                scope.access = VriAccess_CopySourceRead;
+                scope.stages = VriPipelineStage_Transfer;
+                break;
+            case VriLayout_CopyDestination:
+                scope.access = VriAccess_CopyDestinationWrite;
+                scope.stages = VriPipelineStage_Transfer;
+                break;
+            default:
+                break; // Undefined: nothing to wait for
+        }
+        return scope;
+    }
+
     void Barrier(Gpu& gpu, VriCommandBuffer* cmd, VriTexture* texture, VriLayout before, VriLayout after)
     {
         VriTextureBarrierDesc tb {};
-        tb.texture       = texture;
-        tb.before.layout = before;
-        tb.after.layout  = after;
-        tb.after.stages  = VriPipelineStage_AllCommands;
-        tb.aspect        = VriImageAspect_Color;
-        if (after == VriLayout_ColorAttachment)
-            tb.after.access = VriAccess_ColorAttachmentWrite;
-        else if (after == VriLayout_CopySource)
-            tb.after.access = VriAccess_CopySourceRead;
-        else if (after == VriLayout_CopyDestination)
-            tb.after.access = VriAccess_CopyDestinationWrite;
+        tb.texture = texture;
+        tb.before  = Scope(before);
+        tb.after   = Scope(after);
+        tb.aspect  = VriImageAspect_Color;
         VriBarrierGroupDesc g {};
         g.textures   = &tb;
         g.textureNum = 1;
