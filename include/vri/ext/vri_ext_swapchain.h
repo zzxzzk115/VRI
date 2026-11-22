@@ -94,6 +94,11 @@ typedef struct VriSwapChainInterface
        takes RGBA8, RGBA8 sRGB and BGRA8, the formats of its 8-bit window framebuffer. Metal takes the
        CAMetalLayer formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F. */
     VriResult(VRI_CALL* CreateSwapChain)(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** outSwapChain);
+    /* DestroySwapChain and Resize may follow a Present at once: the backend keeps the swapchain's images
+       alive until the GPU, the queued presents included, is done with them, so the caller need not wait for
+       anything first. Vulkan and D3D12 wait on the host for the present queue to go idle; native WebGPU
+       polls the device until it is idle; GL defers deleting a texture still in use; Metal command buffers
+       retain the textures they use; the browser's WebGPU keeps released objects alive until the GPU is done. */
     void(VRI_CALL* DestroySwapChain)(VriSwapChain* swapChain);
 
     /* Borrowed array of backbuffer textures (owned by the swapchain). */
