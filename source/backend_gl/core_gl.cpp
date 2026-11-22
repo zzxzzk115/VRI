@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>

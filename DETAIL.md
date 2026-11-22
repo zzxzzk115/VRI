@@ -82,10 +82,37 @@ A refused description returns `VriResult_InvalidArgument` and creates nothing (t
 
 Device limits, such as the largest texture dimension, are not part of this check.
 
+On GL, a CubeArray is a `GL_TEXTURE_CUBE_MAP_ARRAY`, whose layer-face `layer * 6 + face` is the VRI layer, and
+needs desktop GL 4.0 or later. GLES and WebGL refuse it with `VriResult_Unsupported`: WebGL 2 has no cube map
+arrays, and GLES 3.2 has them, but VRI's ES shaders are ESSL 300, which cannot sample one. Before 0.3.8, GL
+created a single cube for any CubeArray. The texture type picks the GL target, so a 2DArray of one layer is a
+`GL_TEXTURE_2D_ARRAY`. Before 0.3.8 it was a plain 2D texture, which a `sampler2DArray` cannot sample.
+1D and 1DArray textures are `VriResult_Unsupported` on GL, GLES and WebGL, and `texture1DMaxDim` is 0 there.
+GLES and WebGL have no 1D textures, and desktop GL's are not wired; use a 2D texture 1 texel high. GL's
+`CreateTexture` and `CreateBuffer` also read `glGetError` after
+creating the object. On an error they delete it and return `VriResult_OutOfMemory` for `GL_OUT_OF_MEMORY`, as
+the other backends return on an allocation failure, and `VriResult_Failure` for any other error. The error
+reported names the GL error, for example `CreateTexture: GL_INVALID_VALUE (0x0501) creating the texture`.
+Errors that earlier calls left in the context are cleared first, so they are not taken for the creation's.
+
+GL attaches one layer of a texture as a render target, resolve target, copy end or readback source: a layer of a
+2D array, cube map array or 3D texture, or a cube face. Before 0.3.8, it attached every texture with its own
+target, which an array, a cube map array or a cube is not, and its DSA path attached layer 0 whatever the view
+said. GL's `CmdCopyTexture` copies one layer, the region's base layer on each side, at mip 0 and the source's
+full extent. It does not honour the rest of the region.
+
 Known limitation: WebGPU validates a texture or buffer itself, and when that validation fails, `CreateTexture` /
 `CreateBuffer` still return `VriResult_Success`. WebGPU hands back an error object rather than nothing, and its
 error arrives later, through the device's uncaptured-error callback, in the log. The descriptions listed above
 never reach WebGPU. What remains is mainly a description beyond the device's limits.
+
+Known limitation: multisample 2DArray textures. GL refuses them with `VriResult_Unsupported`: desktop GL has
+`GL_TEXTURE_2D_MULTISAMPLE_ARRAY`, but this backend has neither that target nor per-layer attachments, and
+GLES and WebGL multisample through renderbuffers, which cannot be arrays. Before 0.3.8, GL created a single
+multisample 2D texture and dropped the layers. WebGPU allows a multisample texture of one layer only. It
+reports a larger one itself, after `CreateTexture` has returned success (see above). Metal creates a
+multisample 2DArray of any layer count. Before 0.3.8, one of a single layer got the plain array type. That fix is
+compiled in CI but has not run: no CI runner has a Metal device.
 
 ## Submission, completion and descriptors
 

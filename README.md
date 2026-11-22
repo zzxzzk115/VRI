@@ -87,6 +87,9 @@ How each feature is supported on each backend:
 | Depth / stencil, blending, MRT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | MSAA + resolve | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Mipmaps, instancing, cubemaps | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Cube map arrays | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ⬜ |
+| 1D textures | ✅ | ✅ | ✅ | ✅ | ⬜ | ❌ | ❌ |
+| Multisample array textures | ✅ | ✅ | ✅ | ❌ | ⬜ | ❌ | ⬜ |
 | Compute shaders | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Push constants | ✅ | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 |
 | Bindless / descriptor indexing | ✅ | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 |

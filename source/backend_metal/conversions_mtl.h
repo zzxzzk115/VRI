@@ -361,7 +361,7 @@ namespace vri::mtl
             case VriTextureType_1D:        return MTLTextureType1D;
             case VriTextureType_1DArray:   return MTLTextureType1DArray;
             case VriTextureType_2D:        return ms ? MTLTextureType2DMultisample : MTLTextureType2D;
-            case VriTextureType_2DArray:   return MTLTextureType2DArray;
+            case VriTextureType_2DArray:   return ms ? MTLTextureType2DMultisampleArray : MTLTextureType2DArray;
             case VriTextureType_3D:        return MTLTextureType3D;
             case VriTextureType_Cube:      return MTLTextureTypeCube;
             case VriTextureType_CubeArray: return MTLTextureTypeCubeArray;

@@ -296,9 +296,8 @@ namespace
             }
             else if (api == VriGraphicsAPI_OpenGL && tc.desc.type == VriTextureType_CubeArray)
             {
-                // GL creates one cube for any CubeArray, so Success here would not mean the array exists; the
-                // follow-up GL cube-array fix makes this Success or Unsupported. Here only: not refused as invalid.
-                CHECK(r != VriResult_InvalidArgument);
+                // GL has cube map arrays on desktop GL 4.0+ only; test_cube_array_xbackend reads both cubes back.
+                CHECK((r == VriResult_Success || r == VriResult_Unsupported));
                 if (r == VriResult_Success)
                     c.DestroyTexture(texture);
             }

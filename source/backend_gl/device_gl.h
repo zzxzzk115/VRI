@@ -24,18 +24,21 @@ namespace vri::gl
     // which texture/renderbuffer + mip is attached where (load/clear ops are per-pass).
     struct FboKey
     {
-        static constexpr int kMaxColor           = 8;
-        uint32_t             colorId[kMaxColor]  = {};
-        uint32_t             colorMip[kMaxColor] = {};
-        uint32_t             colorCount          = 0;
-        uint32_t             depthId             = 0;
-        uint32_t             depthMip            = 0;
+        static constexpr int kMaxColor             = 8;
+        uint32_t             colorId[kMaxColor]    = {};
+        uint32_t             colorMip[kMaxColor]   = {};
+        uint32_t             colorLayer[kMaxColor] = {};
+        uint32_t             colorCount            = 0;
+        uint32_t             depthId               = 0;
+        uint32_t             depthMip              = 0;
+        uint32_t             depthLayer            = 0;
         bool                 operator==(const FboKey& o) const
         {
-            if (colorCount != o.colorCount || depthId != o.depthId || depthMip != o.depthMip)
+            if (colorCount != o.colorCount || depthId != o.depthId || depthMip != o.depthMip ||
+                depthLayer != o.depthLayer)
                 return false;
             for (uint32_t i = 0; i < colorCount; ++i)
-                if (colorId[i] != o.colorId[i] || colorMip[i] != o.colorMip[i])
+                if (colorId[i] != o.colorId[i] || colorMip[i] != o.colorMip[i] || colorLayer[i] != o.colorLayer[i])
                     return false;
             return true;
         }
@@ -49,10 +52,12 @@ namespace vri::gl
             mix(k.colorCount);
             mix(k.depthId);
             mix(k.depthMip);
+            mix(k.depthLayer);
             for (uint32_t i = 0; i < k.colorCount; ++i)
             {
                 mix(k.colorId[i]);
                 mix(k.colorMip[i]);
+                mix(k.colorLayer[i]);
             }
             return h;
         }
@@ -99,6 +104,10 @@ namespace vri::gl
         bool astc = false; // KHR_texture_compression_astc_ldr, WEBGL_compressed_texture_astc
         // glCopyImageSubData (desktop GL 4.3): copies texels, compressed blocks included, without a framebuffer.
         bool copyImage = false;
+        // GL_TEXTURE_CUBE_MAP_ARRAY: desktop GL 4.0+ only. GLES 3.2 has the texture too, but shaders here are
+        // ESSL 300 on every ES context (the WebGL2 baseline), which has no samplerCubeArray, and SPIRV-Cross adds
+        // no extension for it; WebGL2 has no cube map arrays at all.
+        bool cubeMapArray = false;
     };
 
     class DeviceGL final : public core::DeviceBase

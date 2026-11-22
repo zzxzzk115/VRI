@@ -59,6 +59,10 @@ extern "C" void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr si
 #if !defined(GL_SHADER_STORAGE_BUFFER)
 #define GL_SHADER_STORAGE_BUFFER 0x90D2
 #endif
+// Cube map arrays are desktop-only here (GlFeatures::cubeMapArray); the token lets the shared code compile.
+#if !defined(GL_TEXTURE_CUBE_MAP_ARRAY)
+#define GL_TEXTURE_CUBE_MAP_ARRAY 0x9009
+#endif
 #endif
 
 // OVR_multiview (single-pass layered rendering, for VR stereo) is an extension - not in the

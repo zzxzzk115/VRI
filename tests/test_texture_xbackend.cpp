@@ -10,16 +10,23 @@
 #include <cstdint>
 #include <cstring>
 
-#include "shaders/tests/triangle_tex_spv.h"  // g_triangleTexSpv  (Vulkan + OpenGL via SPIRV-Cross)
-#include "shaders/tests/triangle_tex_wgsl.h" // g_triangleTexWgsl (WebGPU)
+#include "shaders/tests/triangle_tex_array_spv.h"  // g_triangleTexArraySpv: samples a Texture2DArray
+#include "shaders/tests/triangle_tex_array_wgsl.h" // g_triangleTexArrayWgsl
+#include "shaders/tests/triangle_tex_spv.h"        // g_triangleTexSpv  (Vulkan + OpenGL via SPIRV-Cross)
+#include "shaders/tests/triangle_tex_wgsl.h"       // g_triangleTexWgsl (WebGPU)
 
 namespace
 {
     constexpr uint32_t kW = 64;
     constexpr uint32_t kH = 64;
 
-    bool
-    RunTexSample(VriGraphicsAPI api, const void* shader, size_t shaderSize, bool& ran, bool beforeRendering = false)
+    // `sampledType` is 2D, or 2DArray (one layer) for a shader that samples a Texture2DArray.
+    bool RunTexSample(VriGraphicsAPI api,
+                      const void*    shader,
+                      size_t         shaderSize,
+                      bool&          ran,
+                      bool           beforeRendering = false,
+                      VriTextureType sampledType     = VriTextureType_2D)
     {
         ran                       = false;
         VriDeviceCreationDesc dc  = vriDefaultDeviceCreationDesc();
@@ -64,7 +71,7 @@ namespace
         // 64*4 = 256 bytes, satisfying WebGPU's COPY_BYTES_PER_ROW_ALIGNMENT (256).
         constexpr uint32_t kTexW = 64, kTexH = 64;
         VriTextureDesc     std_ {};
-        std_.type           = VriTextureType_2D;
+        std_.type           = sampledType;
         std_.format         = VriFormat_RGBA8_UNORM;
         std_.width          = kTexW;
         std_.height         = kTexH;
@@ -77,10 +84,10 @@ namespace
         VriTexture* sampled = nullptr;
         REQUIRE(c.CreateTexture(dev, &std_, &sampled) == VriResult_Success);
         VriTextureViewDesc svd {};
-        svd.texture            = sampled;
-        svd.viewType           = VriTextureViewType_2D;
-        svd.format             = VriFormat_Unknown;
-        svd.aspect             = VriImageAspect_Color;
+        svd.texture  = sampled;
+        svd.viewType = sampledType == VriTextureType_2DArray ? VriTextureViewType_2DArray : VriTextureViewType_2D;
+        svd.format   = VriFormat_Unknown;
+        svd.aspect   = VriImageAspect_Color;
         VriDescriptor* texView = nullptr;
         REQUIRE(c.CreateTextureView(dev, &svd, &texView) == VriResult_Success);
         VriSamplerDesc smpDesc {};
@@ -128,6 +135,8 @@ namespace
         ranges[0].descriptorNum  = 1;
         ranges[0].descriptorType = VriDescriptorType_Texture;
         ranges[0].shaderStages   = VriShaderStage_Fragment;
+        // WebGPU bakes the sampled view dimension into the bind-group layout.
+        ranges[0].viewType = sampledType == VriTextureType_2DArray ? VriTextureViewType_2DArray : VriTextureViewType_2D;
         ranges[1].baseRegister   = 1;
         ranges[1].descriptorNum  = 1;
         ranges[1].descriptorType = VriDescriptorType_Sampler;
@@ -371,6 +380,38 @@ TEST_CASE("sampled-texture parity: a solid texture tints the triangle on each ba
     else
     {
         MESSAGE("OpenGL unavailable - skipped");
+    }
+}
+
+TEST_CASE("sampled-texture parity: a 2DArray of one layer samples as an array on each backend")
+{
+    // GL used to pick the array target by layer count, so a one-layer 2DArray became a plain 2D texture that the
+    // shader's sampler2DArray could not sample (the triangle came out black).
+    struct Backend
+    {
+        VriGraphicsAPI api;
+        const char*    name;
+        const void*    shader;
+        size_t         size;
+    };
+    const Backend backends[] = {
+        {VriGraphicsAPI_Vulkan, "Vulkan", g_triangleTexArraySpv, sizeof(g_triangleTexArraySpv)},
+        {VriGraphicsAPI_WebGPU, "WebGPU", g_triangleTexArrayWgsl, sizeof(g_triangleTexArrayWgsl)},
+        {VriGraphicsAPI_OpenGL, "OpenGL", g_triangleTexArraySpv, sizeof(g_triangleTexArraySpv)},
+    };
+    for (const Backend& b : backends)
+    {
+        bool       ran  = false;
+        const bool blue = RunTexSample(b.api, b.shader, b.size, ran, false, VriTextureType_2DArray);
+        if (ran)
+        {
+            INFO(b.name);
+            CHECK(blue);
+        }
+        else
+        {
+            MESSAGE(b.name << " unavailable - skipped");
+        }
     }
 }
 
