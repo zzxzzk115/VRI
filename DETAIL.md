@@ -96,6 +96,10 @@ take the formats the surface lists. D3D12 takes the flip-model formats (RGBA8, B
 sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window framebuffer holds; it has no
 BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
 
+`Resize` and `DestroySwapChain` may follow a `Present` at once. A present runs on the queue after the frame's own
+work, so the frame's fence does not cover it; the backend waits for the present queue (Vulkan, D3D12) or relies on
+the API keeping images alive until the GPU is done (WebGPU, GL, Metal).
+
 Known swapchain limitations:
 
 - D3D12 `Present` ignores `waitFence`. It is ordered after the work already submitted to the swapchain's
