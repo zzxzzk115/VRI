@@ -1972,11 +1972,18 @@ namespace vri::mtl
             const uint32_t dstSlice = region ? region->dst.baseLayer : 0;
             MTLOrigin so = region ? MTLOriginMake(region->src.x, region->src.y, region->src.z) : MTLOriginMake(0, 0, 0);
             MTLOrigin dorg = region ? MTLOriginMake(region->dst.x, region->dst.y, region->dst.z) : MTLOriginMake(0, 0, 0);
-            uint32_t w = (region && region->src.width)  ? region->src.width  : s->width;
-            uint32_t h = (region && region->src.height) ? region->src.height : s->height;
-            uint32_t d = (region && region->src.depth)  ? region->src.depth  : (s->type == VriTextureType_3D ? s->depth : 1);
-            [c->blitEnc copyFromTexture:s->texture sourceSlice:srcSlice sourceLevel:srcMip sourceOrigin:so sourceSize:MTLSizeMake(w, h, d)
-                              toTexture:dt->texture destinationSlice:dstSlice destinationLevel:dstMip destinationOrigin:dorg];
+            // A zero size is the source mip's full extent; layerNum slices are copied (0 = one).
+            const auto atMip = [&](uint32_t extent) {
+                const uint32_t e = extent >> srcMip;
+                return e ? e : 1u;
+            };
+            uint32_t w = (region && region->src.width)  ? region->src.width  : atMip(s->width);
+            uint32_t h = (region && region->src.height) ? region->src.height : atMip(s->height);
+            uint32_t d = (region && region->src.depth)  ? region->src.depth  : (s->type == VriTextureType_3D ? atMip(s->depth) : 1);
+            const uint32_t slices = (region && region->src.layerNum) ? region->src.layerNum : 1;
+            for (uint32_t slice = 0; slice < slices; ++slice)
+                [c->blitEnc copyFromTexture:s->texture sourceSlice:srcSlice + slice sourceLevel:srcMip sourceOrigin:so sourceSize:MTLSizeMake(w, h, d)
+                                  toTexture:dt->texture destinationSlice:dstSlice + slice destinationLevel:dstMip destinationOrigin:dorg];
         }
 
         void VRI_CALL CmdUploadBufferToTexture(VriCommandBuffer* cmd, VriTexture* dst, VriBuffer* src, const VriBufferTextureCopyDesc* region)

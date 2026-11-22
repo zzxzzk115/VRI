@@ -98,8 +98,26 @@ Errors that earlier calls left in the context are cleared first, so they are not
 GL attaches one layer of a texture as a render target, resolve target, copy end or readback source: a layer of a
 2D array, cube map array or 3D texture, or a cube face. Before 0.3.8, it attached every texture with its own
 target, which an array, a cube map array or a cube is not, and its DSA path attached layer 0 whatever the view
-said. GL's `CmdCopyTexture` copies one layer, the region's base layer on each side, at mip 0 and the source's
-full extent. It does not honour the rest of the region.
+said.
+
+`CmdCopyTexture` follows its region on every backend. The source region sets the offset, the size, the mip and
+the layers; the destination region gives its own offset, mip and base layer. A zero width, height or depth is the
+source mip's full extent, a zero layerNum is one layer, and no region at all is the whole of mip 0, layer 0. Before
+0.3.9, GL copied mip 0 of one layer at the source's full size whatever the region said. D3D12 took a zero height
+or depth as 1, and Metal took a zero size at a mip above 0 as the size of mip 0 and copied one layer. Vulkan copied
+a depth texture with no region as color.
+
+On desktop GL 4.3+ a copy is one `glCopyImageSubData`, for every format. Without it (GLES, WebGL and desktop GL
+4.1), GL copies with one framebuffer blit per layer or slice at the same size, with `GL_NEAREST`, through the
+depth or depth-stencil attachment for those formats. These copies are refused with an error instead:
+
+- a block-compressed texture;
+- a multisample texture (a blit into a multisample framebuffer is invalid, and one out of it is a resolve);
+- a format the context cannot attach to a framebuffer, which `glCheckFramebufferStatus` reports.
+
+`CmdReadbackTextureToBuffer` reads a depth-only texture through its depth attachment on desktop GL. GLES and
+WebGL refuse depth readback with an error, because their `glReadPixels` reads no depth, and GL reads back no packed
+depth-stencil format.
 
 Known limitation: WebGPU validates a texture or buffer itself, and when that validation fails, `CreateTexture` /
 `CreateBuffer` still return `VriResult_Success`. WebGPU hands back an error object rather than nothing, and its
