@@ -123,6 +123,16 @@ TEST_CASE("GL reports the error a texture creation leaves, and the next creation
     }
     VriCoreInterface c {};
     REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
+    // The Android emulator's GLES forwards to the host GPU and does not report the host's GL errors at creation
+    // back to the client, so there is no error to observe there. Its GL_RENDERER (the adapter name) says so.
+    const std::string renderer = c.GetDeviceDesc(dev)->adapter.name;
+    if (renderer.find("Android Emulator") != std::string::npos)
+    {
+        MESSAGE("[OpenGL] " << renderer
+                            << ": the emulator's forwarding GLES does not report creation errors - skipped");
+        vriDestroyDevice(dev);
+        return;
+    }
 
     // Valid for the shared check (one mip), but 2^30 texels wide, about 16 GiB of RGBA8: every implementation refuses
     // it. Not twice the reported GL_MAX_TEXTURE_SIZE: the Android emulator's GLES forwards to the host GPU, which
