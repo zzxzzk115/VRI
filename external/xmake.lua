@@ -25,7 +25,7 @@ end
 
 -- WebGPU backend (prebuilt wgpu-native C API)
 if has_config("vri_backend_wgpu") then
-    add_requires("webgpu-sdk v0.1.2")
+    add_requires("webgpu-sdk v0.1.3")
 end
 
 -- SPIRV-Cross is required by any backend that transpiles VRI's SPIR-V IR: the GL
