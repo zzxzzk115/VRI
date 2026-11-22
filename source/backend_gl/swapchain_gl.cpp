@@ -254,6 +254,35 @@ void main()
             glActiveTexture(active);
         }
 
+        // Writes `image`, bound as the read framebuffer, to the bound window framebuffer at `width` x `height`,
+        // upright. The window framebuffer takes the bytes as they are: desktop GL keeps GL_FRAMEBUFFER_SRGB on
+        // for rendering into sRGB textures, and an sRGB-capable window framebuffer would encode them again.
+        void CopyToWindow(SwapChainGL* s, const TextureGL* image, GLint width, GLint height, GLenum filter)
+        {
+#if !defined(VRI_GL_ES_HEADERS)
+            const bool desktop = !s->device->IsES();
+            if (desktop)
+                glDisable(GL_FRAMEBUFFER_SRGB);
+#endif
+            if (s->presentProgram)
+                PresentSrgb(s, image, width, height);
+            else
+                glBlitFramebuffer(0,
+                                  0,
+                                  static_cast<GLint>(s->width),
+                                  static_cast<GLint>(s->height),
+                                  0,
+                                  height,
+                                  width,
+                                  0,
+                                  GL_COLOR_BUFFER_BIT,
+                                  filter);
+#if !defined(VRI_GL_ES_HEADERS)
+            if (desktop)
+                glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
+        }
+
         void VRI_CALL DestroySwapChain(VriSwapChain* swapChain);
 
         // The window-system-independent end of CreateSwapChain: backbuffers, the present FBO and, for sRGB, the
@@ -574,10 +603,7 @@ void main()
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // the window's default framebuffer (no glDrawBuffer in ES)
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw may have left it on
-            if (s->presentProgram)
-                PresentSrgb(s, bb, w, h);
-            else
-                glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
+            CopyToWindow(s, bb, w, h, GL_LINEAR);
             eglSwapBuffers(dpy, win);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             // Restore the device drawable (EGL_NO_SURFACE when surfaceless, else its pbuffer).
@@ -620,10 +646,7 @@ void main()
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            if (s->presentProgram)
-                PresentSrgb(s, bb, w, h);
-            else
-                glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            CopyToWindow(s, bb, w, h, GL_LINEAR);
             SwapBuffers(hdc); // honors the WGL_EXT_swap_control interval set above
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             wglMakeCurrent(devDc, rc); // restore the device's drawable so later rendering is unaffected
@@ -658,10 +681,7 @@ void main()
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            if (s->presentProgram)
-                PresentSrgb(s, bb, w, h);
-            else
-                glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR); // flip Y to upright
+            CopyToWindow(s, bb, w, h, GL_LINEAR);
             glXSwapBuffers(s->xdisplay, s->xwindow);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             glXMakeCurrent(s->xdisplay, devDrawable, rc); // restore the device's drawable
@@ -677,14 +697,7 @@ void main()
             const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
-            if (s->presentProgram)
-            {
-                PresentSrgb(s, bb, w, h);
-            }
-            else
-            {
-                glBlitFramebuffer(0, 0, w, h, 0, h, w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST); // flip Y to upright
-            }
+            CopyToWindow(s, bb, w, h, GL_NEAREST);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             return VriResult_Success;
 #elif defined(__APPLE__)
@@ -709,19 +722,7 @@ void main()
             glDisable(GL_SCISSOR_TEST); // glBlitFramebuffer is clipped by the scissor; a draw (e.g. ImGui) may have
                                         // left it on
             // src is VRI top-left origin, dst (FBO 0) is GL bottom-left -> flip Y; scale to the backing size.
-            if (s->presentProgram)
-                PresentSrgb(s, bb, vw, vh);
-            else
-                glBlitFramebuffer(0,
-                                  0,
-                                  static_cast<GLint>(s->width),
-                                  static_cast<GLint>(s->height),
-                                  0,
-                                  vh,
-                                  vw,
-                                  0,
-                                  GL_COLOR_BUFFER_BIT,
-                                  GL_LINEAR);
+            CopyToWindow(s, bb, vw, vh, GL_LINEAR);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             vriNSGLEndPresent(d->Window(), s->swapInterval);
             return VriResult_Success;

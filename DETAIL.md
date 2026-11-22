@@ -96,6 +96,17 @@ take the formats the surface lists. D3D12 takes the flip-model formats (RGBA8, B
 sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window framebuffer holds; it has no
 BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
 
+Rendering into an sRGB texture stores display-encoded bytes on every backend; desktop GL enables
+`GL_FRAMEBUFFER_SRGB` for that, as GLES and WebGL always encode. GL presents an sRGB swapchain through a draw that
+encodes the backbuffer's linear color into the window framebuffer, because a blit would decode it and write the
+linear value; Present writes the window framebuffer with `GL_FRAMEBUFFER_SRGB` off, so it takes the bytes as they
+are. A UNORM swapchain is still blitted.
+
+The swapchain tests check API results and read back backbuffers; none reads what reaches the screen. Screen output
+is measured by hand: clear an 8-bit sRGB swapchain to linear 0.2158605 (sRGB 128) and an 8-bit UNORM one to
+128/255, present, capture the screen (`adb exec-out screencap` on Android, `PrintWindow` with
+`PW_RENDERFULLCONTENT` on Windows) and read pixels away from any UI. Both must read 128.
+
 Known swapchain limitations:
 
 - D3D12 `Present` ignores `waitFence`. It is ordered after the work already submitted to the swapchain's
