@@ -58,6 +58,35 @@ VRI does not rewrite arbitrary SPIR-V, DXIL or WGSL. The Slang helpers and shade
 conversion without target-specific shader copies. ImGui always declares its own Y-up source convention.
 OpenGL retains its current-native-context requirement; immutable convention queries do not activate a context.
 
+## Resource descriptions
+
+`CreateBuffer`, `CreateTexture`, their exportable variants and `GetBufferMemoryDesc` / `GetTextureMemoryDesc`
+check the description before the backend sees it. The check is shared, so every backend refuses the same
+descriptions the same way. Before 0.3.8 they differed. Every backend took a height, depth, layer, mip or sample
+count of 0 as 1, and D3D12 and Metal a width or size of 0 too. GL and Metal turned a Cube of 4 layers into 6
+faces. WebGPU and GL returned success and reported the error later. Vulkan left it to the validation layer.
+
+A refused description returns `VriResult_InvalidArgument` and creates nothing (the queries return a zero
+`VriMemoryDesc`). The device callback gets one error that names the field, for example
+`CreateTexture: a Cube has 6 layers, not 4 (layerNum)`. Refused are:
+
+- a buffer `size` of 0, or a `size` that is not a multiple of a non-zero `structureStride`;
+- a texture `width`, `height`, `depth`, `layerNum`, `mipNum` or `sampleNum` of 0;
+- a 1D or 2D texture with `layerNum` above 1 (use the array type);
+- a Cube whose `layerNum` is not 6, and a CubeArray whose `layerNum` is not a multiple of 6;
+- a 3D texture whose `layerNum` is not 1, any other type whose `depth` is not 1, and a 1D or 1DArray texture
+  whose `height` is not 1;
+- a `mipNum` above floor(log2(largest extent)) + 1, the full chain down to 1 texel;
+- a depth/stencil format with `ColorAttachment` or `ShaderResourceStorage` usage, and a color format with
+  `DepthStencilAttachment` usage.
+
+Device limits, such as the largest texture dimension, are not part of this check.
+
+Known limitation: WebGPU validates a texture or buffer itself, and when that validation fails, `CreateTexture` /
+`CreateBuffer` still return `VriResult_Success`. WebGPU hands back an error object rather than nothing, and its
+error arrives later, through the device's uncaptured-error callback, in the log. The descriptions listed above
+never reach WebGPU. What remains is mainly a description beyond the device's limits.
+
 ## Submission, completion and descriptors
 
 `QueueSubmit`, `QueueWaitIdle` and `DeviceWaitIdle` return `VriResult`; check the result before reusing resources.

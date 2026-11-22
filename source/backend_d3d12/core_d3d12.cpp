@@ -6,6 +6,7 @@
 #include "device_d3d12.h"
 #include "objects_d3d12.h"
 
+#include "core/resource_desc_checks.h"
 #include "core/synchronization.h"
 
 #include <algorithm>

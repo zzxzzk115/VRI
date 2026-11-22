@@ -51,7 +51,7 @@ TEST_CASE("D3D12: BC formats round-trip aligned and tiny mip uploads" * doctest:
         REQUIRE((c.GetFormatSupport(device, format) & VriFormatSupport_Texture) != 0);
         const unsigned blockBytes = (format == VriFormat_BC1_UNORM || format == VriFormat_BC4_UNORM) ? 8 : 16;
         VriTextureDesc td {};
-        td.type           = VriTextureType_2D;
+        td.type           = VriTextureType_2DArray;
         td.format         = format;
         td.width          = 128;
         td.height         = 128;

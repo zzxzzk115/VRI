@@ -164,7 +164,7 @@ int main(int, char**)
 
     auto makeTex = [&](uint32_t layerNum) {
         VriTextureDesc td {};
-        td.type           = VriTextureType_2D;
+        td.type           = layerNum > 1 ? VriTextureType_2DArray : VriTextureType_2D;
         td.format         = VriFormat_RGBA8_UNORM;
         td.width          = kTexDim;
         td.height         = kTexDim;

@@ -16,6 +16,7 @@
 #include "objects_mtl.h"
 #include "query_mtl.h"
 
+#include "core/resource_desc_checks.h"
 #include "core/synchronization.h"
 #include "rt_mtl.h" // AccelerationStructureMTL (TLAS -> its referenced BLASes, for residency)
 
@@ -419,6 +420,11 @@ namespace vri::mtl
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
             DeviceMTL* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckBufferDesc("CreateBuffer", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             BufferMTL* b = new BufferMTL{};
             b->device = d;
             b->size = desc->size;
@@ -430,7 +436,7 @@ namespace vri::mtl
             }
             else
             {
-                b->buffer = [d->Device() newBufferWithLength:(desc->size ? desc->size : 1) options:b->options];
+                b->buffer = [d->Device() newBufferWithLength:desc->size options:b->options];
                 if (!b->buffer) { delete b; return VriResult_OutOfMemory; }
                 b->owned = true;
             }
@@ -484,25 +490,26 @@ namespace vri::mtl
         MTLTextureDescriptor* BuildTextureDescriptor(const VriTextureDesc* desc)
         {
             MTLTextureDescriptor* td = [[MTLTextureDescriptor alloc] init];
-            const uint32_t sampleNum = desc->sampleNum ? desc->sampleNum : 1;
-            const uint32_t layerNum = desc->layerNum ? desc->layerNum : 1;
+            const uint32_t sampleNum = desc->sampleNum;
+            const uint32_t layerNum = desc->layerNum;
             const bool is3D = desc->type == VriTextureType_3D;
             const bool isCube = desc->type == VriTextureType_Cube || desc->type == VriTextureType_CubeArray;
             const bool is1D = desc->type == VriTextureType_1D || desc->type == VriTextureType_1DArray;
             td.textureType = ToMtlTextureType(desc->type, sampleNum);
-            // A texture with >1 array layer must use an *array* texture type, even when the caller
-            // labelled it plain 2D/1D (the WebGPU/VK backends key arrays off layerNum, not type).
+            // An array of more than one layer takes the array type, and the multisample array type when it has
+            // samples (ToMtlTextureType maps 2DArray to the plain one). A 1D or 2D texture with more than one
+            // layer never gets here: CheckTextureDesc refuses it.
             if (!is3D && !isCube && layerNum > 1)
                 td.textureType = is1D ? MTLTextureType1DArray
                                : (sampleNum > 1 ? MTLTextureType2DMultisampleArray : MTLTextureType2DArray);
             td.pixelFormat = ToMtlFormat(desc->format);
-            td.width = desc->width ? desc->width : 1;
-            td.height = desc->height ? desc->height : 1;
-            td.depth = is3D ? (desc->depth ? desc->depth : 1) : 1;
-            td.mipmapLevelCount = desc->mipNum ? desc->mipNum : 1;
+            td.width = desc->width;
+            td.height = desc->height;
+            td.depth = is3D ? desc->depth : 1;
+            td.mipmapLevelCount = desc->mipNum;
             td.sampleCount = sampleNum;
             if (desc->type == VriTextureType_CubeArray)
-                td.arrayLength = (layerNum ? layerNum : 6) / 6;
+                td.arrayLength = layerNum / 6; // a non-zero multiple of 6 (CheckTextureDesc)
             else if (!is3D && !isCube && layerNum > 1)
                 td.arrayLength = layerNum;
 
@@ -520,6 +527,11 @@ namespace vri::mtl
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
             DeviceMTL* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckTextureDesc("CreateTexture", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             MTLTextureDescriptor* td = BuildTextureDescriptor(desc);
             td.storageMode = MTLStorageModePrivate;
 
@@ -532,7 +544,7 @@ namespace vri::mtl
             t->height = (uint32_t)td.height;
             t->depth = (uint32_t)td.depth;
             t->mipNum = (uint32_t)td.mipmapLevelCount;
-            t->layerNum = desc->type == VriTextureType_3D ? 1u : (desc->layerNum ? desc->layerNum : 1u);
+            t->layerNum = desc->type == VriTextureType_3D ? 1u : desc->layerNum;
             t->sampleNum = (uint32_t)td.sampleCount;
             t->texelSize = TexelSize(desc->format);
 
@@ -579,7 +591,8 @@ namespace vri::mtl
         {
             if (!o) return;
             *o = {};
-            MTLSizeAndAlign sa = [Dev(device)->Device() heapBufferSizeAndAlignWithLength:(desc->size ? desc->size : 1)
+            if (core::RejectDesc(*Dev(device), core::CheckBufferDesc("GetBufferMemoryDesc", *desc))) return;
+            MTLSizeAndAlign sa = [Dev(device)->Device() heapBufferSizeAndAlignWithLength:desc->size
                                                                                  options:StorageOptions(location)];
             o->size = sa.size; o->alignment = sa.align; o->location = location;
         }
@@ -587,6 +600,7 @@ namespace vri::mtl
         {
             if (!o) return;
             *o = {};
+            if (core::RejectDesc(*Dev(device), core::CheckTextureDesc("GetTextureMemoryDesc", *desc))) return;
             MTLTextureDescriptor* td = BuildTextureDescriptor(desc);
             td.storageMode = location == VriMemoryLocation_Device ? MTLStorageModePrivate : MTLStorageModeShared;
             MTLSizeAndAlign sa = [Dev(device)->Device() heapTextureSizeAndAlignWithDescriptor:td];

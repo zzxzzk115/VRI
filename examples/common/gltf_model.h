@@ -417,7 +417,7 @@ namespace vriex
                     }
                 }
                 VriTextureDesc ad {};
-                ad.type           = VriTextureType_2D;
+                ad.type           = textureArrayLayers > 1 ? VriTextureType_2DArray : VriTextureType_2D;
                 ad.format         = VriFormat_RGBA8_UNORM;
                 ad.width          = kDim;
                 ad.height         = kDim;

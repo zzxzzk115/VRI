@@ -52,7 +52,7 @@ TEST_CASE("WebGPU: BC7 array layers upload and read back in blocks")
     {
         INFO("width = ", width);
         VriTextureDesc td {};
-        td.type           = VriTextureType_2D;
+        td.type           = VriTextureType_2DArray;
         td.format         = VriFormat_BC7_UNORM;
         td.width          = width;
         td.height         = kHeight;

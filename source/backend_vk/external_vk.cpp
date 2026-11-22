@@ -17,6 +17,8 @@
 #include "device_vk.h"
 #include "objects_vk.h"
 
+#include "core/resource_desc_checks.h"
+
 namespace vri::vk
 {
     namespace
@@ -100,6 +102,11 @@ namespace vri::vk
             if (!desc || !out || !HandleTypeOk(handleType))
                 return VriResult_InvalidArgument;
             DeviceVK* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckBufferDesc("CreateExportableBuffer", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
 
             VkExternalMemoryBufferCreateInfo extBci = {VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
             extBci.handleTypes                      = MemHandleBit();
@@ -165,6 +172,11 @@ namespace vri::vk
             if (!desc || !out || !HandleTypeOk(handleType))
                 return VriResult_InvalidArgument;
             DeviceVK* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckTextureDesc("CreateExportableTexture", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
 
             VkExternalMemoryImageCreateInfo extIci = {VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO};
             extIci.handleTypes                     = MemHandleBit();
@@ -173,10 +185,10 @@ namespace vri::vk
             ici.pNext             = &extIci;
             ici.imageType         = ToVkImageType(desc->type);
             ici.format            = ToVkFormat(desc->format);
-            ici.extent            = {desc->width, desc->height ? desc->height : 1u, desc->depth ? desc->depth : 1u};
-            ici.mipLevels         = desc->mipNum ? desc->mipNum : 1u;
-            ici.arrayLayers       = desc->layerNum ? desc->layerNum : 1u;
-            ici.samples           = static_cast<VkSampleCountFlagBits>(desc->sampleNum ? desc->sampleNum : 1u);
+            ici.extent            = {desc->width, desc->height, desc->depth};
+            ici.mipLevels         = desc->mipNum;
+            ici.arrayLayers       = desc->layerNum;
+            ici.samples           = static_cast<VkSampleCountFlagBits>(desc->sampleNum);
             ici.tiling            = VK_IMAGE_TILING_OPTIMAL;
             ici.usage             = ToVkImageUsage(desc->usage);
             ici.sharingMode       = VK_SHARING_MODE_EXCLUSIVE;

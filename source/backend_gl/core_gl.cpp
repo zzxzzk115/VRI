@@ -5,6 +5,7 @@
 #include "device_gl.h"
 #include "objects_gl.h"
 
+#include "core/resource_desc_checks.h"
 #include "core/synchronization.h"
 
 #include "gl_loader.h"

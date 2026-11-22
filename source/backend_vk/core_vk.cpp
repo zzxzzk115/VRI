@@ -5,6 +5,7 @@
 #include "device_vk.h"
 #include "objects_vk.h"
 
+#include "core/resource_desc_checks.h"
 #include "core/synchronization.h"
 
 #include <algorithm>
@@ -285,7 +286,12 @@ namespace vri::vk
         // ---- resources -----------------------------------------------------
         VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, VriBuffer** out)
         {
-            DeviceVK*          d   = Dev(device);
+            DeviceVK* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckBufferDesc("CreateBuffer", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
             bci.size               = desc->size;
             bci.usage              = ToVkBufferUsage(desc->usage);
@@ -394,14 +400,19 @@ namespace vri::vk
 
         VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, VriTexture** out)
         {
-            DeviceVK*         d   = Dev(device);
+            DeviceVK* d = Dev(device);
+            if (core::RejectDesc(*d, core::CheckTextureDesc("CreateTexture", *desc)))
+            {
+                *out = nullptr;
+                return VriResult_InvalidArgument;
+            }
             VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
             ici.imageType         = ToVkImageType(desc->type);
             ici.format            = ToVkFormat(desc->format);
-            ici.extent            = {desc->width, desc->height ? desc->height : 1u, desc->depth ? desc->depth : 1u};
-            ici.mipLevels         = desc->mipNum ? desc->mipNum : 1u;
-            ici.arrayLayers       = desc->layerNum ? desc->layerNum : 1u;
-            ici.samples           = static_cast<VkSampleCountFlagBits>(desc->sampleNum ? desc->sampleNum : 1u);
+            ici.extent            = {desc->width, desc->height, desc->depth};
+            ici.mipLevels         = desc->mipNum;
+            ici.arrayLayers       = desc->layerNum;
+            ici.samples           = static_cast<VkSampleCountFlagBits>(desc->sampleNum);
             ici.tiling            = VK_IMAGE_TILING_OPTIMAL;
             ici.usage             = ToVkImageUsage(desc->usage);
             ici.sharingMode       = VK_SHARING_MODE_EXCLUSIVE;
@@ -490,6 +501,9 @@ namespace vri::vk
         {
             if (!out)
                 return;
+            *out = VriMemoryDesc {};
+            if (core::RejectDesc(*Dev(device), core::CheckBufferDesc("GetBufferMemoryDesc", *desc)))
+                return;
             VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
             bci.size               = desc->size;
             bci.usage              = ToVkBufferUsage(desc->usage);
@@ -509,7 +523,6 @@ namespace vri::vk
             // Query via a throwaway VkBuffer + core-1.0 vkGetBufferMemoryRequirements rather than
             // the 1.3 vkGetDeviceBufferMemoryRequirements: MoltenVK reports apiVersion 1.2, where
             // that entry point is null and calling it segfaults. The temp buffer allocates no memory.
-            *out         = VriMemoryDesc {};
             VkDevice dev = Dev(device)->Device();
             VkBuffer tmp = VK_NULL_HANDLE;
             if (Dev(device)->Vkd().vkCreateBuffer(dev, &bci, nullptr, &tmp) != VK_SUCCESS)
@@ -530,13 +543,16 @@ namespace vri::vk
         {
             if (!out)
                 return;
+            *out = VriMemoryDesc {};
+            if (core::RejectDesc(*Dev(device), core::CheckTextureDesc("GetTextureMemoryDesc", *desc)))
+                return;
             VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
             ici.imageType         = ToVkImageType(desc->type);
             ici.format            = ToVkFormat(desc->format);
-            ici.extent            = {desc->width, desc->height ? desc->height : 1u, desc->depth ? desc->depth : 1u};
-            ici.mipLevels         = desc->mipNum ? desc->mipNum : 1u;
-            ici.arrayLayers       = desc->layerNum ? desc->layerNum : 1u;
-            ici.samples           = static_cast<VkSampleCountFlagBits>(desc->sampleNum ? desc->sampleNum : 1u);
+            ici.extent            = {desc->width, desc->height, desc->depth};
+            ici.mipLevels         = desc->mipNum;
+            ici.arrayLayers       = desc->layerNum;
+            ici.samples           = static_cast<VkSampleCountFlagBits>(desc->sampleNum);
             ici.tiling            = VK_IMAGE_TILING_OPTIMAL;
             ici.usage             = ToVkImageUsage(desc->usage);
             ici.sharingMode       = VK_SHARING_MODE_EXCLUSIVE;
@@ -556,7 +572,6 @@ namespace vri::vk
             // Query via a throwaway VkImage + core-1.0 vkGetImageMemoryRequirements rather than
             // the 1.3 vkGetDeviceImageMemoryRequirements: MoltenVK reports apiVersion 1.2, where
             // that entry point is null and calling it segfaults. The temp image allocates no memory.
-            *out         = VriMemoryDesc {};
             VkDevice dev = Dev(device)->Device();
             VkImage  tmp = VK_NULL_HANDLE;
             if (Dev(device)->Vkd().vkCreateImage(dev, &ici, nullptr, &tmp) != VK_SUCCESS)
