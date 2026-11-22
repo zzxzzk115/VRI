@@ -176,11 +176,11 @@ VriResult VRI_CALL CreateBuffer(VriDevice* device, const VriBufferDesc* desc, Vr
         glBufferData(target, static_cast<GLsizeiptr>(desc->size), nullptr, usage);
         glBindBuffer(target, 0);
     }
-    if (CreationFailed(Dev(device), "CreateBuffer", "buffer"))
+    if (const VriResult created = CreationResult(Dev(device), "CreateBuffer", "buffer"); created != VriResult_Success)
     {
         glDeleteBuffers(1, &id); // deleting also unmaps a persistent mapping
         *out = nullptr;
-        return VriResult_Failure;
+        return created;
     }
     BufferGL* b      = new BufferGL {};
     b->device        = Dev(device);
@@ -511,14 +511,14 @@ VriResult VRI_CALL CreateTexture(VriDevice* device, const VriTextureDesc* desc, 
             TexImageAllocate(GL_TEXTURE_2D, gf, mips, w, h, 0, /*is3D*/ false, /*isCube*/ false);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
-    if (CreationFailed(Dev(device), "CreateTexture", "texture"))
+    if (const VriResult created = CreationResult(Dev(device), "CreateTexture", "texture"); created != VriResult_Success)
     {
         if (isRenderbuffer)
             glDeleteRenderbuffers(1, &id);
         else
             glDeleteTextures(1, &id);
         *out = nullptr;
-        return VriResult_Failure;
+        return created;
     }
 
     TextureGL* t      = new TextureGL {};

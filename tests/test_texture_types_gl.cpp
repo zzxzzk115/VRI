@@ -104,3 +104,46 @@ TEST_CASE("GL refuses the texture types it cannot create as described")
     }
     vriDestroyDevice(dev);
 }
+
+TEST_CASE("GL reports the error a texture creation leaves, and the next creation is not blamed for it")
+{
+    Messages             messages;
+    VriCallbackInterface callbacks = {};
+    callbacks.MessageCallback      = OnMessage;
+    callbacks.userArg              = &messages;
+    VriDeviceCreationDesc dc       = vriDefaultDeviceCreationDesc();
+    dc.graphicsAPI                 = VriGraphicsAPI_OpenGL;
+    dc.bestEffort                  = VRI_TRUE;
+    dc.callbackInterface           = &callbacks;
+    VriDevice* dev                 = nullptr;
+    if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+    {
+        MESSAGE("[OpenGL] unavailable - skipped");
+        return;
+    }
+    VriCoreInterface c {};
+    REQUIRE(vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success);
+
+    // Valid for the shared check (one mip), but wider than GL_MAX_TEXTURE_SIZE: glTexStorage2D gives
+    // GL_INVALID_VALUE.
+    const uint32_t maxDim = c.GetDeviceDesc(dev)->texture2DMaxDim;
+    REQUIRE(maxDim > 0);
+    VriTextureDesc tooWide = Texture(VriTextureType_2D, 4, 1, 1);
+    tooWide.width          = maxDim * 2;
+    messages.errors.clear();
+    VriTexture*     texture = reinterpret_cast<VriTexture*>(&messages); // must be reset
+    const VriResult r       = c.CreateTexture(dev, &tooWide, &texture);
+    CHECK(r == VriResult_Failure);
+    CHECK(texture == nullptr);
+    REQUIRE(messages.errors.size() == 1);
+    CHECK(messages.errors[0].rfind("CreateTexture: GL_", 0) == 0);
+    MESSAGE(messages.errors[0]);
+
+    // The error is consumed: a valid texture right after succeeds with no error.
+    messages.errors.clear();
+    const VriTextureDesc valid = Texture(VriTextureType_2D, 64, 1, 1);
+    REQUIRE(c.CreateTexture(dev, &valid, &texture) == VriResult_Success);
+    CHECK(messages.errors.empty());
+    c.DestroyTexture(texture);
+    vriDestroyDevice(dev);
+}

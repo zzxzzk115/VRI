@@ -90,9 +90,16 @@ created a single cube for any CubeArray. The texture type picks the GL target, s
 1D and 1DArray textures are `VriResult_Unsupported` on GL, GLES and WebGL, and `texture1DMaxDim` is 0 there.
 GLES and WebGL have no 1D textures, and desktop GL's are not wired; use a 2D texture 1 texel high. GL's
 `CreateTexture` and `CreateBuffer` also read `glGetError` after
-creating the object. On an error they delete it and return `VriResult_Failure`, with an error that names the
-GL error, for example `CreateTexture: GL_OUT_OF_MEMORY (0x0505) creating the texture`. Errors that earlier
-calls left in the context are cleared first, so they are not taken for the creation's.
+creating the object. On an error they delete it and return `VriResult_OutOfMemory` for `GL_OUT_OF_MEMORY`, as
+the other backends return on an allocation failure, and `VriResult_Failure` for any other error. The error
+reported names the GL error, for example `CreateTexture: GL_INVALID_VALUE (0x0501) creating the texture`.
+Errors that earlier calls left in the context are cleared first, so they are not taken for the creation's.
+
+GL attaches one layer of a texture as a render target, resolve target, copy end or readback source: a layer of a
+2D array, cube map array or 3D texture, or a cube face. Before 0.3.8, it attached every texture with its own
+target, which an array, a cube map array or a cube is not, and its DSA path attached layer 0 whatever the view
+said. GL's `CmdCopyTexture` copies one layer, the region's base layer on each side, at mip 0 and the source's
+full extent. It does not honour the rest of the region.
 
 Known limitation: WebGPU validates a texture or buffer itself, and when that validation fails, `CreateTexture` /
 `CreateBuffer` still return `VriResult_Success`. WebGPU hands back an error object rather than nothing, and its

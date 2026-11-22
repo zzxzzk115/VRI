@@ -42,6 +42,7 @@ namespace vri::gl
         GLenum           srcAttachment;
         const TextureGL* dst;
         GLuint           dstMip;
+        GLuint           dstLayer;
     };
 
     struct CommandBufferGL

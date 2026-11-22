@@ -10,6 +10,7 @@
 
 #include "tests/buffer_texture_copy_probe.h"
 #include "tests/gl_compressed_probe.h"
+#include "tests/layer_attachment_probe.h"
 #include "tests/map_async_probe.h"
 #include "tests/queue_wait_probe.h"
 
@@ -2303,6 +2304,23 @@ namespace
                r.dataOk && unsignaled == VriResult_InvalidArgument;
     }
 
+    // One layer of a 2DArray or a cube face as a render target and copy end (tests/layer_attachment_probe.h).
+    bool LayerAttachmentProbe()
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = VriGraphicsAPI_OpenGLES;
+        VriDevice* dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface c {};
+        int              failure = __LINE__;
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success)
+            failure = vri::test::CheckLayerAttachments(dev, c);
+        std::printf("VRI_WEBGL_STEP: layer attachments failure line %d\n", failure);
+        vriDestroyDevice(dev);
+        return failure == 0;
+    }
+
     // WebGL2 has no cube map arrays: a valid CubeArray description is refused as Unsupported, with no object, rather
     // than created as something else.
     bool CubeArrayUnsupportedProbe()
@@ -2753,6 +2771,7 @@ int main()
     const bool compressedPass = CompressedProbe();
     const bool queueWaitPass  = QueueWaitProbe();
     const bool cubeArrayPass  = CubeArrayUnsupportedProbe();
+    const bool layerPass      = LayerAttachmentProbe();
 
     bool       msaaEdge = false;
     const bool ranMsaa  = RenderMsaaAndProbe(msaaEdge);
@@ -2764,13 +2783,13 @@ int main()
 
     const bool pass = triPass && uboPass && texPass && vbufPass && depthPass && blendPass && cullPass && mrtPass &&
                       instPass && scissorPass && computeNoPass && secondPass && mapAsyncPass && validationPass &&
-                      featurePass && copyPass && compressedPass && queueWaitPass && cubeArrayPass && msaaPass &&
-                      swapPass;
+                      featurePass && copyPass && compressedPass && queueWaitPass && cubeArrayPass && layerPass &&
+                      msaaPass && swapPass;
     std::printf("VRI_WEBGL_RESULT: %s (triangle: ran=%d topRed=%d botRed=%d | ubo: ran=%d green=%d | tex: ran=%d "
                 "blue=%d | vbuf: ran=%d yellow=%d | depth: ran=%d green=%d | blend: ran=%d purple=%d | cull: ran=%d "
                 "green=%d | mrt: ran=%d ok=%d | inst: ran=%d ok=%d | scissor: ran=%d ok=%d | compute-unsupported: "
                 "ran=%d ok=%d | second-context: ran=%d ok=%d | map-async: %d | validation-state: %d | features: %d | "
-                "copies: %d | compressed: %d | queue-wait: %d | cube-array-unsupported: %d | "
+                "copies: %d | compressed: %d | queue-wait: %d | cube-array-unsupported: %d | layer-attachments: %d | "
                 "msaa: ran=%d edge=%d | swapchain: ran=%d red=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ranTri,
@@ -2805,6 +2824,7 @@ int main()
                 compressedPass,
                 queueWaitPass,
                 cubeArrayPass,
+                layerPass,
                 ranMsaa,
                 msaaEdge,
                 ranSwap,

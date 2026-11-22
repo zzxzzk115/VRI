@@ -55,12 +55,14 @@
             }
         }
 
-        // Reports the error a creation left, if any, as "<function>: <name> (0x...) creating the <what>".
-        inline bool CreationFailed(const DeviceGL* device, const char* function, const char* what)
+        // The result of a creation from the error it left, if any, which is reported as
+        // "<function>: <name> (0x...) creating the <what>". GL_OUT_OF_MEMORY is VriResult_OutOfMemory, as an
+        // allocation failure is on Vulkan, WebGPU and Metal; any other error is VriResult_Failure.
+        inline VriResult CreationResult(const DeviceGL* device, const char* function, const char* what)
         {
             const GLenum error = glGetError();
             if (error == GL_NO_ERROR)
-                return false;
+                return VriResult_Success;
             char message[160];
             std::snprintf(message,
                           sizeof(message),
@@ -71,7 +73,30 @@
                           what);
             device->ReportError(message);
             ClearGLErrors();
-            return true;
+            return error == GL_OUT_OF_MEMORY ? VriResult_OutOfMemory : VriResult_Failure;
+        }
+
+        // Attaches layer `layer` (a cube face, or a 3D slice) of `t` at `mip` to `attachment` of the framebuffer bound
+        // to `fbTarget`. glFramebufferTexture2D takes only 2D and cube-face targets, so arrays, cube map arrays and 3D
+        // textures attach a layer, and a cube attaches its face (glFramebufferTextureLayer takes a cube only from
+        // desktop GL 4.5, not on GLES 3.0 or WebGL 2).
+        inline void AttachTextureLayer(GLenum fbTarget, GLenum attachment, const TextureGL& t, GLint mip, GLint layer)
+        {
+            switch (t.target)
+            {
+                case GL_TEXTURE_2D_ARRAY:
+                case GL_TEXTURE_CUBE_MAP_ARRAY:
+                case GL_TEXTURE_3D:
+                    glFramebufferTextureLayer(fbTarget, attachment, t.id, mip, layer);
+                    break;
+                case GL_TEXTURE_CUBE_MAP:
+                    glFramebufferTexture2D(
+                        fbTarget, attachment, static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + layer), t.id, mip);
+                    break;
+                default:
+                    glFramebufferTexture2D(fbTarget, attachment, t.target, t.id, mip);
+                    break;
+            }
         }
 
         // ESSL/WebGL has no gl_BaseVertex / gl_BaseInstance, but Slang lowers

@@ -14,12 +14,14 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
         const DescriptorGL* v = Desc(a->colors[i].view);
         key.colorId[i]        = v->texture->id;
         key.colorMip[i]       = v->mip;
+        key.colorLayer[i]     = v->layer;
     }
     if (a->depth)
     {
         const DescriptorGL* dv = Desc(a->depth->view);
         key.depthId            = dv->texture->id;
         key.depthMip           = dv->mip;
+        key.depthLayer         = dv->layer;
     }
 
 #if !defined(VRI_GL_ES_HEADERS) // GL 4.5: configure + clear the FBO by name (undeclared on GLES3)
@@ -58,13 +60,9 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
             }
             else
             {
-#if !defined(VRI_GL_ES_HEADERS)
-                if (dsa)
-                    glNamedFramebufferTexture(fbo, att, v->texture->id, static_cast<GLint>(v->mip));
-                else
-#endif
-                    glFramebufferTexture2D(
-                        GL_FRAMEBUFFER, att, v->texture->target, v->texture->id, static_cast<GLint>(v->mip));
+                // The FBO is bound, so the bind-to-edit call serves DSA contexts too, and it attaches the view's layer.
+                AttachTextureLayer(
+                    GL_FRAMEBUFFER, att, *v->texture, static_cast<GLint>(v->mip), static_cast<GLint>(v->layer));
             }
             drawBufs[i] = att;
         }
@@ -87,13 +85,8 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
                                                  static_cast<GLint>(dv->layer),
                                                  static_cast<GLsizei>(std::popcount(a->viewMask)));
             else
-#if !defined(VRI_GL_ES_HEADERS)
-                if (dsa)
-                glNamedFramebufferTexture(fbo, attach, dv->texture->id, static_cast<GLint>(dv->mip));
-            else
-#endif
-                glFramebufferTexture2D(
-                    GL_FRAMEBUFFER, attach, dv->texture->target, dv->texture->id, static_cast<GLint>(dv->mip));
+                AttachTextureLayer(
+                    GL_FRAMEBUFFER, attach, *dv->texture, static_cast<GLint>(dv->mip), static_cast<GLint>(dv->layer));
         }
     }
 
@@ -120,7 +113,8 @@ void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc*
         if (a->colors[i].resolveView)
         {
             const DescriptorGL* rv = Desc(a->colors[i].resolveView);
-            c->pendingResolves.push_back({GL_COLOR_ATTACHMENT0 + i, rv->texture, static_cast<GLuint>(rv->mip)});
+            c->pendingResolves.push_back(
+                {GL_COLOR_ATTACHMENT0 + i, rv->texture, static_cast<GLuint>(rv->mip), static_cast<GLuint>(rv->layer)});
         }
     for (uint32_t i = 0; i < a->colorNum; ++i)
         if (a->colors[i].loadOp == VriAttachmentLoadOp_Clear)
@@ -187,8 +181,11 @@ void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, c->fbo);
             glReadBuffer(r.srcAttachment);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFbo);
-            glFramebufferTexture2D(
-                GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, r.dst->target, r.dst->id, static_cast<GLint>(r.dstMip));
+            AttachTextureLayer(GL_DRAW_FRAMEBUFFER,
+                               GL_COLOR_ATTACHMENT0,
+                               *r.dst,
+                               static_cast<GLint>(r.dstMip),
+                               static_cast<GLint>(r.dstLayer));
             const GLenum drawBuf = GL_COLOR_ATTACHMENT0;
             glDrawBuffers(1, &drawBuf);
             glBlitFramebuffer(0,
@@ -882,10 +879,12 @@ void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src
     const RawFramebufferBytesGL raw(*s->device);
     GLuint                      fbos[2] = {0, 0};
     glGenFramebuffers(2, fbos);
+    // One layer each, the region's base layers, at mip 0 and the source's full extent: the rest of the region is
+    // not honoured on GL.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
-    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s->target, s->id, 0);
+    AttachTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *s, 0, static_cast<GLint>(region->src.baseLayer));
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbos[1]);
-    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, d->target, d->id, 0);
+    AttachTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *d, 0, static_cast<GLint>(region->dst.baseLayer));
     const GLint w = static_cast<GLint>(s->width), h = static_cast<GLint>(s->height);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -1112,11 +1111,6 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     const uint32_t rowLength  = region->bufferRowLength ? region->bufferRowLength : static_cast<uint32_t>(c.width);
     const uint32_t rows       = region->bufferImageHeight ? region->bufferImageHeight : static_cast<uint32_t>(c.height);
     const uint64_t sliceBytes = static_cast<uint64_t>(rowLength) * rows * t->texelSize;
-    // Array, cube and 3D textures attach one layer (glFramebufferTexture2D rejects them); plain 2D
-    // uses the 2D attach.
-    const bool layerAttach = t->target == GL_TEXTURE_2D_ARRAY || t->target == GL_TEXTURE_CUBE_MAP ||
-                             t->target == GL_TEXTURE_CUBE_MAP_ARRAY || t->target == GL_TEXTURE_3D;
-
     // WebGL2 glReadPixels only accepts GL_RGBA (+ GL_UNSIGNED_BYTE); GL_BGRA is
     // rejected (INVALID_ENUM -> zeroed readback). The BGRA8 backbuffer is GL_RGBA8
     // internally, so read it as RGBA. Bytes land R,G,B,A (B/R swapped vs the BGRA
@@ -1134,10 +1128,7 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     const PixelStoreGL store(true, *region);
     for (GLsizei slice = 0; slice < c.slices; ++slice)
     {
-        if (layerAttach)
-            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->id, mip, c.z + slice);
-        else
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, t->target, t->id, mip);
+        AttachTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *t, mip, c.z + slice);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
         const uint64_t offset = region->bufferOffset + sliceBytes * static_cast<uint64_t>(slice);
         glReadPixels(
