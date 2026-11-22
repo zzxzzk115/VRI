@@ -42,4 +42,15 @@ namespace vri::vk
     }
 
     const VriSwapChainInterface* GetSwapChainInterfaceVK();
+
+    // Swapchain creation fields chosen from what the surface reports.
+    // Opaque when the surface supports it, otherwise inherit, pre-multiplied, post-multiplied in that order; 0 when
+    // the surface reports none of them.
+    VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR supported);
+    // Color attachment (every surface supports it) plus whichever of transfer source and destination the surface
+    // supports.
+    VkImageUsageFlags ChooseImageUsage(VkImageUsageFlags supported);
+    // currentExtent, or the requested size clamped to the surface's limits when the surface leaves the size to the
+    // swapchain.
+    VkExtent2D ChooseExtent(const VkSurfaceCapabilitiesKHR& caps, uint32_t width, uint32_t height);
 } // namespace vri::vk

@@ -96,6 +96,15 @@ take the formats the surface lists. D3D12 takes the flip-model formats (RGBA8, B
 sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window framebuffer holds; it has no
 BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
 
+A Vulkan swapchain takes its composite alpha, image usage and size from what the surface reports. Alpha is opaque
+where the surface supports it. Otherwise it is inherit, then pre-multiplied, then post-multiplied, and
+`CreateSwapChain` fails with an error if the surface supports none. Android emulator surfaces support only
+inherit, so there the window system decides what the backbuffer's alpha means; write alpha = 1 to keep the window
+opaque on every platform. Swapchain textures are color attachments everywhere, and transfer sources and
+destinations only where the surface supports that. A surface without one of them logs a warning naming the missing
+usage, and copies in that direction are invalid on its textures. A surface that leaves the size to the swapchain gets the requested size clamped to its
+limits.
+
 Rendering into an sRGB texture stores display-encoded bytes on every backend; desktop GL enables
 `GL_FRAMEBUFFER_SRGB` for that, as GLES and WebGL always encode. This is a behavior change in 0.3.6: before it,
 desktop GL stored the linear value unencoded (a clear to linear 0.2158605 read back as 55, not 128). Copies,
@@ -121,6 +130,9 @@ Known swapchain limitations:
   on the swapchain's queue first.
 - Vulkan `AcquireNextTexture` waits on the host until the image is available and ignores `acquireFence` and
   `signalValue`: it never signals that fence, so do not make a submission wait on it.
+- There is no query for the usages a swapchain's textures actually have. On a Vulkan surface that does not
+  support transfer usages, the only sign is a warning from `CreateSwapChain` and `Resize`. A query for swapchain
+  texture usages may be added later.
 - On Windows with NVIDIA's Vulkan driver (seen with 621.01), destroying a Vulkan swapchain that has never
   presented ends the process if the D3D12 debug layer is on in it: the driver presents through D3D12, and the
   layer reports one of the driver's own resources as released while in use (`CORRUPTION`). A D3D12 device created

@@ -99,6 +99,7 @@ target("vri-tests")
         add_files("test_cooperative_vector_c.c", {languages = "c11"})
         add_cflags("-fshort-enums", {tools = {"gcc", "clang"}})
         add_files("test_debugutils_vk.cpp")
+        add_files("test_swapchain_caps_vk.cpp") -- swapchain fields chosen from surface capabilities
         add_files("test_devices_vk.cpp")      -- per-device entry points across instances
         add_packages("vulkan-memory-allocator")
         add_files("test_vrs_vk.cpp")          -- variable rate shading (VK_KHR_fragment_shading_rate)
