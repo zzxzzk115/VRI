@@ -97,10 +97,11 @@ sRGB 8-bit ones). GL takes RGBA8, RGBA8 sRGB and BGRA8, which its 8-bit window f
 BGRA sRGB format. Metal takes the `CAMetalLayer` formats BGRA8, BGRA8 sRGB, RGB10A2 and RGBA16F.
 
 Rendering into an sRGB texture stores display-encoded bytes on every backend; desktop GL enables
-`GL_FRAMEBUFFER_SRGB` for that, as GLES and WebGL always encode. GL presents an sRGB swapchain through a draw that
-encodes the backbuffer's linear color into the window framebuffer, because a blit would decode it and write the
-linear value; Present writes the window framebuffer with `GL_FRAMEBUFFER_SRGB` off, so it takes the bytes as they
-are. A UNORM swapchain is still blitted.
+`GL_FRAMEBUFFER_SRGB` for that, as GLES and WebGL always encode. This is a behavior change in 0.3.6: before it,
+desktop GL stored the linear value unencoded (a clear to linear 0.2158605 read back as 55, not 128). Copies,
+resolves, readback and Present move bytes through a framebuffer with `GL_FRAMEBUFFER_SRGB` off, so they neither
+decode nor encode. GL presents an sRGB swapchain through a draw that encodes the backbuffer's linear color into the
+window framebuffer, because a blit would decode it and write the linear value. A UNORM swapchain is still blitted.
 
 The swapchain tests check API results and read back backbuffers; none reads what reaches the screen. Screen output
 is measured by hand: clear an 8-bit sRGB swapchain to linear 0.2158605 (sRGB 128) and an 8-bit UNORM one to

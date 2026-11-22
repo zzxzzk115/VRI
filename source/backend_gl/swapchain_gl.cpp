@@ -255,15 +255,11 @@ void main()
         }
 
         // Writes `image`, bound as the read framebuffer, to the bound window framebuffer at `width` x `height`,
-        // upright. The window framebuffer takes the bytes as they are: desktop GL keeps GL_FRAMEBUFFER_SRGB on
-        // for rendering into sRGB textures, and an sRGB-capable window framebuffer would encode them again.
+        // upright. The window framebuffer takes the bytes as they are: an sRGB-capable one would encode them
+        // again.
         void CopyToWindow(SwapChainGL* s, const TextureGL* image, GLint width, GLint height, GLenum filter)
         {
-#if !defined(VRI_GL_ES_HEADERS)
-            const bool desktop = !s->device->IsES();
-            if (desktop)
-                glDisable(GL_FRAMEBUFFER_SRGB);
-#endif
+            const RawFramebufferBytesGL raw(*s->device);
             if (s->presentProgram)
                 PresentSrgb(s, image, width, height);
             else
@@ -277,10 +273,6 @@ void main()
                                   0,
                                   GL_COLOR_BUFFER_BIT,
                                   filter);
-#if !defined(VRI_GL_ES_HEADERS)
-            if (desktop)
-                glEnable(GL_FRAMEBUFFER_SRGB);
-#endif
         }
 
         void VRI_CALL DestroySwapChain(VriSwapChain* swapChain);

@@ -605,7 +605,7 @@ namespace vri::gl
             glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
         glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS); // filter across cube faces (always on in WebGL2/core ES3)
         // Desktop GL encodes writes into sRGB attachments only with this on (GLES and WebGL always do). The
-        // swapchain turns it off while it writes the window framebuffer (swapchain_gl.cpp, CopyToWindow).
+        // byte-moving paths turn it off while they run (RawFramebufferBytesGL).
         if (!m_es)
             glEnable(GL_FRAMEBUFFER_SRGB);
 #endif

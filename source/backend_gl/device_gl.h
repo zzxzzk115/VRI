@@ -171,5 +171,32 @@ namespace vri::gl
         bool                                           m_debugOutput = false; // KHR_debug reaches the app callback
     };
 
+    // Moves bytes through a framebuffer as they are. A desktop GL device keeps GL_FRAMEBUFFER_SRGB on so that
+    // rendering into sRGB textures encodes; blit copies, resolves, readback and the window present must neither
+    // decode nor encode, so it is off for this object's scope. GLES and WebGL have no such state.
+    class RawFramebufferBytesGL
+    {
+    public:
+        explicit RawFramebufferBytesGL(const DeviceGL& device) : m_desktop(!device.IsES())
+        {
+#if !defined(VRI_GL_ES_HEADERS)
+            if (m_desktop)
+                glDisable(GL_FRAMEBUFFER_SRGB);
+#endif
+        }
+        ~RawFramebufferBytesGL()
+        {
+#if !defined(VRI_GL_ES_HEADERS)
+            if (m_desktop)
+                glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
+        }
+        RawFramebufferBytesGL(const RawFramebufferBytesGL&)            = delete;
+        RawFramebufferBytesGL& operator=(const RawFramebufferBytesGL&) = delete;
+
+    private:
+        bool m_desktop;
+    };
+
     core::DeviceBase* CreateDevice(const VriDeviceCreationDesc& desc, VriResult& outResult);
 } // namespace vri::gl

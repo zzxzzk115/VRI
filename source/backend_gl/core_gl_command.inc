@@ -178,7 +178,8 @@ void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
     // (the multisample read FBO -> single-sample draw FBO performs the resolve).
     if (!c->pendingResolves.empty())
     {
-        GLuint resolveFbo = 0;
+        const RawFramebufferBytesGL raw(*c->device);
+        GLuint                      resolveFbo = 0;
         glGenFramebuffers(1, &resolveFbo);
         for (const PendingResolveGL& r : c->pendingResolves)
         {
@@ -877,7 +878,8 @@ void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src
         CopyCompressedTexture(d, s, region);
         return;
     }
-    GLuint fbos[2] = {0, 0};
+    const RawFramebufferBytesGL raw(*s->device);
+    GLuint                      fbos[2] = {0, 0};
     glGenFramebuffers(2, fbos);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fbos[0]);
     glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s->target, s->id, 0);
@@ -1120,7 +1122,8 @@ void VRI_CALL CmdReadbackTextureToBuffer(VriCommandBuffer*,
     if (b->device->IsES() && readFmt == GL_BGRA)
         readFmt = GL_RGBA;
 
-    GLuint fbo = 0;
+    const RawFramebufferBytesGL raw(*b->device);
+    GLuint                      fbo = 0;
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glBindBuffer(GL_PIXEL_PACK_BUFFER, b->id);
