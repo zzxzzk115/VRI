@@ -13,6 +13,13 @@ namespace vri::d3d12
         // Flip-model swapchains reject sRGB formats: the buffers are created with the UNORM
         // format of the same layout and the sRGB encoding comes from the render-target view,
         // which takes the texture's (sRGB) format.
+        // The buffer formats a flip-model swapchain accepts.
+        bool IsFlipModelFormat(DXGI_FORMAT f)
+        {
+            return f == DXGI_FORMAT_R16G16B16A16_FLOAT || f == DXGI_FORMAT_B8G8R8A8_UNORM ||
+                   f == DXGI_FORMAT_R8G8B8A8_UNORM || f == DXGI_FORMAT_R10G10B10A2_UNORM;
+        }
+
         DXGI_FORMAT FlipModelBufferFormat(DXGI_FORMAT f)
         {
             switch (f)
@@ -70,12 +77,10 @@ namespace vri::d3d12
             HWND hwnd = static_cast<HWND>(desc->window.handle.win32.hwnd);
             if (!hwnd)
                 return VriResult_InvalidArgument;
+            // Not a diagnostic: trying formats in turn until one is accepted is the expected use.
             const DXGI_FORMAT format = ToDxgiFormat(desc->format).format;
-            if (format == DXGI_FORMAT_UNKNOWN)
-            {
-                d->ReportError("D3D12 swapchain: unmapped DXGI format");
+            if (!IsFlipModelFormat(FlipModelBufferFormat(format)))
                 return VriResult_Unsupported;
-            }
             ID3D12CommandQueue* queue = reinterpret_cast<QueueD3D12*>(desc->queue)->queue.Get();
 
             SwapChainD3D12* s = new SwapChainD3D12 {};

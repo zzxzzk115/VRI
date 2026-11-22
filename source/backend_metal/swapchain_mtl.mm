@@ -56,6 +56,12 @@ namespace vri::mtl
         {
             if (desc->window.type != VriWindowSystem_Cocoa || desc->window.handle.cocoa.layer == nullptr)
                 return VriResult_Unsupported;
+            // CAMetalLayer takes only these of the formats VRI maps. Not a diagnostic: trying formats in turn until
+            // one is accepted is the expected use.
+            const MTLPixelFormat fmt = ToMtlFormat(desc->format);
+            if (fmt != MTLPixelFormatBGRA8Unorm && fmt != MTLPixelFormatBGRA8Unorm_sRGB &&
+                fmt != MTLPixelFormatRGBA16Float && fmt != MTLPixelFormatRGB10A2Unorm)
+                return VriResult_Unsupported;
 
             DeviceMTL* d = Dev(device);
             SwapChainMTL* sc = new SwapChainMTL{};
@@ -64,9 +70,6 @@ namespace vri::mtl
             sc->layer = (CAMetalLayer*)desc->window.handle.cocoa.layer;
             [sc->layer retain];
 
-            MTLPixelFormat fmt = ToMtlFormat(desc->format);
-            if (fmt == MTLPixelFormatInvalid)
-                fmt = MTLPixelFormatBGRA8Unorm;
             sc->format = fmt;
             sc->width = desc->width;
             sc->height = desc->height;

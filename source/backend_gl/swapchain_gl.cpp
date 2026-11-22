@@ -240,6 +240,12 @@ void main()
 
         VriResult VRI_CALL CreateSwapChain(VriDevice* device, const VriSwapChainDesc* desc, VriSwapChain** out)
         {
+            // Present copies the backbuffer into the window's 8-bit RGBA default framebuffer, so only formats
+            // that match it are presented as requested; GL has no BGRA sRGB format. Not a diagnostic: trying
+            // formats in turn until one is accepted is the expected use.
+            if (desc->format != VriFormat_RGBA8_UNORM && desc->format != VriFormat_RGBA8_SRGB &&
+                desc->format != VriFormat_BGRA8_UNORM)
+                return VriResult_Unsupported;
             DeviceGL*      d = Dev(device);
             const uint32_t n = desc->textureNum ? desc->textureNum : 2u;
             const uint32_t w = desc->width ? desc->width : 1u;

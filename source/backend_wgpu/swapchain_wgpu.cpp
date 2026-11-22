@@ -153,9 +153,9 @@ namespace vri::wgpu
                     break;
                 }
             wgpuSurfaceCapabilitiesFreeMembers(caps);
+            // Not a diagnostic: trying formats in turn until one is accepted is the expected use.
             if (chosen != base)
             {
-                d->ReportError("requested swapchain channel format is unsupported by the WebGPU surface");
                 wgpuSurfaceRelease(sc->surface);
                 delete sc;
                 return VriResult_Unsupported;
