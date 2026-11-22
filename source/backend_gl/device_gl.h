@@ -172,7 +172,7 @@ namespace vri::gl
     };
 
     // Moves bytes through a framebuffer as they are. A desktop GL device keeps GL_FRAMEBUFFER_SRGB on so that
-    // rendering into sRGB textures encodes; blit copies, resolves, readback and the window present must neither
+    // rendering into sRGB textures encodes; blit copies, readback and the window present must neither
     // decode nor encode, so it is off for this object's scope. GLES and WebGL have no such state.
     class RawFramebufferBytesGL
     {

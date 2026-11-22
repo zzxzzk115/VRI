@@ -178,8 +178,9 @@ void VRI_CALL CmdEndRendering(VriCommandBuffer* cmd)
     // (the multisample read FBO -> single-sample draw FBO performs the resolve).
     if (!c->pendingResolves.empty())
     {
-        const RawFramebufferBytesGL raw(*c->device);
-        GLuint                      resolveFbo = 0;
+        // Not raw bytes: the blit averages the samples, which with GL_FRAMEBUFFER_SRGB on happens in linear space
+        // for an sRGB attachment, as on the other backends.
+        GLuint resolveFbo = 0;
         glGenFramebuffers(1, &resolveFbo);
         for (const PendingResolveGL& r : c->pendingResolves)
         {
