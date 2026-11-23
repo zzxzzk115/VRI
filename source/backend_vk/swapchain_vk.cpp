@@ -501,6 +501,12 @@ namespace vri::vk
             return VriResult_Success;
         }
 
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain*)
+        {
+            // The textures are built at creation and by Resize; acquiring only picks one by index.
+            return VriSwapChainTextureModel_Fixed;
+        }
+
         const VriSwapChainInterface g_swapChainVK = {
             CreateSwapChain,
             DestroySwapChain,
@@ -509,6 +515,7 @@ namespace vri::vk
             Present,
             Resize,
             GetSwapChainExtent,
+            GetSwapChainTextureModel,
         };
     } // namespace
 

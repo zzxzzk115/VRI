@@ -214,6 +214,12 @@ namespace vri::d3d12
             *outHeight = s->height;
             return VriResult_Success;
         }
+
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain*)
+        {
+            // The textures are built at creation and by Resize; acquiring only picks one by index.
+            return VriSwapChainTextureModel_Fixed;
+        }
     } // namespace
 
     const VriSwapChainInterface* GetSwapChainInterfaceD3D12()
@@ -226,6 +232,7 @@ namespace vri::d3d12
             Present,
             Resize,
             GetSwapChainExtent,
+            GetSwapChainTextureModel,
         };
         return &table;
     }

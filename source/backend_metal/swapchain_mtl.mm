@@ -1,9 +1,10 @@
 // swapchain_mtl.mm - native Metal presentation via CAMetalLayer.
 //
 // The window integration (SDL3) hands us a ready CAMetalLayer in cocoa.layer
-// (same handle the MoltenVK backend wraps). nextDrawable returns the current
-// backbuffer; we expose one stable VRI texture whose underlying drawable texture
-// is refreshed on each AcquireNextTexture (mirrors the WebGPU backend's model).
+// (same handle the MoltenVK backend wraps). The swapchain exposes one VRI texture,
+// an owned render target (`backing`) that only Resize rebuilds: AcquireNextTexture
+// takes the layer's next drawable, and Present copies `backing` onto it. This is the
+// Fixed texture model, unlike WebGPU, whose texture is replaced at every acquire.
 
 #include "swapchain_mtl.h"
 #include "conversions_mtl.h"
@@ -184,6 +185,13 @@ namespace vri::mtl
             return VriResult_Success;
         }
 
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain*)
+        {
+            // Frames are rendered into `backing`, which is rebuilt only by Resize; Present copies it onto the
+            // drawable.
+            return VriSwapChainTextureModel_Fixed;
+        }
+
         const VriSwapChainInterface g_swapChainMTL = {
             CreateSwapChain,
             DestroySwapChain,
@@ -192,6 +200,7 @@ namespace vri::mtl
             Present,
             Resize,
             GetSwapChainExtent,
+            GetSwapChainTextureModel,
         };
     } // namespace
 

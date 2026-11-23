@@ -74,6 +74,23 @@ typedef enum VriPresentMode
     VriPresentMode_Immediate,   /* no vsync: tears, lowest latency, uncapped */
 } VriPresentMode;
 
+/* How a swapchain's textures relate to its images, from GetSwapChainTextureModel. */
+typedef enum VriSwapChainTextureModel
+{
+    /* GetSwapChainTextures returns textures that stay the same until Resize or DestroySwapChain, and
+       AcquireNextTexture picks one of them by index. A texture and the views made from it stay valid
+       until then, across frames. Vulkan, D3D12, GL and Metal. Metal returns one texture: the frame is
+       rendered into it and Present copies it onto the drawable. */
+    VriSwapChainTextureModel_Fixed = 0,
+    /* GetSwapChainTextures returns one texture handle, and each AcquireNextTexture puts a new image
+       behind it. The image, and any view made from the handle, are valid only from that acquire until
+       the Present that follows: Present releases the image and leaves the handle empty until the next
+       acquire. Make views after each acquire and destroy them after the Present. WebGPU, native and in
+       the browser (where the canvas is presented when the frame's callback returns). */
+    VriSwapChainTextureModel_Replaced,
+    VriSwapChainTextureModel_MaxEnum = 0x7fffffff
+} VriSwapChainTextureModel;
+
 typedef struct VriSwapChainDesc
 {
     VriWindowHandle window;
@@ -106,11 +123,15 @@ typedef struct VriSwapChainInterface
        retain the textures they use; the browser's WebGPU keeps released objects alive until the GPU is done. */
     void(VRI_CALL* DestroySwapChain)(VriSwapChain* swapChain);
 
-    /* Borrowed array of backbuffer textures (owned by the swapchain). */
+    /* Borrowed array of backbuffer textures (owned by the swapchain). How long they and their views stay
+       valid depends on GetSwapChainTextureModel: until Resize or DestroySwapChain (Fixed), or only from
+       an acquire to the Present that follows (Replaced). */
     VriResult(VRI_CALL* GetSwapChainTextures)(VriSwapChain* swapChain, VriTexture** outTextures, uint32_t* ioCount);
 
-    /* Acquire the next image; signals `acquireFence` to `signalValue` when ready. Known limitation: Vulkan
-       instead waits on the host until the image is available and never signals `acquireFence`. */
+    /* Acquire the next image; signals `acquireFence` to `signalValue` when ready. With the Fixed model,
+       `outIndex` picks one of the GetSwapChainTextures textures. With the Replaced model, it is always 0, and
+       the one texture holds the new image until the next Present. Known limitation: Vulkan instead waits
+       on the host until the image is available and never signals `acquireFence`. */
     VriResult(VRI_CALL* AcquireNextTexture)(VriSwapChain* swapChain,
                                             VriFence*     acquireFence,
                                             uint64_t      signalValue,
@@ -134,6 +155,10 @@ typedef struct VriSwapChainInterface
        than the backbuffer is undefined behavior (GPU faults, black window). May be null in
        backends that predate it; fall back to the requested size then. */
     VriResult(VRI_CALL* GetSwapChainExtent)(VriSwapChain* swapChain, uint32_t* outWidth, uint32_t* outHeight);
+
+    /* Whether this swapchain's textures stay the same for its lifetime (Fixed) or are replaced at every
+       acquire (Replaced). See VriSwapChainTextureModel. */
+    VriSwapChainTextureModel(VRI_CALL* GetSwapChainTextureModel)(VriSwapChain* swapChain);
 } VriSwapChainInterface;
 
 VRI_EXTERN_C_END
