@@ -429,7 +429,8 @@ namespace vri::test
     // - a 16x16 block at (0, 0) of mip 0, layer 0 to (4, 4) of mip 0, layer 1 (different layers).
     // Then three copies that share a subresource are refused with one error each and copy nothing: two blocks of
     // mip 1, layer 0 that do not overlap; layers 0-1 of mip 0 onto base layer 1; and no region at all (mip 0, layer 0
-    // onto itself). Both destinations are read back. Returns 0 on success, else the failing line.
+    // onto itself). A copy between two slices of mip 0 of a 3D texture is refused too: one mip of a 3D texture, all
+    // its slices, is one subresource. Both destinations are read back. Returns 0 on success, else the failing line.
     inline int CheckCopyWithinTexture(VriDevice* dev, const VriCoreInterface& c, CopyErrors& errors)
     {
         constexpr uint32_t kSize      = 64;
@@ -457,6 +458,16 @@ namespace vri::test
         td.memoryLocation = VriMemoryLocation_Device;
         VriTexture* texture = nullptr;
         if (c.CreateTexture(dev, &td, &texture) != VriResult_Success)
+            return __LINE__;
+        VriTextureDesc vd  = td;
+        vd.type            = VriTextureType_3D;
+        vd.width           = 16;
+        vd.height          = 16;
+        vd.depth           = 4;
+        vd.mipNum          = 1;
+        vd.layerNum        = 1;
+        VriTexture* volume = nullptr;
+        if (c.CreateTexture(dev, &vd, &volume) != VriResult_Success)
             return __LINE__;
 
         // Staging: slot 0 holds the pattern for mip 0, layer 0; slot 1 holds zeros.
@@ -630,6 +641,22 @@ namespace vri::test
                 return __LINE__;
             }
         }
+        // Slice 0 to slice 2 of mip 0 of the 3D texture: different slices, the same subresource.
+        VriTextureCopyDesc slices = region(0, 0, 1, 0, 0, 8, 0, 0, 0, 0);
+        slices.dst.z              = 2;
+        errors.messages.clear();
+        c.CmdCopyTexture(cmd, volume, volume, &slices);
+        const char* const sliceError =
+            "CmdCopyTexture: the source and destination are the same subresource of one texture (mip 0, layer 0); a "
+            "copy within one texture must be between different mips or layers";
+        if (errors.messages.size() != 1 || errors.messages[0] != sliceError)
+        {
+            std::printf("copy within one 3D texture: %zu errors, the first \"%s\", want one: \"%s\"\n",
+                        errors.messages.size(),
+                        errors.messages.empty() ? "" : errors.messages[0].c_str(),
+                        sliceError);
+            return __LINE__;
+        }
 
         errors.messages.clear();
         barrier(1,
@@ -707,6 +734,7 @@ namespace vri::test
         c.DestroyCommandAllocator(alloc);
         c.DestroyBuffer(readback);
         c.DestroyBuffer(upload);
+        c.DestroyTexture(volume);
         c.DestroyTexture(texture);
         return failure;
     }
