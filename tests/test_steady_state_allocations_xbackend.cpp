@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 #include <string>
 
@@ -211,6 +212,15 @@ namespace
             Buffer(c, dev, 256, VriBufferUsage_IndexBuffer | VriBufferUsage_TransferDst, VriMemoryLocation_Device);
         VriBuffer* storage =
             Buffer(c, dev, 256, VriBufferUsage_StorageBuffer | VriBufferUsage_TransferSrc, VriMemoryLocation_Device);
+        // The indices 0, 1, 2, copied into the index buffer in the first frame; every frame also copies them into
+        // copyDestination for CmdCopyBuffer.
+        VriBuffer*     indexSource     = Buffer(c, dev, 256, VriBufferUsage_TransferSrc, VriMemoryLocation_HostUpload);
+        VriBuffer*     copyDestination = Buffer(c, dev, 256, VriBufferUsage_TransferDst, VriMemoryLocation_Device);
+        const uint16_t indexData[4]    = {0, 1, 2, 0};
+        void*          mapped          = c.MapBuffer(indexSource, 0, sizeof(indexData));
+        REQUIRE(mapped != nullptr);
+        std::memcpy(mapped, indexData, sizeof(indexData));
+        c.UnmapBuffer(indexSource);
 
         VriTextureViewDesc cvd {};
         cvd.texture              = color;
@@ -349,6 +359,22 @@ namespace
         const auto frame = [&](bool first) {
             c.ResetCommandAllocator(alloc);
             REQUIRE(c.BeginCommandBuffer(cmd) == VriResult_Success);
+            if (first)
+            {
+                VriBufferCopyDesc indexCopy {};
+                indexCopy.size = sizeof(indexData);
+                c.CmdCopyBuffer(cmd, indices, indexSource, &indexCopy);
+                VriBufferBarrierDesc bb {};
+                bb.buffer        = indices;
+                bb.before.access = VriAccess_CopyDestinationWrite;
+                bb.before.stages = VriPipelineStage_AllCommands;
+                bb.after.access  = VriAccess_IndexBufferRead;
+                bb.after.stages  = VriPipelineStage_AllCommands;
+                VriBarrierGroupDesc g {};
+                g.buffers   = &bb;
+                g.bufferNum = 1;
+                c.CmdBarrier(cmd, &g);
+            }
             // Upload into the sampled texture, then sample it in a render pass.
             Barrier(c,
                     cmd,
@@ -442,7 +468,7 @@ namespace
             c.CmdReadbackTextureToBuffer(cmd, readback, color, &imageRegion);
             VriBufferCopyDesc bufferCopy {};
             bufferCopy.size = 256;
-            c.CmdCopyBuffer(cmd, indices, vertices, &bufferCopy);
+            c.CmdCopyBuffer(cmd, copyDestination, indexSource, &bufferCopy);
             if (compute)
             {
                 c.CmdSetPipeline(cmd, computePipeline);
@@ -498,7 +524,7 @@ namespace
         c.DestroyDescriptor(sampler);
         c.DestroyDescriptor(texView);
         c.DestroyDescriptor(colorView);
-        for (VriBuffer* b : {upload, readback, vertices, indices, storage})
+        for (VriBuffer* b : {upload, readback, vertices, indices, storage, indexSource, copyDestination})
             c.DestroyBuffer(b);
         for (VriTexture* t : {color, sampled, copyTarget, mipped})
             c.DestroyTexture(t);
