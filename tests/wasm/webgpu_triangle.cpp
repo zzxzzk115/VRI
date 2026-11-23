@@ -669,7 +669,7 @@ int main()
     const bool mapCancel  = MapCancelProbe();
     const bool swapModel  = SwapChainModelProbe();
     const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies &&
-                            queueWait && fences && mapCancel && swapModel;
+                      queueWait && fences && mapCancel && swapModel;
     std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
                 "features=%d copies=%d queueWait=%d fences=%d mapCancel=%d swapModel=%d)\n",
                 pass ? "PASS" : "FAIL",
