@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace vri::test
@@ -409,6 +410,304 @@ namespace vri::test
         c.DestroyDescriptor(view);
         c.DestroyTexture(target);
         c.DestroyTexture(source);
+        return failure;
+    }
+
+    // The errors a device reports, for the copies within one texture that must be refused.
+    struct CopyErrors
+    {
+        std::vector<std::string> messages;
+    };
+    inline void VRI_CALL RecordCopyError(void* userArg, VriMessageSeverity severity, const char* message)
+    {
+        if (severity == VriMessageSeverity_Error)
+            static_cast<CopyErrors*>(userArg)->messages.emplace_back(message ? message : "");
+    }
+
+    // Copies within one 64x64 2DArray of two mips and two layers, on a device whose errors go to `errors`:
+    // - a 32x32 block at (8, 4) of mip 0, layer 0 to mip 1, layer 0 (different mips);
+    // - a 16x16 block at (0, 0) of mip 0, layer 0 to (4, 4) of mip 0, layer 1 (different layers).
+    // Then three copies that share a subresource are refused with one error each and copy nothing: two blocks of
+    // mip 1, layer 0 that do not overlap; layers 0-1 of mip 0 onto base layer 1; and no region at all (mip 0, layer 0
+    // onto itself). Both destinations are read back. Returns 0 on success, else the failing line.
+    inline int CheckCopyWithinTexture(VriDevice* dev, const VriCoreInterface& c, CopyErrors& errors)
+    {
+        constexpr uint32_t kSize      = 64;
+        constexpr uint32_t kRowLength = 64;
+        constexpr uint64_t kSlot      = uint64_t(kRowLength) * kSize * 4;
+
+        const auto texel = [](uint32_t x, uint32_t y) {
+            return (x & 0xFF) | (y & 0xFF) << 8 | 0x01u << 16 | 0xFFu << 24;
+        };
+        const auto mipSize = [](uint32_t mip) { return kSize >> mip; };
+
+        VriQueue* queue = nullptr;
+        if (c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) != VriResult_Success)
+            return __LINE__;
+        VriTextureDesc td {};
+        td.type           = VriTextureType_2DArray;
+        td.format         = VriFormat_RGBA8_UNORM;
+        td.width          = kSize;
+        td.height         = kSize;
+        td.depth          = 1;
+        td.mipNum         = 2;
+        td.layerNum       = 2;
+        td.sampleNum      = 1;
+        td.usage          = VriTextureUsage_TransferSrc | VriTextureUsage_TransferDst | VriTextureUsage_ShaderResource;
+        td.memoryLocation = VriMemoryLocation_Device;
+        VriTexture* texture = nullptr;
+        if (c.CreateTexture(dev, &td, &texture) != VriResult_Success)
+            return __LINE__;
+
+        // Staging: slot 0 holds the pattern for mip 0, layer 0; slot 1 holds zeros.
+        VriBufferDesc ud {};
+        ud.size              = kSlot * 2;
+        ud.usage             = VriBufferUsage_TransferSrc;
+        ud.memoryLocation    = VriMemoryLocation_HostUpload;
+        VriBuffer*    upload = nullptr;
+        VriBufferDesc rd     = ud;
+        rd.usage             = VriBufferUsage_TransferDst;
+        rd.memoryLocation    = VriMemoryLocation_HostReadback;
+        VriBuffer* readback  = nullptr;
+        if (c.CreateBuffer(dev, &ud, &upload) != VriResult_Success ||
+            c.CreateBuffer(dev, &rd, &readback) != VriResult_Success)
+            return __LINE__;
+        auto* staging = static_cast<uint32_t*>(c.MapBuffer(upload, 0, ud.size));
+        if (!staging)
+            return __LINE__;
+        for (uint32_t i = 0; i < ud.size / 4; ++i)
+            staging[i] = 0;
+        for (uint32_t y = 0; y < kSize; ++y)
+            for (uint32_t x = 0; x < kSize; ++x)
+                staging[y * kRowLength + x] = texel(x, y);
+        c.UnmapBuffer(upload);
+
+        VriCommandAllocator* alloc = nullptr;
+        VriCommandBuffer*    cmd   = nullptr;
+        VriFence*            fence = nullptr;
+        if (c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc) != VriResult_Success ||
+            c.CreateCommandBuffer(alloc, &cmd) != VriResult_Success ||
+            c.CreateFence(dev, 0, &fence) != VriResult_Success)
+            return __LINE__;
+        // One subresource's barrier: the source and destination of a copy within one texture are in different states.
+        const auto barrier =
+            [&](uint32_t mip, uint32_t layer, VriAccessFlags ba, VriLayout bl, VriAccessFlags aa, VriLayout al) {
+                VriTextureBarrierDesc tb {};
+                tb.texture       = texture;
+                tb.before.access = ba;
+                tb.before.layout = bl;
+                tb.before.stages = ba == VriAccess_None ? VriPipelineStage_None : VriPipelineStage_Transfer;
+                tb.after.access  = aa;
+                tb.after.layout  = al;
+                tb.after.stages  = VriPipelineStage_Transfer;
+                tb.aspect        = VriImageAspect_Color;
+                tb.baseMip       = mip;
+                tb.mipNum        = 1;
+                tb.baseLayer     = layer;
+                tb.layerNum      = 1;
+                VriBarrierGroupDesc g {};
+                g.textures   = &tb;
+                g.textureNum = 1;
+                c.CmdBarrier(cmd, &g);
+            };
+        const auto bufferRegion = [&](uint64_t offset, uint32_t mip, uint32_t layer) {
+            VriBufferTextureCopyDesc r {};
+            r.bufferOffset      = offset;
+            r.bufferRowLength   = kRowLength;
+            r.bufferImageHeight = mipSize(mip);
+            r.texture.aspect    = VriImageAspect_Color;
+            r.texture.mip       = mip;
+            r.texture.baseLayer = layer;
+            r.texture.layerNum  = 1;
+            r.texture.width     = mipSize(mip);
+            r.texture.height    = mipSize(mip);
+            r.texture.depth     = 1;
+            return r;
+        };
+        const auto region = [](uint32_t srcMip,
+                               uint32_t srcLayer,
+                               uint32_t layerNum,
+                               int32_t  srcX,
+                               int32_t  srcY,
+                               uint32_t size,
+                               uint32_t dstMip,
+                               uint32_t dstLayer,
+                               int32_t  dstX,
+                               int32_t  dstY) {
+            VriTextureCopyDesc r {};
+            r.src.aspect    = VriImageAspect_Color;
+            r.src.mip       = srcMip;
+            r.src.baseLayer = srcLayer;
+            r.src.layerNum  = layerNum;
+            r.src.x         = srcX;
+            r.src.y         = srcY;
+            r.src.width     = size;
+            r.src.height    = size;
+            r.src.depth     = 1;
+            r.dst           = r.src;
+            r.dst.mip       = dstMip;
+            r.dst.baseLayer = dstLayer;
+            r.dst.x         = dstX;
+            r.dst.y         = dstY;
+            return r;
+        };
+
+        if (c.BeginCommandBuffer(cmd) != VriResult_Success)
+            return __LINE__;
+        for (uint32_t mip = 0; mip < 2; ++mip)
+            for (uint32_t layer = 0; layer < 2; ++layer)
+            {
+                barrier(mip,
+                        layer,
+                        VriAccess_None,
+                        VriLayout_Undefined,
+                        VriAccess_CopyDestinationWrite,
+                        VriLayout_CopyDestination);
+                const VriBufferTextureCopyDesc fill = bufferRegion(mip == 0 && layer == 0 ? 0 : kSlot, mip, layer);
+                c.CmdUploadBufferToTexture(cmd, texture, upload, &fill);
+            }
+        barrier(0,
+                0,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination,
+                VriAccess_CopySourceRead,
+                VriLayout_CopySource);
+        barrier(1,
+                0,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination);
+        barrier(0,
+                1,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination);
+
+        errors.messages.clear();
+        const VriTextureCopyDesc toMip1 = region(0, 0, 1, 8, 4, 32, 1, 0, 0, 0);
+        c.CmdCopyTexture(cmd, texture, texture, &toMip1);
+        const VriTextureCopyDesc toLayer1 = region(0, 0, 1, 0, 0, 16, 0, 1, 4, 4);
+        c.CmdCopyTexture(cmd, texture, texture, &toLayer1);
+        if (!errors.messages.empty())
+        {
+            std::printf("copy within one texture: a copy between different subresources reported \"%s\"\n",
+                        errors.messages[0].c_str());
+            return __LINE__;
+        }
+
+        struct Refused
+        {
+            VriTextureCopyDesc region;
+            bool               hasRegion;
+            const char*        message;
+        };
+        const Refused refused[] = {
+            {region(1, 0, 1, 0, 0, 8, 1, 0, 16, 16),
+             true,
+             "CmdCopyTexture: the source and destination are the same subresource of one texture (mip 1, layer 0); a "
+             "copy within one texture must be between different mips or layers"},
+            {region(0, 0, 2, 0, 0, 8, 0, 1, 0, 0),
+             true,
+             "CmdCopyTexture: the source and destination are the same subresource of one texture (mip 0, layer 1); a "
+             "copy within one texture must be between different mips or layers"},
+            {VriTextureCopyDesc {},
+             false,
+             "CmdCopyTexture: the source and destination are the same subresource of one texture (mip 0, layer 0); a "
+             "copy within one texture must be between different mips or layers"},
+        };
+        for (const Refused& r : refused)
+        {
+            errors.messages.clear();
+            c.CmdCopyTexture(cmd, texture, texture, r.hasRegion ? &r.region : nullptr);
+            if (errors.messages.size() != 1 || errors.messages[0] != r.message)
+            {
+                std::printf("copy within one texture: %zu errors, the first \"%s\", want one: \"%s\"\n",
+                            errors.messages.size(),
+                            errors.messages.empty() ? "" : errors.messages[0].c_str(),
+                            r.message);
+                return __LINE__;
+            }
+        }
+
+        errors.messages.clear();
+        barrier(1,
+                0,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination,
+                VriAccess_CopySourceRead,
+                VriLayout_CopySource);
+        barrier(0,
+                1,
+                VriAccess_CopyDestinationWrite,
+                VriLayout_CopyDestination,
+                VriAccess_CopySourceRead,
+                VriLayout_CopySource);
+        const VriBufferTextureCopyDesc readMip1   = bufferRegion(0, 1, 0);
+        const VriBufferTextureCopyDesc readLayer1 = bufferRegion(kSlot, 0, 1);
+        c.CmdReadbackTextureToBuffer(cmd, readback, texture, &readMip1);
+        c.CmdReadbackTextureToBuffer(cmd, readback, texture, &readLayer1);
+        if (c.EndCommandBuffer(cmd) != VriResult_Success)
+            return __LINE__;
+        VriFenceSubmitDesc signal {};
+        signal.fence = fence;
+        signal.value = 1;
+        VriQueueSubmitDesc submit {};
+        submit.commandBuffers   = &cmd;
+        submit.commandBufferNum = 1;
+        submit.signalFences     = &signal;
+        submit.signalFenceNum   = 1;
+        if (c.QueueSubmit(queue, &submit) != VriResult_Success)
+            return __LINE__;
+        c.Wait(fence, 1);
+
+        // Mip 1, layer 0 is the block of mip 0 at (8, 4), whole. Mip 0, layer 1 holds the 16x16 block at (4, 4) and
+        // zeros elsewhere. A refused copy that ran anyway would change either.
+        const auto expected = [&](uint32_t slot, uint32_t x, uint32_t y) -> uint32_t {
+            if (slot == 0)
+                return texel(x + 8, y + 4);
+            if (x >= 4 && x < 20 && y >= 4 && y < 20)
+                return texel(x - 4, y - 4);
+            return 0;
+        };
+        int        failure = 0;
+        const auto result  = static_cast<const uint32_t*>(c.MapBuffer(readback, 0, rd.size));
+        if (!result)
+            failure = __LINE__;
+        for (uint32_t slot = 0; slot < 2 && !failure; ++slot)
+        {
+            const uint32_t size = slot == 0 ? mipSize(1) : mipSize(0);
+            for (uint32_t y = 0; y < size && !failure; ++y)
+                for (uint32_t x = 0; x < size && !failure; ++x)
+                {
+                    const uint32_t got  = result[slot * (kSlot / 4) + y * kRowLength + x];
+                    const uint32_t want = expected(slot, x, y);
+                    if (got != want)
+                    {
+                        std::printf("copy within one texture: %s at (%u, %u): got %08x, want %08x\n",
+                                    slot == 0 ? "mip 1, layer 0" : "mip 0, layer 1",
+                                    x,
+                                    y,
+                                    got,
+                                    want);
+                        failure = __LINE__;
+                    }
+                }
+        }
+        if (result)
+            c.UnmapBuffer(readback);
+        if (!failure && !errors.messages.empty())
+        {
+            std::printf("copy within one texture: an error after the copies: \"%s\"\n", errors.messages[0].c_str());
+            failure = __LINE__;
+        }
+
+        c.DestroyFence(fence);
+        c.DestroyCommandAllocator(alloc);
+        c.DestroyBuffer(readback);
+        c.DestroyBuffer(upload);
+        c.DestroyTexture(texture);
         return failure;
     }
 } // namespace vri::test

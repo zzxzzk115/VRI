@@ -1718,8 +1718,10 @@ namespace vri::vk
                                      VriTexture*               src,
                                      const VriTextureCopyDesc* region)
         {
-            const TextureVK*           s           = reinterpret_cast<const TextureVK*>(src);
-            const TextureVK*           d           = reinterpret_cast<const TextureVK*>(dst);
+            const TextureVK* s = reinterpret_cast<const TextureVK*>(src);
+            const TextureVK* d = reinterpret_cast<const TextureVK*>(dst);
+            if (core::RejectDesc(*s->device, core::CheckTextureCopy(dst, src, region)))
+                return;
             const VriTextureRegionDesc source      = region ? region->src : VriTextureRegionDesc {};
             const VriTextureRegionDesc destination = region ? region->dst : VriTextureRegionDesc {};
             VkImageCopy                c {};

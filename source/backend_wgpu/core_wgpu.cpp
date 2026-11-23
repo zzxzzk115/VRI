@@ -1810,9 +1810,11 @@ namespace vri::wgpu
                                      const VriTextureCopyDesc* region)
         {
             CommandBufferWGPU* c = CB(cmd);
+            const TextureWGPU* s = reinterpret_cast<const TextureWGPU*>(src);
+            const TextureWGPU* d = reinterpret_cast<const TextureWGPU*>(dst);
+            if (core::RejectDesc(*s->device, core::CheckTextureCopy(dst, src, region)))
+                return;
             EndComputePass(c);
-            const TextureWGPU*         s           = reinterpret_cast<const TextureWGPU*>(src);
-            const TextureWGPU*         d           = reinterpret_cast<const TextureWGPU*>(dst);
             const VriTextureRegionDesc source      = region ? region->src : VriTextureRegionDesc {};
             const VriTextureRegionDesc destination = region ? region->dst : VriTextureRegionDesc {};
             // As in CmdUploadBufferToTexture: array layers are origin.z and depthOrArrayLayers, as volume slices are.

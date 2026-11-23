@@ -2305,21 +2305,33 @@ namespace
                r.dataOk && unsignaled == VriResult_InvalidArgument;
     }
 
-    // CmdCopyTexture follows its region through GL's blit path (tests/texture_copy_region_probe.h).
+    // CmdCopyTexture follows its region through GL's blit path, and within one texture copies between different mips
+    // or layers and refuses a shared subresource (tests/texture_copy_region_probe.h).
     bool TextureCopyRegionProbe()
     {
-        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
-        dc.graphicsAPI           = VriGraphicsAPI_OpenGLES;
-        VriDevice* dev           = nullptr;
+        vri::test::CopyErrors errors;
+        VriCallbackInterface  callbacks = {};
+        callbacks.MessageCallback       = vri::test::RecordCopyError;
+        callbacks.userArg               = &errors;
+        VriDeviceCreationDesc dc        = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI                  = VriGraphicsAPI_OpenGLES;
+        dc.callbackInterface            = &callbacks;
+        VriDevice* dev                  = nullptr;
         if (vriCreateDevice(&dc, &dev) != VriResult_Success)
             return false;
         VriCoreInterface c {};
         int              failure = __LINE__;
+        int              within  = __LINE__;
         if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) == VriResult_Success)
+        {
             failure = vri::test::CheckTextureCopyRegions(dev, c);
-        std::printf("VRI_WEBGL_STEP: texture copy regions failure line %d\n", failure);
+            within  = vri::test::CheckCopyWithinTexture(dev, c, errors);
+        }
+        std::printf("VRI_WEBGL_STEP: texture copy regions failure line %d, within one texture failure line %d\n",
+                    failure,
+                    within);
         vriDestroyDevice(dev);
-        return failure == 0;
+        return failure == 0 && within == 0;
     }
 
     // One layer of a 2DArray or a cube face as a render target and copy end (tests/layer_attachment_probe.h).
