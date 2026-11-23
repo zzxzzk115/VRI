@@ -5,7 +5,6 @@
 
 #include <vri/vri.h>
 
-#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -298,8 +297,10 @@ namespace vri::gl
             uint64_t value;
             GLsync   sync;
         };
-        std::deque<Signal> pending;
-        bool               failed = false;
+        // Signals not yet observed, oldest first. A vector, so a steady frame reuses its capacity; a deque frees and
+        // allocates blocks as it advances.
+        std::vector<Signal> pending;
+        bool                failed = false;
     };
 
     struct QueryPoolGL

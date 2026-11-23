@@ -88,6 +88,9 @@ namespace vri::mtl
         // Borrowed TLAS identities/stages already declared in the current native encoder.
         std::vector<std::pair<struct AccelerationStructureMTL*, MTLRenderStages>> residentTlas;
         std::vector<uint8_t>        constants;
+        // CmdSetViewports / CmdSetScissors arrays, refilled on each call so a steady frame allocates nothing.
+        std::vector<MTLViewport>    viewports;
+        std::vector<MTLScissorRect> scissors;
         id<MTLBuffer>               indexBuffer;
         uint64_t                    indexOffset;
         MTLIndexType                indexType;

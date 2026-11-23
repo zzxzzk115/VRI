@@ -1238,9 +1238,11 @@ namespace vri::wgpu
             std::lock_guard lock(queue->completionMutex);
             // Native callbacks can arrive out of order. Publish only the completed
             // submission prefix, so a later value cannot hide an earlier callback.
-            while (!queue->completions.empty() && queue->completions.front()->done.load(std::memory_order_acquire))
+            auto& completions = queue->completions;
+            auto  drained     = completions.begin();
+            while (drained != completions.end() && (*drained)->done.load(std::memory_order_acquire))
             {
-                const auto& completion = *queue->completions.front();
+                const auto& completion = **drained;
                 for (const auto& [fence, value] : completion.signals)
                 {
                     if (completion.status == WGPUQueueWorkDoneStatus_Success)
@@ -1248,9 +1250,11 @@ namespace vri::wgpu
                     else
                         fence->failed.store(true, std::memory_order_release);
                 }
-                queue->completions.pop_front();
+                queue->spareCompletions.push_back(std::move(*drained));
+                ++drained;
             }
-            return queue->completions.empty();
+            completions.erase(completions.begin(), drained);
+            return completions.empty();
         }
 
         uint64_t VRI_CALL GetFenceValue(VriFence* fence)
@@ -1327,7 +1331,8 @@ namespace vri::wgpu
         {
             CommandBufferWGPU* c = CB(cmd);
             EndComputePass(c);
-            std::vector<WGPURenderPassColorAttachment> colors(a->colorNum);
+            std::vector<WGPURenderPassColorAttachment>& colors = c->colorAttachments;
+            colors.resize(a->colorNum);
             for (uint32_t i = 0; i < a->colorNum; ++i)
             {
                 const VriAttachmentDesc&       src = a->colors[i];
@@ -1885,22 +1890,34 @@ namespace vri::wgpu
                 }
             }
 
-            std::vector<WGPUCommandBuffer> commands;
-            commands.reserve(submit->commandBufferNum);
+            std::vector<WGPUCommandBuffer>& commands = q->submitCommands;
+            commands.clear();
             for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
                 commands.push_back(CB(submit->commandBuffers[i])->finished);
             SubmissionCompletionWGPU* completion = nullptr;
             if (submit->signalFenceNum)
             {
-                auto pending = std::make_unique<SubmissionCompletionWGPU>();
-                pending->signals.reserve(submit->signalFenceNum);
+                std::lock_guard                           lock(q->completionMutex);
+                std::unique_ptr<SubmissionCompletionWGPU> pending;
+                if (q->spareCompletions.empty())
+                {
+                    pending = std::make_unique<SubmissionCompletionWGPU>();
+                }
+                else
+                {
+                    // A spare record was drained, so its callback has run and will not touch it again.
+                    pending = std::move(q->spareCompletions.back());
+                    q->spareCompletions.pop_back();
+                    pending->signals.clear();
+                    pending->status = WGPUQueueWorkDoneStatus_Error;
+                    pending->done.store(false, std::memory_order_relaxed);
+                }
                 for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
                 {
                     const auto& signal = submit->signalFences[i];
                     pending->signals.emplace_back(Fen(signal.fence), signal.value);
                 }
                 completion = pending.get();
-                std::lock_guard lock(q->completionMutex);
                 q->completions.push_back(std::move(pending));
             }
             wgpuQueueSubmit(q->queue, commands.size(), commands.data());

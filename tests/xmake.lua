@@ -87,6 +87,7 @@ target("vri-tests")
     add_files("test_debuggroup_xbackend.cpp") -- debug-group markers (DX12 PIX BeginEvent/EndEvent) wrap work without corrupting it
     add_files("test_srgb_target_xbackend.cpp") -- rendering into sRGB textures stores encoded bytes everywhere
     add_files("test_msaa_srgb_resolve_xbackend.cpp") -- sRGB MSAA resolves average in linear space everywhere
+    add_files("test_steady_state_allocations_xbackend.cpp") -- a warmed-up frame of per-frame commands allocates nothing
     add_files("c_clean_check.c")
     if is_plat("windows") then
         add_files("test_swapchain_formats_xbackend.cpp") -- unpresentable swapchain formats on hidden Win32 windows

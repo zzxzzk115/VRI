@@ -1396,9 +1396,9 @@ namespace vri::vk
         // ---- command recording ---------------------------------------------
         void VRI_CALL CmdBeginRendering(VriCommandBuffer* cmd, const VriAttachmentsDesc* a)
         {
-            CommandBufferVK*                       c = CB(cmd);
-            std::vector<VkRenderingAttachmentInfo> colors;
-            colors.reserve(a->colorNum);
+            CommandBufferVK*                        c      = CB(cmd);
+            std::vector<VkRenderingAttachmentInfo>& colors = c->colorAttachments;
+            colors.clear();
             for (uint32_t i = 0; i < a->colorNum; ++i)
             {
                 const VriAttachmentDesc&  src  = a->colors[i];
@@ -1472,8 +1472,9 @@ namespace vri::vk
 
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)
         {
-            const bool              yUp = CB(cmd)->device->Desc().coordinates.clipSpaceY == VriClipSpaceY_Up;
-            std::vector<VkViewport> v(num);
+            const bool               yUp = CB(cmd)->device->Desc().coordinates.clipSpaceY == VriClipSpaceY_Up;
+            std::vector<VkViewport>& v   = CB(cmd)->viewports;
+            v.resize(num);
             for (uint32_t i = 0; i < num; ++i)
             {
                 v[i].x        = vps[i].x;
@@ -1488,7 +1489,8 @@ namespace vri::vk
 
         void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* rects, uint32_t num)
         {
-            std::vector<VkRect2D> r(num);
+            std::vector<VkRect2D>& r = CB(cmd)->scissors;
+            r.resize(num);
             for (uint32_t i = 0; i < num; ++i)
                 r[i] = {{rects[i].x, rects[i].y}, {rects[i].width, rects[i].height}};
             CB(cmd)->device->Vkd().vkCmdSetScissor(CB(cmd)->cmd, 0, num, r.data());
@@ -1534,8 +1536,10 @@ namespace vri::vk
                                           const VriVertexBufferBinding* bindings,
                                           uint32_t                      num)
         {
-            std::vector<VkBuffer>     buffers(num);
-            std::vector<VkDeviceSize> offsets(num);
+            std::vector<VkBuffer>&     buffers = CB(cmd)->vertexBuffers;
+            std::vector<VkDeviceSize>& offsets = CB(cmd)->vertexOffsets;
+            buffers.resize(num);
+            offsets.resize(num);
             for (uint32_t i = 0; i < num; ++i)
             {
                 buffers[i] = Buf(bindings[i].buffer)->buffer;
@@ -1614,9 +1618,11 @@ namespace vri::vk
 
         void VRI_CALL CmdBarrier(VriCommandBuffer* cmd, const VriBarrierGroupDesc* group)
         {
-            CommandBufferVK*                    c = CB(cmd);
-            std::vector<VkBufferMemoryBarrier2> bufBarriers;
-            std::vector<VkImageMemoryBarrier2>  imgBarriers;
+            CommandBufferVK*                     c           = CB(cmd);
+            std::vector<VkBufferMemoryBarrier2>& bufBarriers = c->bufferBarriers;
+            std::vector<VkImageMemoryBarrier2>&  imgBarriers = c->imageBarriers;
+            bufBarriers.clear();
+            imgBarriers.clear();
 
             for (uint32_t i = 0; i < group->bufferNum; ++i)
             {
@@ -1799,7 +1805,8 @@ namespace vri::vk
                 if (Fen(submit->signalFences[i].fence)->device != q->device)
                     return VriResult_InvalidArgument;
 
-            std::vector<VkSemaphoreSubmitInfo> waits(submit->waitFenceNum);
+            std::vector<VkSemaphoreSubmitInfo>& waits = q->submitWaits;
+            waits.resize(submit->waitFenceNum);
             for (uint32_t i = 0; i < submit->waitFenceNum; ++i)
             {
                 const VriFenceSubmitDesc& w = submit->waitFences[i];
@@ -1809,14 +1816,16 @@ namespace vri::vk
                 waits[i].stageMask          = ToVkStages(w.stages ? w.stages : VriPipelineStage_AllCommands);
             }
 
-            std::vector<VkCommandBufferSubmitInfo> cmds(submit->commandBufferNum);
+            std::vector<VkCommandBufferSubmitInfo>& cmds = q->submitCommands;
+            cmds.resize(submit->commandBufferNum);
             for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
             {
                 cmds[i]               = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
                 cmds[i].commandBuffer = CB(submit->commandBuffers[i])->cmd;
             }
 
-            std::vector<VkSemaphoreSubmitInfo> signals(submit->signalFenceNum);
+            std::vector<VkSemaphoreSubmitInfo>& signals = q->submitSignals;
+            signals.resize(submit->signalFenceNum);
             for (uint32_t i = 0; i < submit->signalFenceNum; ++i)
             {
                 const VriFenceSubmitDesc& s = submit->signalFences[i];

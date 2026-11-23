@@ -617,11 +617,11 @@
         }
         uint64_t VRI_CALL GetFenceValue(VriFence* fence)
         {
-            FenceGL* f = Fen(fence);
-            while (!f->pending.empty())
+            FenceGL* f       = Fen(fence);
+            auto     retired = f->pending.begin();
+            while (retired != f->pending.end())
             {
-                const auto&  signal = f->pending.front();
-                const GLenum result = glClientWaitSync(signal.sync, 0, 0);
+                const GLenum result = glClientWaitSync(retired->sync, 0, 0);
                 if (result == GL_WAIT_FAILED)
                 {
                     f->failed = true;
@@ -629,10 +629,11 @@
                 }
                 if (result != GL_ALREADY_SIGNALED && result != GL_CONDITION_SATISFIED)
                     break;
-                f->value = signal.value;
-                glDeleteSync(signal.sync);
-                f->pending.pop_front();
+                f->value = retired->value;
+                glDeleteSync(retired->sync);
+                ++retired;
             }
+            f->pending.erase(f->pending.begin(), retired);
             return f->value;
         }
         VriResult VRI_CALL WaitForFence(VriFence* fence, uint64_t value, uint64_t timeoutNs)

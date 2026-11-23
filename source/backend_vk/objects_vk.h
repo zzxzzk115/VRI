@@ -24,6 +24,11 @@ namespace vri::vk
         VkQueue   queue;
         uint32_t  familyIndex;
         uint32_t  indexInFamily;
+        // QueueSubmit's native arrays, refilled on each submit so a steady frame allocates nothing; a queue is
+        // externally synchronized, so one set is enough.
+        std::vector<VkSemaphoreSubmitInfo>     submitWaits;
+        std::vector<VkCommandBufferSubmitInfo> submitCommands;
+        std::vector<VkSemaphoreSubmitInfo>     submitSignals;
     };
 
     struct CommandBufferVK;
@@ -46,6 +51,14 @@ namespace vri::vk
         // recording state
         VriPipelineLayout*  boundLayout;
         VkPipelineBindPoint boundBindPoint;
+        // Native arrays the Cmd* calls translate into, refilled on each call so a steady frame allocates nothing.
+        std::vector<VkBufferMemoryBarrier2>    bufferBarriers;
+        std::vector<VkImageMemoryBarrier2>     imageBarriers;
+        std::vector<VkRenderingAttachmentInfo> colorAttachments;
+        std::vector<VkViewport>                viewports;
+        std::vector<VkRect2D>                  scissors;
+        std::vector<VkBuffer>                  vertexBuffers;
+        std::vector<VkDeviceSize>              vertexOffsets;
     };
 
     inline CommandAllocatorVK::~CommandAllocatorVK()
