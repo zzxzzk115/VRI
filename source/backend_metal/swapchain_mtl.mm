@@ -184,6 +184,13 @@ namespace vri::mtl
             return VriResult_Success;
         }
 
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain*)
+        {
+            // Frames are rendered into `backing`, which is rebuilt only by Resize; Present copies it onto the
+            // drawable.
+            return VriSwapChainTextureModel_Fixed;
+        }
+
         const VriSwapChainInterface g_swapChainMTL = {
             CreateSwapChain,
             DestroySwapChain,
@@ -192,6 +199,7 @@ namespace vri::mtl
             Present,
             Resize,
             GetSwapChainExtent,
+            GetSwapChainTextureModel,
         };
     } // namespace
 

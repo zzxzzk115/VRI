@@ -197,6 +197,20 @@ is measured by hand: clear an 8-bit sRGB swapchain to linear 0.2158605 (sRGB 128
 work, so the frame's fence does not cover it; the backend waits for the present queue (Vulkan, D3D12) or relies on
 the API keeping images alive until the GPU is done (WebGPU, GL, Metal).
 
+`GetSwapChainTextureModel` says how long a swapchain's textures stay valid:
+
+- **`VriSwapChainTextureModel_Fixed`** (Vulkan, D3D12, GL, Metal): the textures from `GetSwapChainTextures`
+  stay the same until `Resize` or `DestroySwapChain`. `AcquireNextTexture` only picks one by index, so views made
+  once can be used every frame. Metal returns one texture: frames are rendered into it, and `Present` copies it
+  onto the layer's drawable.
+- **`VriSwapChainTextureModel_Replaced`** (WebGPU): `GetSwapChainTextures` returns one handle, and each
+  `AcquireNextTexture` puts the surface's new texture behind it. `Present` releases that texture and leaves the
+  handle empty. This is true natively and in the browser, where `Present` only releases the texture and the
+  canvas is shown when the frame's callback returns. A view made from the handle is valid only until that
+  `Present`, so make views after each acquire and destroy them after the present.
+
+Before this query, a caller could not tell the models apart: both return one texture on some backends.
+
 Known swapchain limitations:
 
 - D3D12 `Present` ignores `waitFence`. It is ordered after the work already submitted to the swapchain's

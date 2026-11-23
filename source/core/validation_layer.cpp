@@ -718,6 +718,10 @@ namespace vri::core
         {
             return SV(sc)->dev->swap.GetSwapChainExtent(SV(sc)->real, width, height);
         }
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain* sc)
+        {
+            return SV(sc)->dev->swap.GetSwapChainTextureModel(SV(sc)->real);
+        }
 
         // ---- extension interfaces taking a wrapped command buffer ----------
         // These forward to the backend's real table after unwrapping cmd->real.
@@ -1121,6 +1125,7 @@ namespace vri::core
                 Present,
                 Resize,
                 GetSwapChainExtent,
+                GetSwapChainTextureModel,
             };
             *static_cast<VriSwapChainInterface*>(out) = wrapped;
             return VriResult_Success;

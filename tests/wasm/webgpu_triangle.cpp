@@ -546,6 +546,106 @@ namespace
         vriDestroyDevice(dev);
         return allOk;
     }
+
+    // A canvas swapchain reports the Replaced texture model: one texture, index 0 at every acquire, and a view made
+    // after each acquire that is used only until the Present.
+    bool SwapChainModelProbe()
+    {
+        VriDeviceCreationDesc dc = vriDefaultDeviceCreationDesc();
+        dc.graphicsAPI           = VriGraphicsAPI_WebGPU;
+        dc.bestEffort            = VRI_TRUE;
+        VriDevice* dev           = nullptr;
+        if (vriCreateDevice(&dc, &dev) != VriResult_Success)
+            return false;
+        VriCoreInterface      c {};
+        VriSwapChainInterface sw {};
+        VriQueue*             queue = nullptr;
+        if (vriGetInterface(dev, VRI_INTERFACE_CORE, sizeof(c), &c) != VriResult_Success ||
+            vriGetInterface(dev, VRI_INTERFACE_SWAPCHAIN, sizeof(sw), &sw) != VriResult_Success ||
+            c.GetQueue(dev, VriQueueType_Graphics, 0, &queue) != VriResult_Success)
+        {
+            vriDestroyDevice(dev);
+            return false;
+        }
+        VriSwapChainDesc sd {};
+        sd.window.type                = VriWindowSystem_Web;
+        sd.window.handle.web.selector = "#canvas";
+        sd.queue                      = queue;
+        sd.width                      = 64;
+        sd.height                     = 32;
+        sd.textureNum                 = 2;
+        VriSwapChain* swc             = nullptr;
+        VriResult     created         = VriResult_Unsupported;
+        for (const VriFormat format : {VriFormat_BGRA8_UNORM, VriFormat_RGBA8_UNORM})
+        {
+            sd.format = format;
+            created   = sw.CreateSwapChain(dev, &sd, &swc);
+            if (created != VriResult_Unsupported)
+                break;
+        }
+        if (created != VriResult_Success)
+        {
+            std::printf("VRI_WEBGPU_STEP: swapchain texture model: CreateSwapChain %d\n", static_cast<int>(created));
+            vriDestroyDevice(dev);
+            return false;
+        }
+        const VriSwapChainTextureModel model = sw.GetSwapChainTextureModel(swc);
+        uint32_t                       count = 0;
+        sw.GetSwapChainTextures(swc, nullptr, &count);
+        VriTexture* texture = nullptr;
+        uint32_t    one     = 1;
+        sw.GetSwapChainTextures(swc, &texture, &one);
+
+        VriCommandAllocator* alloc = nullptr;
+        VriCommandBuffer*    cmd   = nullptr;
+        c.CreateCommandAllocator(dev, VriQueueType_Graphics, &alloc);
+        c.CreateCommandBuffer(alloc, &cmd);
+        bool framesOk = alloc && cmd && texture;
+        for (int frame = 0; frame < 2 && framesOk; ++frame)
+        {
+            uint32_t index = 1;
+            framesOk       = sw.AcquireNextTexture(swc, nullptr, 0, &index) == VriResult_Success && index == 0;
+            VriTextureViewDesc vd {};
+            vd.texture          = texture;
+            vd.viewType         = VriTextureViewType_2D;
+            vd.aspect           = VriImageAspect_Color;
+            VriDescriptor* view = nullptr;
+            framesOk            = framesOk && c.CreateTextureView(dev, &vd, &view) == VriResult_Success;
+            if (!framesOk)
+                break;
+            c.ResetCommandAllocator(alloc);
+            c.BeginCommandBuffer(cmd);
+            VriAttachmentDesc rt {};
+            rt.view                    = view;
+            rt.loadOp                  = VriAttachmentLoadOp_Clear;
+            rt.storeOp                 = VriAttachmentStoreOp_Store;
+            rt.clearValue.color.f32[3] = 1.0f;
+            VriAttachmentsDesc att {};
+            att.colors            = &rt;
+            att.colorNum          = 1;
+            att.renderArea.width  = 64;
+            att.renderArea.height = 32;
+            att.layerNum          = 1;
+            c.CmdBeginRendering(cmd, &att);
+            c.CmdEndRendering(cmd);
+            c.EndCommandBuffer(cmd);
+            VriQueueSubmitDesc submit {};
+            submit.commandBuffers   = &cmd;
+            submit.commandBufferNum = 1;
+            framesOk =
+                c.QueueSubmit(queue, &submit) == VriResult_Success && sw.Present(swc, nullptr, 0) == VriResult_Success;
+            c.DestroyDescriptor(view); // valid only until the Present
+        }
+        std::printf("VRI_WEBGPU_STEP: swapchain texture model %d (Replaced = %d), textures %u, frames %s\n",
+                    static_cast<int>(model),
+                    static_cast<int>(VriSwapChainTextureModel_Replaced),
+                    count,
+                    framesOk ? "ok" : "FAILED");
+        c.DestroyCommandAllocator(alloc);
+        sw.DestroySwapChain(swc);
+        vriDestroyDevice(dev);
+        return model == VriSwapChainTextureModel_Replaced && count == 1 && framesOk;
+    }
 } // namespace
 
 int main()
@@ -567,10 +667,11 @@ int main()
     const bool queueWait  = QueueWaitProbe();
     const bool fences     = FenceDestroyProbe();
     const bool mapCancel  = MapCancelProbe();
+    const bool swapModel  = SwapChainModelProbe();
     const bool pass       = ran && centerRed && compute && completion && mapAsync && compressed && features && copies &&
-                      queueWait && fences && mapCancel;
+                            queueWait && fences && mapCancel && swapModel;
     std::printf("VRI_WEBGPU_RESULT: %s (ran=%d centerRed=%d compute=%d completion=%d mapAsync=%d compressed=%d "
-                "features=%d copies=%d queueWait=%d fences=%d mapCancel=%d)\n",
+                "features=%d copies=%d queueWait=%d fences=%d mapCancel=%d swapModel=%d)\n",
                 pass ? "PASS" : "FAIL",
                 ran ? 1 : 0,
                 centerRed ? 1 : 0,
@@ -582,7 +683,8 @@ int main()
                 copies ? 1 : 0,
                 queueWait ? 1 : 0,
                 fences ? 1 : 0,
-                mapCancel ? 1 : 0);
+                mapCancel ? 1 : 0,
+                swapModel ? 1 : 0);
     std::fflush(stdout);
 #if defined(__EMSCRIPTEN__)
     emscripten_force_exit(pass ? 0 : 1);

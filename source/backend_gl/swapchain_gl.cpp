@@ -760,6 +760,12 @@ void main()
             *outHeight = s->height;
             return VriResult_Success;
         }
+
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain*)
+        {
+            // GL renders into textures built at creation and by Resize; acquiring only picks one by index.
+            return VriSwapChainTextureModel_Fixed;
+        }
     } // namespace
 
     const VriSwapChainInterface* GetSwapChainInterfaceGL()
@@ -772,6 +778,7 @@ void main()
             Present,
             Resize,
             GetSwapChainExtent,
+            GetSwapChainTextureModel,
         };
         return &table;
     }

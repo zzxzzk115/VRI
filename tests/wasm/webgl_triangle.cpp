@@ -2707,9 +2707,14 @@ namespace
         c.QueueSubmit(queue, &sub);
         c.Wait(fence, 1);
         sw.Present(swc, nullptr, 0); // blit backbuffer -> canvas (exercises the web present path)
+        // WebGL renders into textures of its own and copies them to the canvas: the Fixed model.
+        const VriSwapChainTextureModel model = sw.GetSwapChainTextureModel(swc);
+        std::printf("VRI_WEBGL_STEP: swapchain texture model %d (Fixed = %d)\n",
+                    static_cast<int>(model),
+                    static_cast<int>(VriSwapChainTextureModel_Fixed));
 
         const uint8_t* px = static_cast<const uint8_t*>(c.MapBuffer(readback, 0, bd.size));
-        bool           ok = px != nullptr;
+        bool           ok = px != nullptr && model == VriSwapChainTextureModel_Fixed;
         if (ok)
         {
             const uint32_t o = ((kH / 2) * kW + (kW / 2)) * 4;

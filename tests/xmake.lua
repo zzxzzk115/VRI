@@ -91,6 +91,7 @@ target("vri-tests")
     add_files("c_clean_check.c")
     if is_plat("windows") then
         add_files("test_swapchain_formats_xbackend.cpp") -- unpresentable swapchain formats on hidden Win32 windows
+        add_files("test_swapchain_texture_model_xbackend.cpp") -- GetSwapChainTextureModel matches the textures
         add_syslinks("user32")
     end
     if has_config("vri_backend_vulkan") then

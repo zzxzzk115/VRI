@@ -292,6 +292,12 @@ namespace vri::wgpu
             return VriResult_Success;
         }
 
+        VriSwapChainTextureModel VRI_CALL GetSwapChainTextureModel(VriSwapChain*)
+        {
+            // One handle; AcquireNextTexture puts the surface's new texture behind it and Present clears it.
+            return VriSwapChainTextureModel_Replaced;
+        }
+
         const VriSwapChainInterface g_swapChainWGPU = {
             CreateSwapChain,
             DestroySwapChain,
@@ -300,6 +306,7 @@ namespace vri::wgpu
             Present,
             Resize,
             GetSwapChainExtent,
+            GetSwapChainTextureModel,
         };
     } // namespace
 
