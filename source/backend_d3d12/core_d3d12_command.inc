@@ -192,7 +192,8 @@ void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uin
 {
     if (!num)
         return;
-    std::vector<D3D12_VIEWPORT> v(num);
+    std::vector<D3D12_VIEWPORT>& v = CB(cmd)->viewports;
+    v.resize(num);
     for (uint32_t i = 0; i < num; ++i)
         v[i] = {vps[i].x, vps[i].y, vps[i].width, vps[i].height, vps[i].minDepth, vps[i].maxDepth};
     CB(cmd)->list->RSSetViewports(num, v.data());
@@ -201,7 +202,8 @@ void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* r, uint32_t n
 {
     if (!num)
         return;
-    std::vector<D3D12_RECT> rects(num);
+    std::vector<D3D12_RECT>& rects = CB(cmd)->scissors;
+    rects.resize(num);
     for (uint32_t i = 0; i < num; ++i)
         rects[i] = {r[i].x, r[i].y, r[i].x + static_cast<LONG>(r[i].width), r[i].y + static_cast<LONG>(r[i].height)};
     CB(cmd)->list->RSSetScissorRects(num, rects.data());
@@ -318,7 +320,8 @@ VriResult VRI_CALL QueueSubmit(VriQueue* queue, const VriQueueSubmitDesc* submit
         if (FAILED(q->queue->Wait(Fen(wait.fence)->fence.Get(), wait.value)))
             return VriResult_DeviceLost;
     }
-    std::vector<ID3D12CommandList*> lists(submit->commandBufferNum);
+    std::vector<ID3D12CommandList*>& lists = q->submitLists;
+    lists.resize(submit->commandBufferNum);
     for (uint32_t i = 0; i < submit->commandBufferNum; ++i)
         lists[i] = CB(submit->commandBuffers[i])->list.Get();
     if (!lists.empty())

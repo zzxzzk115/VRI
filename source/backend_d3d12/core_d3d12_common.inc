@@ -178,10 +178,11 @@
             }
             else
             {
-                const bool planes = t->dsvFormat == DXGI_FORMAT_D24_UNORM_S8_UINT ||
-                                    t->dsvFormat == DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-                const UINT subresources = t->mipNum * t->layerNum;
-                std::vector<D3D12_RESOURCE_BARRIER> barriers;
+                const bool planes =
+                    t->dsvFormat == DXGI_FORMAT_D24_UNORM_S8_UINT || t->dsvFormat == DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+                const UINT                           subresources = t->mipNum * t->layerNum;
+                std::vector<D3D12_RESOURCE_BARRIER>& barriers     = c->transitionBarriers;
+                barriers.clear();
                 for (uint32_t layer = r.baseLayer; layer < r.baseLayer + r.layerNum; ++layer)
                     for (uint32_t mip = r.baseMip; mip < r.baseMip + r.mipNum; ++mip)
                     {

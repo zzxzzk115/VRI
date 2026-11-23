@@ -28,6 +28,9 @@ namespace vri::d3d12
         ComPtr<ID3D12Fence>        idleFence; // for QueueWaitIdle / DeviceWaitIdle
         void*                      idleEvent = nullptr;
         uint64_t                   idleValue = 0;
+        // QueueSubmit's list array, refilled on each submit so a steady frame allocates nothing; a queue is
+        // externally synchronized, so one is enough.
+        std::vector<ID3D12CommandList*> submitLists;
     };
 
     // GPU memory allocation (an ID3D12Heap) for the explicit AllocateMemory / BindMemory path.
@@ -214,6 +217,10 @@ namespace vri::d3d12
         // COMMON: a list on another queue type may not name the states this one used (a compute
         // list cannot transition from PIXEL_SHADER_RESOURCE), and reads promote from COMMON.
         std::vector<TextureD3D12*> concurrentTextures;
+        // Native arrays the Cmd* calls translate into, refilled on each call so a steady frame allocates nothing.
+        std::vector<D3D12_RESOURCE_BARRIER> transitionBarriers;
+        std::vector<D3D12_VIEWPORT>         viewports;
+        std::vector<D3D12_RECT>             scissors;
     };
 
     struct FenceD3D12

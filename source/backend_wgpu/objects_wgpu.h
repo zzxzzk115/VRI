@@ -2,7 +2,6 @@
 #pragma once
 
 #include <atomic>
-#include <deque>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -26,10 +25,15 @@ namespace vri::wgpu
 
     struct QueueWGPU
     {
-        DeviceWGPU*                                           device;
-        WGPUQueue                                             queue;
-        std::mutex                                            completionMutex;
-        std::deque<std::unique_ptr<SubmissionCompletionWGPU>> completions;
+        DeviceWGPU* device;
+        WGPUQueue   queue;
+        std::mutex  completionMutex;
+        // Records of signaling submissions in submission order, and drained records kept for reuse: a steady frame
+        // takes its record from spareCompletions instead of allocating one.
+        std::vector<std::unique_ptr<SubmissionCompletionWGPU>> completions;
+        std::vector<std::unique_ptr<SubmissionCompletionWGPU>> spareCompletions;
+        // QueueSubmit's command-buffer array, refilled on each submit; a queue is externally synchronized.
+        std::vector<WGPUCommandBuffer> submitCommands;
     };
 
     struct CommandAllocatorWGPU
@@ -49,6 +53,8 @@ namespace vri::wgpu
         // Bounce buffers created to satisfy copyBufferToTexture's 256-byte bytesPerRow; held
         // until the GPU consumes them (released at the next BeginCommandBuffer).
         std::vector<WGPUBuffer> tempUploads;
+        // CmdBeginRendering's color attachments, refilled on each pass so a steady frame allocates nothing.
+        std::vector<WGPURenderPassColorAttachment> colorAttachments;
     };
 
 #if defined(__EMSCRIPTEN__)

@@ -1457,7 +1457,8 @@ namespace vri::mtl
         void VRI_CALL CmdSetViewports(VriCommandBuffer* cmd, const VriViewport* vps, uint32_t num)
         {
             if (num == 0 || !CB(cmd)->renderEnc) return;
-            std::vector<MTLViewport> v(num);
+            std::vector<MTLViewport>& v = CB(cmd)->viewports;
+            v.resize(num);
             for (uint32_t i = 0; i < num; ++i)
                 v[i] = (MTLViewport){vps[i].x, vps[i].y, vps[i].width, vps[i].height, vps[i].minDepth, vps[i].maxDepth};
             [CB(cmd)->renderEnc setViewports:v.data() count:num];
@@ -1466,7 +1467,8 @@ namespace vri::mtl
         void VRI_CALL CmdSetScissors(VriCommandBuffer* cmd, const VriRect* rects, uint32_t num)
         {
             if (num == 0 || !CB(cmd)->renderEnc) return;
-            std::vector<MTLScissorRect> r(num);
+            std::vector<MTLScissorRect>& r = CB(cmd)->scissors;
+            r.resize(num);
             for (uint32_t i = 0; i < num; ++i)
                 r[i] = (MTLScissorRect){(NSUInteger)(rects[i].x < 0 ? 0 : rects[i].x),
                                         (NSUInteger)(rects[i].y < 0 ? 0 : rects[i].y),
