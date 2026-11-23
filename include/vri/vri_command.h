@@ -135,7 +135,10 @@ typedef struct VriBufferCopyDesc
 
 /* A region of one mip of a texture. A zero width, height or depth is that mip's full extent, and a zero
    layerNum is one layer. In CmdCopyTexture the source region sets the size and the layer count; the
-   destination region gives only its offset, mip and base layer. */
+   destination region gives only its offset, mip and base layer. A copy within one texture is between different
+   subresources: a different mip, or layer ranges that do not intersect (one mip of a 3D texture, all its slices,
+   is one subresource). A copy whose source and destination share a subresource is refused with an error and
+   copies nothing, even when its regions do not overlap. */
 typedef struct VriTextureRegionDesc
 {
     uint32_t            mip;

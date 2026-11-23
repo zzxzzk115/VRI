@@ -624,6 +624,8 @@ void VRI_CALL CmdCopyTexture(VriCommandBuffer* cmd, VriTexture* dst, VriTexture*
     CommandBufferD3D12*        c    = CB(cmd);
     TextureD3D12*              d    = Tex(dst);
     TextureD3D12*              s    = Tex(src);
+    if (core::RejectDesc(*s->device, core::CheckTextureCopy(dst, src, region)))
+        return;
     const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
     const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
 

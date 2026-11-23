@@ -124,6 +124,22 @@ namespace vri::core
         return {};
     }
 
+    std::string CheckTextureCopy(const VriTexture* dst, const VriTexture* src, const VriTextureCopyDesc* region)
+    {
+        if (dst != src)
+            return {};
+        const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
+        const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
+        // The source region's layer count applies to both ends.
+        const uint32_t layerNum = from.layerNum ? from.layerNum : 1;
+        const uint32_t first    = (std::max)(from.baseLayer, to.baseLayer);
+        if (from.mip != to.mip || first >= (std::min)(from.baseLayer, to.baseLayer) + layerNum)
+            return {};
+        return "CmdCopyTexture: the source and destination are the same subresource of one texture (mip " +
+               Number(from.mip) + ", layer " + Number(first) +
+               "); a copy within one texture must be between different mips or layers";
+    }
+
     std::string CheckBufferDesc(const char* function, const VriBufferDesc& desc)
     {
         if (desc.size == 0)

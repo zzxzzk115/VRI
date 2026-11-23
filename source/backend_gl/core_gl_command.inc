@@ -1022,8 +1022,10 @@ void BlitRegion(const TextureGL* d, const TextureGL* s, const VriTextureRegionDe
 
 void VRI_CALL CmdCopyTexture(VriCommandBuffer*, VriTexture* dst, VriTexture* src, const VriTextureCopyDesc* region)
 {
-    const TextureGL*           s    = reinterpret_cast<const TextureGL*>(src);
-    const TextureGL*           d    = reinterpret_cast<const TextureGL*>(dst);
+    const TextureGL* s = reinterpret_cast<const TextureGL*>(src);
+    const TextureGL* d = reinterpret_cast<const TextureGL*>(dst);
+    if (core::RejectDesc(*s->device, core::CheckTextureCopy(dst, src, region)))
+        return;
     const VriTextureRegionDesc from = region ? region->src : VriTextureRegionDesc {};
     const VriTextureRegionDesc to   = region ? region->dst : VriTextureRegionDesc {};
     if (s->device->Features().copyImage)

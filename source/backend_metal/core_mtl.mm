@@ -1967,6 +1967,7 @@ namespace vri::mtl
             CommandBufferMTL* c = CB(cmd);
             TextureMTL* s = Tex(src);
             TextureMTL* dt = Tex(dst);
+            if (core::RejectDesc(*s->device, core::CheckTextureCopy(dst, src, region))) return;
             EnsureBlit(c);
             const uint32_t srcMip = region ? region->src.mip : 0;
             const uint32_t dstMip = region ? region->dst.mip : 0;

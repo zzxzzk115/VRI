@@ -115,6 +115,21 @@ depth or depth-stencil attachment for those formats. These copies are refused wi
 - a multisample texture (a blit into a multisample framebuffer is invalid, and one out of it is a resolve);
 - a format the context cannot attach to a framebuffer, which `glCheckFramebufferStatus` reports.
 
+A copy within one texture works on every backend when the source and destination are different subresources:
+a different mip, or layer ranges that do not intersect. One mip of a 3D texture, all its slices, is one
+subresource. When they share a subresource, `CmdCopyTexture` reports an error and copies nothing, whether or not
+the regions overlap. The rule is the one every API allows:
+
+- D3D12's `CopyTextureRegion` takes different subresources of one resource only.
+- WebGPU's `copyTextureToTexture` requires the two sets of subresources to be disjoint.
+- On GLES and WebGL, a blit between identical buffers is an `INVALID_OPERATION`. ES 3.0 §4.3.3 says different
+  mipmap levels, layers and cube faces of a texture are not identical buffers, so the blit path copies between
+  them.
+- Vulkan allows a shared subresource only in the `GENERAL` layout, which VRI's copy does not use.
+
+Desktop GL and Metal would allow non-overlapping regions of one subresource, but VRI refuses them there too, so
+the rule is the same on every backend.
+
 `CmdReadbackTextureToBuffer` reads a depth-only texture through its depth attachment on desktop GL. GLES and
 WebGL refuse depth readback with an error, because their `glReadPixels` reads no depth, and GL reads back no packed
 depth-stencil format.
